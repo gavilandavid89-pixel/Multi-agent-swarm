@@ -1,0 +1,7 @@
+{
+  "name": "multi-agent-swarm-monorepo",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": { "check": "node scripts/check.mjs && node --test tests/*.test.mjs" }
+}
