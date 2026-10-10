@@ -1,0 +1,59 @@
+import { timingSafeEqual } from 'node:crypto';
+import 'dotenv/config';
+import express from 'express';
+import { createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore } from './services/store.js';
+import { processJob } from './services/multiAiEngine.js';
+
+const app = express();
+const PORT = Number(process.env.PORT || 3100);
+const SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
+const concurrencyRaw = Number.parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+const MAX_CONCURRENCY = Number.isFinite(concurrencyRaw) ? Math.min(8, Math.max(1, concurrencyRaw)) : 2;
+if (SHARED_SECRET.length < 32 || /replace-with|your-/i.test(SHARED_SECRET)) throw new Error('WORKER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
+app.disable('x-powered-by');
+app.use(express.json({ limit: '64kb' }));
+const queue = new Set(); const active = new Set(); let shuttingDown = false; let server;
+const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '15000', 10) || 15000));
+app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
+app.use('/internal', (req, res, next) => { if (!safeEqual(req.get('x-swarm-bridge-secret') || '', SHARED_SECRET)) return res.status(401).json({ error: 'No autorizado.' }); next(); });
+function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b)); if (aa.length !== bb.length || aa.length === 0) return false; return timingSafeEqual(aa, bb); }
+function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
+function pump() {
+  if (shuttingDown) return;
+  while (active.size < MAX_CONCURRENCY && queue.size > 0) {
+    const id = queue.values().next().value; queue.delete(id); if (active.has(id)) continue; active.add(id);
+    void processJob(id).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
+  }
+}
+app.get('/internal/history', (_req, res) => res.json(historySummary()));
+app.get('/internal/jobs', (_req, res) => res.json({ jobs: listJobs(25) }));
+app.post('/internal/jobs', (req, res) => {
+  const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
+  if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
+  if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
+  try { const job = createJob(objective); enqueue(job.id); res.status(202).json(job); }
+  catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
+});
+app.get('/internal/jobs/:id', (req, res) => { const job = getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); });
+app.post('/internal/jobs/:id/retry', (req, res) => {
+  const record = getPayload(req.params.id);
+  if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+  if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
+  const job = updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { validation: null, syntax: null, validationRound: 0, result: null, lastCheckpoint: 'retry-requested' } });
+  enqueue(req.params.id); res.status(202).json(job);
+});
+app.get('/internal/jobs/:id/history', (req, res) => {
+  const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null });
+});
+app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
+function maybeExit() { if (shuttingDown && active.size === 0) { try { server?.close(); } catch {} try { closeStore(); } catch {} process.exit(0); } }
+function shutdown() {
+  if (shuttingDown) return; shuttingDown = true;
+  console.log('[worker] apagado solicitado; el trabajo activo tiene una ventana para guardar checkpoints.');
+  server?.close(() => { if (active.size === 0) maybeExit(); });
+  const timer = setTimeout(() => { console.warn('[worker] terminó la ventana de apagado; los trabajos no finalizados se recuperarán desde checkpoints.'); process.exit(0); }, shutdownGraceMs);
+  timer.unref(); maybeExit();
+}
+process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+server = app.listen(PORT, '0.0.0.0', () => { console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`); for (const id of recoverableJobs()) enqueue(id); });
