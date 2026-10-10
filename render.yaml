@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: swarm-bridge
+    runtime: node
+    plan: free
+    buildCommand: npm --prefix apps/bridge install --no-audit --no-fund
+    startCommand: npm --prefix apps/bridge start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_BASE_URL
+        sync: false
+      - key: WORKER_SHARED_SECRET
+        sync: false
+      - key: APP_ACCESS_KEY
+        sync: false
