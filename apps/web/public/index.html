@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#100b1b">
+  <title>Swarm · Centro de mando</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark">✳</span><span>swarm<span class="brand-dot">.</span></span></a>
+      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span></div>
+    </header>
+    <section class="hero">
+      <p class="eyebrow">CENTRO DE MANDO · MULTIAGENTE</p>
+      <h1>Las ideas se convierten<br><span>en trabajo real.</span></h1>
+      <p class="subtitle">Un comité de IA que analiza, desarrolla y valida. El procesamiento ocurre fuera del puente.</p>
+    </section>
+    <section id="access-panel" class="panel access-panel hidden">
+      <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
+      <form id="access-form" class="inline-form"><input id="access-key" type="password" autocomplete="current-password" placeholder="Clave de acceso" required><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form>
+    </section>
+    <section id="app-content" class="hidden">
+      <section class="panel composer">
+        <div class="section-head"><div><p class="panel-kicker">NUEVA TAREA</p><h2>¿Qué vamos a resolver?</h2></div><span class="pill"><span class="dot dot-pink"></span> Motor externo</span></div>
+        <form id="job-form"><label class="sr-only" for="objective">Objetivo</label><textarea id="objective" rows="4" maxlength="20000" placeholder="Describí el objetivo con el contexto necesario…" required></textarea><div class="composer-footer"><span class="muted tiny">Los avances se guardan automáticamente.</span><button class="button button-primary" id="submit-job" type="submit">Iniciar comité <span>↗</span></button></div></form>
+      </section>
+      <section class="dashboard-grid">
+        <div class="panel history-panel"><div class="section-head"><div><p class="panel-kicker">MEMORIA</p><h2>Historial</h2></div><span class="history-icon">▤</span></div><div class="history-state"><span id="history-indicator" class="history-symbol">◌</span><div><strong id="history-title">Comprobando…</strong><p id="history-copy" class="muted">Solo consultamos el indicador.</p></div></div><button id="show-history" class="button button-secondary hidden" type="button">Ver registros <span>→</span></button><div id="history-list" class="history-list hidden"></div></div>
+        <div class="panel jobs-panel"><div class="section-head"><div><p class="panel-kicker">EN CURSO</p><h2>Actividad</h2></div><button id="refresh-jobs" class="icon-button" title="Actualizar actividad" aria-label="Actualizar actividad">↻</button></div><div id="jobs-list" class="jobs-list"><div class="empty-state"><span class="empty-glyph">✳</span><p>Todo tranquilo por ahora.</p><span class="muted tiny">Las tareas aparecerán aquí.</span></div></div></div>
+      </section>
+      <section id="detail-panel" class="panel detail-panel hidden"><div class="section-head"><div><p class="panel-kicker">DETALLE BAJO DEMANDA</p><h2 id="detail-title">Registro</h2></div><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div><pre id="detail-content"></pre></section>
+    </section>
+    <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
