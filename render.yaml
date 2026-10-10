@@ -21,7 +21,7 @@ services:
     runtime: docker
     plan: free
     dockerfilePath: ./apps/worker/Dockerfile
-    dockerContext: .
+    dockerContext: ./apps/worker
     healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
