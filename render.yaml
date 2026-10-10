@@ -15,3 +15,24 @@ services:
         sync: false
       - key: APP_ACCESS_KEY
         sync: false
+
+  - type: web
+    name: swarm-worker
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/worker/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3100"
+      - key: WORKER_SHARED_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: HISTORY_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_PATH
+        value: ./data/swarm.sqlite
