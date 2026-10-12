@@ -30,9 +30,9 @@ export async function consultarModelo({ model, messages, temperature = 0.3, onRe
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
-const reasoningModel = () => process.env.GROQ_MODEL_REASONING || 'llama-3.3-70b-versatile';
-const codingModel = () => process.env.GROQ_MODEL_CODING || 'llama-3.3-70b-versatile';
-const validationModel = () => process.env.GROQ_MODEL_VALIDATION || 'llama-3.1-8b-instant';
+const reasoningModel = () => process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b';
+const codingModel = () => process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b';
+const validationModel = () => process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b';
 export async function agenteArquitecto(objetivo, onRetry) { return consultarModelo({ model: reasoningModel(), onRetry, messages: [sys('Arquitecto', 'Diseñá una solución modular, concreta y mantenible. Enumerá supuestos, componentes, riesgos y criterios de aceptación.'), { role: 'user', content: objetivo }] }); }
 export async function agenteEsceptico(objetivo, propuesta, onRetry) { return consultarModelo({ model: reasoningModel(), onRetry, messages: [sys('Escéptico/Auditor', 'Buscá fallos lógicos, amenazas, casos límite, dependencias y costos ocultos. Intentá refutar la propuesta de forma útil.'), { role: 'user', content: `OBJETIVO:\n${objetivo}\n\nPROPUESTA DEL ARQUITECTO:\n${propuesta}` }] }); }
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) { return consultarModelo({ model: reasoningModel(), onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${objetivo}\n\nPROPUESTA:\n${propuesta}\n\nAUDITORÍA ESCÉPTICA:\n${critica}` }] }); }
