@@ -12,20 +12,48 @@ function retryNotice(jobId, info) {
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, lastCheckpoint: 'provider-retry' } });
 }
+function startAgent(jobId, stage, progress, agent, content) {
+  const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
+  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent, type: 'thinking', content }]);
+  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, lastCheckpoint: `started:${stage}` } });
+}
 function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) }]);
-  return updateJob(jobId, { status: 'running', stage, progress, payload: { transcript, lastCheckpoint: stage, ...extra }, ...publicPatch });
+  const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    if (transcript[i].agent === agent && transcript[i].type === 'thinking') {
+      transcript[i] = { ...transcript[i], type: 'activity', content: 'Terminó su análisis y compartió su respuesta.' };
+      break;
+    }
+  }
+  transcript.push({ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
+  return updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, ...extra }, ...publicPatch });
 }
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', delivery = '' } = payload;
   try {
-    if (!proposal) { updateJob(jobId, { status: 'running', stage: 'Arquitectura', progress: 5, error: null }); proposal = await agenteArquitecto(objective, onRetry); checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal }); }
-    if (!critique) { critique = await agenteEsceptico(objective, proposal, onRetry); checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique }); }
-    if (!strategy) { strategy = await agenteArbitro(objective, proposal, critique, onRetry); checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy }); }
-    if (!delivery) { delivery = await agenteDesarrollador(objective, strategy, '', onRetry); checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, delivery }); }
+    if (!proposal) {
+      startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
+      proposal = await agenteArquitecto(objective, onRetry);
+      checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
+    }
+    if (!critique) {
+      startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Estoy revisando la propuesta para encontrar riesgos, contradicciones y casos límite.');
+      critique = await agenteEsceptico(objective, proposal, onRetry);
+      checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique });
+    }
+    if (!strategy) {
+      startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Estoy comparando la propuesta y las objeciones para acordar un plan.');
+      strategy = await agenteArbitro(objective, proposal, critique, onRetry);
+      checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
+    }
+    if (!delivery) {
+      startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega a partir de la estrategia acordada.');
+      delivery = await agenteDesarrollador(objective, strategy, '', onRetry);
+      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, delivery });
+    }
     payload = getPayload(jobId)?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
     let round = (payload.validationRound && validation && syntax) ? Number(payload.validationRound) : (getPayload(jobId)?.publicJob.attempt || 0) + 1;
@@ -33,14 +61,22 @@ export async function processJob(jobId) {
       const saved = payload.validationRound === round && validation && syntax;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
       if (!saved) {
-        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress, error: null });
-        validation = await agenteValidador(objective, strategy, delivery, onRetry); syntax = await checkJavascriptSyntax(delivery);
+        startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress, 'Validador', 'Estoy comprobando la entrega y buscando defectos antes de aprobarla.');
+        validation = await agenteValidador(objective, strategy, delivery, onRetry);
+        syntax = await checkJavascriptSyntax(delivery);
         const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
-        const transcript = appendEntries(current.payload.transcript, [
+        const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
+        for (let i = transcript.length - 1; i >= 0; i--) {
+          if (transcript[i].agent === 'Validador' && transcript[i].type === 'thinking') {
+            transcript[i] = { ...transcript[i], type: 'activity', content: 'Terminó la revisión; resultado de la auditoría a continuación.' };
+            break;
+          }
+        }
+        transcript.push(
           { at: new Date().toISOString(), agent: 'Validador', type: 'message', content: JSON.stringify(validation).slice(0, 20000) },
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
-        ]);
-        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript, proposal, critique, strategy, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
+        );
+        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
         payload = getPayload(jobId)?.payload || {};
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
@@ -52,6 +88,7 @@ export async function processJob(jobId) {
       if (round >= MAX_ROUNDS) break;
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
+      startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
