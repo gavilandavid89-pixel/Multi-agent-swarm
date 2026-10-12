@@ -66,6 +66,27 @@ $('show-history').addEventListener('click', async () => {
     list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.history)));
   } catch (error) { alert(error.message); }
 });
+$('copy-detail').addEventListener('click', async () => {
+  const button = $('copy-detail');
+  const content = $('detail-content').textContent || '';
+  if (!content.trim()) { $('copy-status').textContent = 'No hay diagnóstico para copiar.'; return; }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(content);
+    } else {
+      const area = document.createElement('textarea');
+      area.value = content; area.setAttribute('readonly', '');
+      area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      const copied = document.execCommand('copy'); area.remove();
+      if (!copied) throw new Error('El navegador no permitió copiar.');
+    }
+    $('copy-status').textContent = 'Diagnóstico copiado. Podés pegarlo en el chat; no incluye claves secretas.';
+    button.textContent = 'Copiado ✓';
+  } catch {
+    $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.';
+  }
+});
 $('close-detail').addEventListener('click', () => $('detail-panel').classList.add('hidden'));
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
