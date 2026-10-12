@@ -62,13 +62,39 @@ function safeEqual(a, b) {
   return aa.length === bb.length && aa.length > 0 && timingSafeEqual(aa, bb);
 }
 async function workerRequest(route, options = {}) {
-  if (!WORKER_BASE_URL || !WORKER_SHARED_SECRET) { const error = new Error('El motor externo no está configurado.'); error.status = 503; throw error; }
-  const response = await fetch(`${WORKER_BASE_URL}${route}`, {
-    ...options, signal: AbortSignal.timeout(15000),
-    headers: { 'content-type': 'application/json', 'x-swarm-bridge-secret': WORKER_SHARED_SECRET, ...(options.headers || {}) }
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) { const error = new Error(data.error || `El motor externo respondió HTTP ${response.status}.`); error.status = response.status >= 500 ? 502 : response.status; throw error; }
+  if (!WORKER_BASE_URL || !WORKER_SHARED_SECRET) {
+    const error = new Error('El motor externo no está configurado.');
+    error.status = 503;
+    throw error;
+  }
+  const startedAt = Date.now();
+  let response;
+  try {
+    response = await fetch(`${WORKER_BASE_URL}${route}`, {
+      ...options,
+      signal: AbortSignal.timeout(15000),
+      headers: { 'content-type': 'application/json', 'x-swarm-bridge-secret': WORKER_SHARED_SECRET, ...(options.headers || {}) }
+    });
+  } catch (cause) {
+    const detail = cause?.name === 'TimeoutError' || cause?.name === 'AbortError'
+      ? 'timeout después de 15 segundos'
+      : String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 300);
+    console.error('[bridge][worker_network_error]', JSON.stringify({ route, durationMs: Date.now() - startedAt, detail }));
+    const error = new Error(`No se pudo conectar con el motor externo (${detail}). Revisá que swarm-worker esté activo y que WORKER_BASE_URL sea correcto.`);
+    error.status = 502;
+    throw error;
+  }
+  const rawBody = await response.text().catch(() => '');
+  let data = {};
+  try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+  if (!response.ok) {
+    const detail = String(data?.error || rawBody || response.statusText || 'el motor no envió detalles').slice(0, 1200);
+    console.error('[bridge][worker_http_error]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt, detail }));
+    const error = new Error(`El motor externo respondió HTTP ${response.status}: ${detail}`);
+    error.status = response.status >= 500 ? 502 : response.status;
+    throw error;
+  }
+  console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
   return data;
 }
 app.get('/api/history', async (_req, res) => { try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
