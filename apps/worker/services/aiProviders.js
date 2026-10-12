@@ -13,14 +13,18 @@ export function retryDelay(retry, retryAfter) {
 export async function consultarModelo({ model, messages, temperature = 0.3, onRetry = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
-  let retry = 0;
+  let retry = 0; let emptyRetries = 0;
   while (true) {
     let response;
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, temperature }) }); }
     catch (error) { retry++; const wait = retryDelay(retry); onRetry({ retry, wait, reason: `error de red: ${error.message}` }); await sleep(wait); continue; }
     if (response.ok) {
       const data = await response.json(); const content = data?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || !content.trim()) throw new Error(`El modelo ${model} devolvió una respuesta vacía.`);
+      if (typeof content !== 'string' || !content.trim()) {
+        emptyRetries++;
+        if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); onRetry({ retry: emptyRetries, wait, reason: 'respuesta vacía del modelo' }); await sleep(wait); continue; }
+        throw new Error(`El modelo ${model} devolvió una respuesta vacía después de 3 intentos.`);
+      }
       if (content.length > 250000) throw new Error(`El modelo ${model} devolvió una respuesta demasiado grande (límite de seguridad: 250.000 caracteres).`);
       return content;
     }
