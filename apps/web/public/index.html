@@ -16,7 +16,7 @@
     <section class="hero">
       <p class="eyebrow">CENTRO DE MANDO · MULTIAGENTE</p>
       <h1>Las ideas se convierten<br><span>en trabajo real.</span></h1>
-      <p class="subtitle">Un comité de IA que analiza, desarrolla y valida. El procesamiento ocurre fuera del puente.</p>
+      <p class="subtitle">Un comité de IA que analiza, desarrolla y valida. Seguí sus intercambios y avances en directo.</p>
     </section>
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
@@ -29,9 +29,16 @@
       </section>
       <section class="dashboard-grid">
         <div class="panel history-panel"><div class="section-head"><div><p class="panel-kicker">MEMORIA</p><h2>Historial</h2></div><span class="history-icon">▤</span></div><div class="history-state"><span id="history-indicator" class="history-symbol">◌</span><div><strong id="history-title">Comprobando…</strong><p id="history-copy" class="muted">Solo consultamos el indicador.</p></div></div><button id="show-history" class="button button-secondary hidden" type="button">Ver registros <span>→</span></button><div id="history-list" class="history-list hidden"></div></div>
-        <div class="panel jobs-panel"><div class="section-head"><div><p class="panel-kicker">EN CURSO</p><h2>Actividad</h2></div><button id="refresh-jobs" class="icon-button" title="Actualizar actividad" aria-label="Actualizar actividad">↻</button></div><div id="jobs-list" class="jobs-list"><div class="empty-state"><span class="empty-glyph">✳</span><p>Todo tranquilo por ahora.</p><span class="muted tiny">Las tareas aparecerán aquí.</span></div></div></div>
+        <div class="panel jobs-panel"><div class="section-head"><div><p class="panel-kicker">TAREAS</p><h2>Actividad</h2></div><button id="refresh-jobs" class="icon-button" title="Actualizar actividad" aria-label="Actualizar actividad">↻</button></div><div id="jobs-list" class="jobs-list"><div class="empty-state"><span class="empty-glyph">✳</span><p>Todo tranquilo por ahora.</p><span class="muted tiny">Las tareas aparecerán aquí.</span></div></div></div>
       </section>
-      <section id="detail-panel" class="panel detail-panel hidden"><div class="section-head"><div><p class="panel-kicker">DETALLE BAJO DEMANDA</p><h2 id="detail-title">Registro</h2></div><div class="detail-actions"><button id="copy-detail" class="button button-secondary" type="button">Copiar diagnóstico</button><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div></div><p id="copy-status" class="muted tiny" role="status" aria-live="polite"></p><pre id="detail-content"></pre></section>
+      <section id="detail-panel" class="panel detail-panel hidden">
+        <div class="section-head"><div><p class="panel-kicker">COMITÉ EN DIRECTO</p><h2 id="detail-title">Conversación de agentes</h2></div><div class="detail-actions"><span id="detail-live" class="live-label">Sincronizando</span><button id="copy-detail" class="button button-secondary" type="button">Copiar diagnóstico</button><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div></div>
+        <div class="task-status"><div><strong id="detail-stage">Preparando tarea…</strong><span id="detail-status" class="status running">En curso</span></div><span id="detail-progress-label" class="muted tiny">Esperando actividad</span></div>
+        <div id="detail-progress" class="progress-track" aria-hidden="true"><span id="detail-progress-fill"></span></div>
+        <p id="detail-hint" class="muted tiny">Los mensajes se actualizan automáticamente. El porcentaje solo cambia al guardarse una etapa; durante la respuesta del proveedor verás actividad en curso.</p>
+        <div id="conversation" class="conversation" aria-live="polite"><div class="empty-state"><span class="empty-glyph">✳</span><p>Preparando el comité…</p></div></div>
+        <details class="diagnostic"><summary>Diagnóstico técnico</summary><p id="copy-status" class="muted tiny" role="status" aria-live="polite"></p><pre id="detail-content"></pre></details>
+      </section>
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
