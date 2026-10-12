@@ -6,8 +6,10 @@ const MAX_ROUNDS = Number.isFinite(configuredRounds) ? Math.min(10, Math.max(1, 
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function retryNotice(jobId, info) {
+  const reason = String(info.reason || 'error temporal').slice(0, 240);
+  console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
   const current = getPayload(jobId); if (!current) return;
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${String(info.reason || 'error temporal').slice(0, 240)}` }]);
+  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, lastCheckpoint: 'provider-retry' } });
 }
 function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
@@ -57,6 +59,12 @@ export async function processJob(jobId) {
     const finalPayload = getPayload(jobId)?.payload || {};
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
+    console.error('[worker][job_failed]', JSON.stringify({
+      jobId,
+      name: String(error?.name || 'Error').slice(0, 100),
+      message: String(error?.message || error).slice(0, 1200),
+      stack: String(error?.stack || '').slice(0, 4000)
+    }));
     const current = getPayload(jobId);
     if (current) {
       const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'error', content: String(error?.stack || error?.message || error).slice(0, 12000) }]);
