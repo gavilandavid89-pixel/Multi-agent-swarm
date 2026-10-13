@@ -1,21 +1,10 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { getValidationResumeState } from './validationResume.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
-export function getValidationResumeState(payload = {}, attempt = 0) {
-  const validation = payload.validation || null;
-  const syntax = payload.syntax || null;
-  const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\d+)$/)?.[1]) || 0;
-  const round = (payload.validationRound && validation && syntax)
-    ? Number(payload.validationRound)
-    : (Number(payload.activeValidationRound) || auditCheckpointRound || Number(attempt || 0) + 1);
-  const coherenceReview = (Number(payload.coherenceReviewRound) === round && payload.coherenceReview)
-    ? payload.coherenceReview
-    : (auditCheckpointRound === round && payload.coherenceReview ? payload.coherenceReview : null);
-  return { round, coherenceReview, validationSaved: Boolean(payload.validationRound === round && validation && syntax) };
-}
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function selectRepairContext(delivery, findings) {
   const source = String(delivery || '');
