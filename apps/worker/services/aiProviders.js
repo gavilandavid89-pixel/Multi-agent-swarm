@@ -10,20 +10,22 @@ export function retryDelay(retry, retryAfter) {
   else { const dateRetryAfter = Date.parse(String(retryAfter || '')); delay = Number.isFinite(dateRetryAfter) ? Math.min(Math.max(0, dateRetryAfter - Date.now()), 900000) : Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000); }
   return Math.max(250, Math.round(delay * (0.8 + Math.random() * 0.4)));
 }
-export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, onRetry = () => {} }) {
+export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0;
   while (true) {
     let response;
-    try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }) }); }
+    try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, temperature, max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) { retry++; const wait = retryDelay(retry); onRetry({ retry, wait, reason: `error de red: ${error.message}` }); await sleep(wait); continue; }
     if (response.ok) {
-      const data = await response.json(); const content = data?.choices?.[0]?.message?.content;
+      const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
-        if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); onRetry({ retry: emptyRetries, wait, reason: 'respuesta vacía del modelo' }); await sleep(wait); continue; }
-        throw new Error(`El modelo ${model} devolvió una respuesta vacía después de 3 intentos.`);
+        const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
+        console.warn('[worker][provider_empty_response]', JSON.stringify({ model, attempt: emptyRetries, diagnostic }));
+        if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
+        throw new Error(`El modelo ${model} devolvió una respuesta vacía después de 3 intentos. Diagnóstico: ${diagnostic}.`);
       }
       if (content.length > 250000) throw new Error(`El modelo ${model} devolvió una respuesta demasiado grande (límite de seguridad: 250.000 caracteres).`);
       return content;
@@ -67,7 +69,7 @@ export function parseValidationResponse(rawValue) {
 }
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const boundedDelivery = boundContext(entrega, 8500, 'entrega');
-  const raw = await consultarModelo({ model: validationModel(), temperature: 0, maxTokens: 700, onRetry, messages: [sys('Validador independiente', 'Auditá la entrega y devolvé ÚNICAMENTE JSON válido con este esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Usá APPROVED solo si no encontrás defectos relevantes. No incluyas APPROVED en summary/findings si el veredicto es NEEDS_CHANGES. Si la entrega fue recortada, evaluá el extracto disponible y aclaralo en summary; no afirmes haber revisado partes no incluidas.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 900, 'objetivo')}\n\nESTRATEGIA:\n${boundContext(estrategia, 1400, 'estrategia')}\n\nENTREGA A REVISAR (el chequeo determinista se ejecuta sobre el contenido completo):\n${boundedDelivery}` }] });
+  const raw = await consultarModelo({ model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low', responseFormat: { type: 'json_object' }, onRetry, messages: [sys('Validador independiente', 'Auditá la entrega y devolvé ÚNICAMENTE JSON válido con este esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Usá APPROVED solo si no encontrás defectos relevantes. No incluyas APPROVED en summary/findings si el veredicto es NEEDS_CHANGES. Si la entrega fue recortada, evaluá el extracto disponible y aclaralo en summary; no afirmes haber revisado partes no incluidas.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 900, 'objetivo')}\n\nESTRATEGIA:\n${boundContext(estrategia, 1400, 'estrategia')}\n\nENTREGA A REVISAR (el chequeo determinista se ejecuta sobre el contenido completo):\n${boundedDelivery}` }] });
   const parsed = parseValidationResponse(raw);
   if (String(entrega ?? '').length > 8500) {
     const note = 'La entrega supera el tamaño revisable en una sola llamada; se comprobó sintaxis por separado, pero la revisión de IA no cubrió el contenido completo.';
