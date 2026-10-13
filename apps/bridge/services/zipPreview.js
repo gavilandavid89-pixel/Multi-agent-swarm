@@ -1,17 +1,19 @@
 import { inflateRawSync } from 'node:zlib';
 
-const MAX_FILES = 80;
-const MAX_EXPANDED_BYTES = 10 * 1024 * 1024;
-const MAX_FILE_BYTES = 3 * 1024 * 1024;
+const MAX_FILES = 250;
+const MAX_EXPANDED_BYTES = 32 * 1024 * 1024;
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   '.html', '.htm', '.css', '.js', '.mjs', '.json', '.svg', '.png', '.jpg', '.jpeg',
   '.gif', '.webp', '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.mp4',
-  '.webm', '.mp3', '.wav', '.ogg', '.txt', '.xml'
+  '.webm', '.mp3', '.wav', '.ogg', '.txt', '.xml', '.wasm', '.bin', '.dat', '.data',
+  '.csv', '.map', '.webmanifest', '.glb', '.gltf', '.obj', '.mtl', '.ktx', '.ktx2',
+  '.basis', '.hdr', '.exr', '.vert', '.frag'
 ]);
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.dll', '.so', '.dylib', '.com', '.bat', '.cmd', '.sh', '.ps1', '.msi',
   '.apk', '.aab', '.app', '.dmg', '.pkg', '.deb', '.rpm', '.jar', '.class',
-  '.scr', '.hta', '.vbs', '.wsf', '.reg', '.lnk', '.iso', '.wasm'
+  '.scr', '.hta', '.vbs', '.wsf', '.reg', '.lnk', '.iso'
 ]);
 
 const MIME_TYPES = {
@@ -23,7 +25,14 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4', '.webm': 'video/webm',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8'
+  '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8',
+  '.wasm': 'application/wasm', '.bin': 'application/octet-stream', '.dat': 'application/octet-stream',
+  '.data': 'application/octet-stream', '.csv': 'text/csv; charset=utf-8', '.map': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8', '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json; charset=utf-8', '.obj': 'text/plain; charset=utf-8',
+  '.mtl': 'text/plain; charset=utf-8', '.ktx': 'image/ktx', '.ktx2': 'image/ktx2',
+  '.basis': 'application/octet-stream', '.hdr': 'application/octet-stream', '.exr': 'application/octet-stream',
+  '.vert': 'text/plain; charset=utf-8', '.frag': 'text/plain; charset=utf-8'
 };
 const crcTable = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
@@ -61,14 +70,14 @@ function findEndRecord(buffer) {
 /** Parse only ordinary ZIP entries; never extracts to the filesystem. */
 export function parsePreviewZip(input) {
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input || []);
-  if (buffer.length > 8 * 1024 * 1024) throw new Error('El ZIP debe pesar como máximo 8 MB.');
+  if (buffer.length > 32 * 1024 * 1024) throw new Error('El ZIP debe pesar como máximo 32 MB.');
   if (buffer.length < 22) throw new Error('El archivo no parece ser un ZIP completo o está dañado.');
   const end = findEndRecord(buffer);
   if (buffer.readUInt16LE(end + 4) !== 0 || buffer.readUInt16LE(end + 6) !== 0) throw new Error('No se admiten ZIP divididos en varios volúmenes.');
   const count = buffer.readUInt16LE(end + 10);
   const centralSize = buffer.readUInt32LE(end + 12);
   const centralOffset = buffer.readUInt32LE(end + 16);
-  if (count > MAX_FILES) throw new Error('El ZIP supera el límite de 80 entradas.');
+  if (count > MAX_FILES) throw new Error('El ZIP supera el límite de 250 entradas.');
   if (centralOffset + centralSize > end || centralOffset + centralSize < centralOffset) throw new Error('El índice interno del ZIP está fuera de rango.');
   const files = [];
   const seen = new Set();
@@ -104,9 +113,9 @@ export function parsePreviewZip(input) {
     if (!ALLOWED_EXTENSIONS.has(ext)) continue;
     if ((flags & 1) !== 0) throw new Error('No se admiten entradas ZIP cifradas.');
     if (method !== 0 && method !== 8) throw new Error('El ZIP usa un método de compresión no compatible.');
-    if (uncompressedSize > MAX_FILE_BYTES) throw new Error('Un archivo supera el límite de 3 MB: ' + name.slice(0, 120));
+    if (uncompressedSize > MAX_FILE_BYTES) throw new Error('Un archivo supera el límite de 8 MB: ' + name.slice(0, 120));
     expandedTotal += uncompressedSize;
-    if (expandedTotal > MAX_EXPANDED_BYTES) throw new Error('El ZIP supera el límite de 10 MB descomprimidos.');
+    if (expandedTotal > MAX_EXPANDED_BYTES) throw new Error('El ZIP supera el límite de 32 MB descomprimidos.');
     if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== 0x04034b50) throw new Error('Una entrada apunta a datos ZIP inválidos.');
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
