@@ -1,6 +1,7 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { getValidationResumeState } from './validationResume.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -133,15 +134,19 @@ export async function processJob(jobId) {
     }
     payload = getPayload(jobId)?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
-    let round = (payload.validationRound && validation && syntax) ? Number(payload.validationRound) : (getPayload(jobId)?.publicJob.attempt || 0) + 1;
+    let resumeState = getValidationResumeState(payload, getPayload(jobId)?.publicJob.attempt || 0);
+    let round = resumeState.round;
     while (round <= MAX_ROUNDS) {
-      const saved = payload.validationRound === round && validation && syntax;
+      const saved = resumeState.validationSaved;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
       if (!saved) {
-        startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
-        assertTaskTokenBudget(jobId);
-        const coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry);
-        checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, delivery, validation: null, syntax: null });
+        let coherenceReview = resumeState.coherenceReview;
+        if (!coherenceReview) {
+          startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
+          assertTaskTokenBudget(jobId);
+          coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry);
+          checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, coherenceReviewRound: round, activeValidationRound: round, delivery, validation: null, syntax: null });
+        }
         startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Estoy haciendo una revisión independiente y una comprobación determinista.');
         assertTaskTokenBudget(jobId);
         validation = await agenteValidador(objective, strategy, delivery, onRetry);
@@ -166,8 +171,9 @@ export async function processJob(jobId) {
           { at: new Date().toISOString(), agent: 'Validador', type: 'message', content: JSON.stringify(validation).slice(0, 20000) },
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
         );
-        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
+        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: payload.coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
         payload = getPayload(jobId)?.payload || {};
+        resumeState = getValidationResumeState(payload, round);
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
@@ -183,9 +189,9 @@ export async function processJob(jobId) {
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
       const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence, canContinue, savePartial);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
-      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
+      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);
-      delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
+      delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
     const finalPayload = getPayload(jobId)?.payload || {};
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
