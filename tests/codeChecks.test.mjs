@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { checkJavascriptSyntax } from '../apps/worker/services/codeChecks.js';
+
+const file = (name, source, language = 'js') =>
+  '### Archivo: ' + name + '\n\`\`\`' + language + '\n' + source + '\n\`\`\`';
+
+test('comprueba imports relativos cuando los módulos están en la entrega', async () => {
+  const delivery = [
+    file('calc-overlay.js', "import { calculate } from './calc-engine.js';\nexport const run = calculate;"),
+    file('calc-engine.js', 'export function calculate(value) { return value; }')
+  ].join('\n\n');
+  const result = await checkJavascriptSyntax(delivery);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.filesChecked, 2);
+});
+
+test('rechaza imports relativos que apuntan a archivos ausentes', async () => {
+  const delivery = file('calc-overlay.js', "import { calculate } from './calc-engine.js';\nexport const run = calculate;");
+  const result = await checkJavascriptSyntax(delivery);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /calc-engine\.js/);
+});
+
+test('rechaza rutas de archivo duplicadas en una entrega', async () => {
+  const delivery = [
+    file('calc.js', 'export const first = true;'),
+    file('calc.js', 'export const second = true;')
+  ].join('\n\n');
+  const result = await checkJavascriptSyntax(delivery);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /aparece más de una vez/);
+});
