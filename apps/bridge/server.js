@@ -133,6 +133,14 @@ app.get('/api/jobs/:id/files/:index', async (req, res) => {
     res.send(file.content);
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+app.post('/api/jobs/:id/reply', async (req, res) => {
+  const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
+  const message = typeof req.body?.message === 'string' ? req.body.message : '';
+  if (!message.trim()) return res.status(400).json({ error: 'Escribí un mensaje para el agente.' });
+  if (message.length > 6000) return res.status(413).json({ error: 'El mensaje supera los 6.000 caracteres.' });
+  try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/reply`, { method: 'POST', body: JSON.stringify({ agent, message }) })); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.get('/api/jobs/:id/history', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/history`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.use((error, _req, res, _next) => { console.error('[bridge]', error.message); res.status(400).json({ error: 'No se pudo procesar la solicitud.' }); });
 app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));
