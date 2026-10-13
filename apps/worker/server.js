@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import { createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
+import { replyToAgent } from './services/agentChat.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -63,6 +64,16 @@ app.get('/internal/jobs/:id/files/:index', (req, res) => {
   const file = getArtifact(req.params.id, Number(req.params.index));
   if (!file) return res.status(404).json({ error: 'No existe ese archivo.' });
   res.json({ file });
+});
+app.post('/internal/jobs/:id/reply', async (req, res) => {
+  try {
+    const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
+    const message = typeof req.body?.message === 'string' ? req.body.message : '';
+    const result = await replyToAgent(req.params.id, agent, message);
+    res.json(result);
+  } catch (error) {
+    res.status(error.status || (error.code === 'PROVIDER_TEMPORARY' ? 503 : 500)).json({ error: String(error.message || 'No se pudo responder al agente.').slice(0, 1200) });
+  }
 });
 app.get('/internal/jobs/:id/history', (req, res) => {
   const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
