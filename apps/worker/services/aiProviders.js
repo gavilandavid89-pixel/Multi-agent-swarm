@@ -22,7 +22,7 @@ export function retryDelay(retry, retryAfter) {
   }
   return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
 }
-export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true }) {
+export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
@@ -50,6 +50,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       }
       if (content.length + accumulatedContent.length > 1000000) throw new Error(`El modelo ${model} superó el límite acumulado de seguridad (1.000.000 caracteres).`);
       accumulatedContent += content;
+      onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
         if (!canContinue()) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
@@ -140,10 +141,10 @@ export async function agenteEsceptico(objetivo, propuesta, onRetry) {
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
-export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true) {
+export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}) {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue,
+    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
     messages: [
       sys('Desarrollador sénior', repairing
         ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
