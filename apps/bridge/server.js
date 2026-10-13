@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
+import { createZip } from './services/zipBundle.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -117,6 +118,37 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/jobs/:id/bundle', async (req, res) => {
+  try {
+    const jobId = encodeURIComponent(req.params.id);
+    const listing = await workerRequest(`/internal/jobs/${jobId}/files`);
+    const metadata = Array.isArray(listing.files) ? listing.files : [];
+    if (!metadata.length) return res.status(409).json({ error: 'Esta tarea todavía no tiene archivos empaquetables. Esperá a que genere la entrega o pedile al Desarrollador que entregue archivos completos.' });
+    if (metadata.length > 40) return res.status(413).json({ error: 'La entrega supera el límite de 40 archivos por paquete.' });
+    const contents = await Promise.all(metadata.map(async item => {
+      const result = await workerRequest(`/internal/jobs/${jobId}/files/${encodeURIComponent(item.index)}`);
+      if (!result.file || typeof result.file.content !== 'string') throw new Error(`No se pudo recuperar el archivo ${item.path || item.index}.`);
+      return { path: result.file.path, content: result.file.content };
+    }));
+    const existingReadme = contents.some(file => file.path.toLowerCase() === 'readme-swarm.txt');
+    if (!existingReadme) {
+      const inventory = contents.map(file => `- ${file.path}`).join('\\n');
+      contents.push({ path: 'README-SWARM.txt', content: `Entrega generada por Swarm\\nTarea: ${req.params.id}\\n\\nContenido del paquete:\\n${inventory}\\n\\nAbrí el archivo HTML principal en un navegador para probar una web estática. Si el proyecto requiere dependencias o un servidor, consultá su README y ejecutá el comando de instalación en un entorno de desarrollo.\\n` });
+    }
+    const archive = createZip(contents);
+    const filename = `swarm-${String(req.params.id).slice(0, 8)}.zip`;
+    res.status(200).set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(archive.length),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store'
+    }).send(archive);
+  } catch (error) {
+    console.error('[bridge][bundle_error]', JSON.stringify({ taskId: req.params.id, detail: String(error.message || error).slice(0, 500) }));
+    res.status(error.status || 502).json({ error: `No se pudo crear el ZIP completo: ${String(error.message || 'error desconocido').slice(0, 700)}` });
+  }
+});
 app.get('/api/jobs/:id/files', async (req, res) => {
   try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/files`)); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
