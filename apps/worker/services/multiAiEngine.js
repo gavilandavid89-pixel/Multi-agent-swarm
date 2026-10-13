@@ -5,6 +5,13 @@ import { checkJavascriptSyntax } from './codeChecks.js';
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
+function selectRepairContext(delivery, findings) {
+  const source = String(delivery || '');
+  const parts = source.split(/(?=^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:)/gim).filter(part => part.trim());
+  const names = String(findings || '').match(/(?:[A-Za-z0-9_.-]+\\/)*[A-Za-z0-9_.-]+\\.(?:js|mjs|cjs|css|html?|json|webmanifest|ts|tsx|jsx|md)/g) || [];
+  const selected = parts.filter(part => names.some(name => part.split('\\n', 1)[0].includes(name)));
+  return selected.length ? selected.join('\\n\\n') : source;
+}
 function mergeDelivery(previous, correction) {
   const split = value => {
     const source = String(value || '');
@@ -136,7 +143,8 @@ export async function processJob(jobId) {
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, delivery);
+      const repairContext = selectRepairContext(delivery, findings.join('\n'));
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);
