@@ -81,15 +81,44 @@ export async function agenteCoordinador(objetivo, estrategia, propuesta, critica
   });
 }
 export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry) {
-  const raw = await consultarModelo({
-    model: validationModel(), temperature: 0, maxTokens: 1400, reasoningEffort: 'low',
-    responseFormat: { type: 'json_object' }, onRetry,
-    messages: [
-      sys('Coordinador de coherencia · auditor', 'Auditá el conjunto completo de archivos contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
-      { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 1000, 'objetivo') + '\n\nMAPA DE COHERENCIA ACORDADO:\n' + boundContext(mapaCoherencia, 3000, 'mapa de coherencia') + '\n\nENTREGA COMPLETA A AUDITAR:\n' + boundContext(entrega, 10000, 'entrega') }
-    ]
-  });
-  return parseValidationResponse(raw);
+  const source = String(entrega ?? '');
+  const maxChars = 8500;
+  const sections = source.split(/(?=^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:)/gim).filter(part => part.trim());
+  const batches = [];
+  if (source.length <= maxChars) batches.push(source);
+  else if (sections.length > 1) {
+    let current = '';
+    for (const section of sections) {
+      if (section.length > maxChars) return { verdict: 'NEEDS_CHANGES', findings: ['Un archivo supera el tamaño que el coordinador puede revisar completo. Dividilo en archivos o módulos más pequeños antes de aprobar la entrega.'], summary: 'Auditoría de coherencia incompleta: se rechazó un archivo demasiado grande para inspeccionarlo íntegramente.', raw: '' };
+      if (current && current.length + section.length > maxChars) { batches.push(current); current = section; }
+      else current += (current ? '\\n\\n' : '') + section;
+    }
+    if (current) batches.push(current);
+  } else {
+    return { verdict: 'NEEDS_CHANGES', findings: ['La entrega es demasiado larga y no tiene encabezados ### Archivo: para dividirla sin perder contenido.'], summary: 'Auditoría de coherencia incompleta; no se aprobó contenido que no pudo inspeccionarse íntegramente.', raw: '' };
+  }
+  if (batches.length > 8) return { verdict: 'NEEDS_CHANGES', findings: ['La entrega excede ocho lotes de auditoría. Agrupá o dividí los módulos para revisar todos los archivos completos.'], summary: 'Auditoría de coherencia detenida por límite de cobertura.', raw: '' };
+  const results = [];
+  for (let i = 0; i < batches.length; i++) {
+    const raw = await consultarModelo({
+      model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
+      responseFormat: { type: 'json_object' }, onRetry,
+      messages: [
+        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. Usá el mapa para comprobar contratos con otros lotes. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
+        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\\nOBJETIVO:\\n' + boundContext(objetivo, 700, 'objetivo') + '\\nMAPA DE COHERENCIA:\\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\\nARCHIVOS COMPLETOS DEL LOTE:\\n' + batches[i] }
+      ]
+    });
+    results.push(parseValidationResponse(raw));
+  }
+  const findings = [];
+  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') result.findings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); });
+  return {
+    verdict: results.every(result => result.verdict === 'APPROVED') ? 'APPROVED' : 'NEEDS_CHANGES',
+    findings: findings.slice(0, 30),
+    summary: results.map((result, index) => 'Lote ' + (index + 1) + '/' + results.length + ': ' + result.summary).join('\\n').slice(0, 5000),
+    raw: results.map(result => result.raw || '').join('\\n').slice(0, 12000),
+    batchesReviewed: results.length
+  };
 }
 export async function agenteArquitecto(objetivo, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Diseñá una solución modular, concreta y mantenible. Enumerá supuestos, componentes, riesgos y criterios de aceptación.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
