@@ -95,24 +95,77 @@ function renderConversation(data) {
   [...conversation.querySelectorAll('[data-message-key]')].forEach(node => { if (!keys.has(node.dataset.messageKey)) node.remove(); });
   if (nearBottom) conversation.scrollTop = conversation.scrollHeight;
 }
+function saveDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url; anchor.download = filename;
+  document.body.appendChild(anchor); anchor.click(); anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+async function responseError(response) {
+  const data = await response.json().catch(() => ({}));
+  return data.error || `Error HTTP ${response.status}`;
+}
 function renderArtifacts(files, jobId) {
   const panel = $('artifacts-panel'); const list = $('artifacts-list');
   const items = Array.isArray(files) ? files : [];
   panel.classList.toggle('hidden', items.length === 0);
   $('artifacts-count').textContent = `${items.length} archivo${items.length === 1 ? '' : 's'}`;
-  list.innerHTML = items.map(file => `<div class="artifact-row"><div class="artifact-info"><span class="artifact-icon">▤</span><div><strong>${escapeHtml(file.path)}</strong><span class="muted tiny">${(Number(file.size || 0) / 1024).toFixed(1)} KB</span></div></div><button class="mini-button" data-artifact-index="${Number(file.index)}">Descargar</button></div>`).join('');
+  $('download-bundle').disabled = items.length === 0;
+  list.innerHTML = items.map(file => {
+    const ext = String(file.path || '').split('.').pop().toLowerCase();
+    const kind = ext === 'html' ? 'HTML · vista previa disponible' : ext === 'apk' ? 'APK · requiere ser un binario Android válido' : ext === 'zip' ? 'ZIP · archivo proporcionado por la tarea' : 'Archivo del proyecto';
+    const preview = ext === 'html' ? `<button class="mini-button" data-preview-index="${Number(file.index)}" type="button">Vista previa ▶</button>` : '';
+    return `<div class="artifact-row"><div class="artifact-info"><span class="artifact-icon">▤</span><div><strong>${escapeHtml(file.path)}</strong><span class="muted tiny">${(Number(file.size || 0) / 1024).toFixed(1)} KB</span><span class="artifact-kind">${kind}</span></div></div><div class="artifact-actions">${preview}<button class="mini-button" data-artifact-index="${Number(file.index)}" type="button">Descargar archivo</button></div></div>`;
+  }).join('');
   list.querySelectorAll('[data-artifact-index]').forEach(button => button.addEventListener('click', async () => {
     button.disabled = true; const original = button.textContent; button.textContent = 'Preparando…';
     try {
       const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(button.dataset.artifactIndex)}`, { headers: authHeaders(false) });
-      if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || `Error HTTP ${response.status}`); }
-      const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
-      anchor.href = url; anchor.download = String(items[Number(button.dataset.artifactIndex)]?.path || 'archivo.txt').split('/').pop() || 'archivo.txt';
-      document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+      if (!response.ok) throw new Error(await responseError(response));
+      const blob = await response.blob();
+      saveDownload(blob, String(items[Number(button.dataset.artifactIndex)]?.path || 'archivo.txt').split('/').pop() || 'archivo.txt');
     } catch (error) { alert(`No se pudo descargar el archivo: ${error.message}`); }
     finally { button.disabled = false; button.textContent = original; }
   }));
+  list.querySelectorAll('[data-preview-index]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true; const original = button.textContent; button.textContent = 'Preparando vista previa…';
+    const preview = $('artifact-preview');
+    try {
+      const result = await api(`/api/jobs/${encodeURIComponent(jobId)}/preview-session`, { method: 'POST', body: JSON.stringify({ index: Number(button.dataset.previewIndex) }) });
+      const item = items.find(file => Number(file.index) === Number(button.dataset.previewIndex));
+      $('artifact-preview-title').textContent = item?.path || 'Vista previa HTML';
+      $('artifact-preview-status').textContent = 'Vista aislada: las conexiones de red, formularios y acceso a la sesión principal están bloqueados. La vista previa caduca en 10 minutos.';
+      $('artifact-preview-frame').src = result.url;
+      preview.classList.remove('hidden');
+      preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      $('artifact-preview-status').textContent = `No se pudo abrir la vista previa: ${error.message}`;
+      preview.classList.remove('hidden');
+    } finally { button.disabled = false; button.textContent = original; }
+  }));
 }
+$('download-bundle').addEventListener('click', async () => {
+  const jobId = state.currentDetailId;
+  if (!jobId) return;
+  const button = $('download-bundle'); const original = button.textContent;
+  button.disabled = true; button.textContent = 'Empaquetando todos los archivos…';
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/bundle`, { headers: authHeaders(false) });
+    if (!response.ok) throw new Error(await responseError(response));
+    const blob = await response.blob();
+    saveDownload(blob, `swarm-${jobId.slice(0, 8)}.zip`);
+    button.textContent = 'ZIP descargado ✓';
+    window.setTimeout(() => { button.textContent = original; }, 1800);
+  } catch (error) {
+    alert(`No se pudo crear el paquete ZIP: ${error.message}`);
+    button.textContent = original;
+  } finally { button.disabled = false; }
+});
+$('close-artifact-preview').addEventListener('click', () => {
+  $('artifact-preview-frame').src = 'about:blank';
+  $('artifact-preview').classList.add('hidden');
+});
 function updateDetailView(data) {
   const job = data.job || {};
   $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
