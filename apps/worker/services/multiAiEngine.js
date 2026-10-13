@@ -7,7 +7,7 @@ const MAX_TRANSCRIPT_ENTRIES = 150;
 export function getValidationResumeState(payload = {}, attempt = 0) {
   const validation = payload.validation || null;
   const syntax = payload.syntax || null;
-  const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\\d+)$/)?.[1]) || 0;
+  const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\d+)$/)?.[1]) || 0;
   const round = (payload.validationRound && validation && syntax)
     ? Number(payload.validationRound)
     : (Number(payload.activeValidationRound) || auditCheckpointRound || Number(attempt || 0) + 1);
@@ -202,7 +202,7 @@ export async function processJob(jobId) {
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);
-      delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
+      delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
     const finalPayload = getPayload(jobId)?.payload || {};
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
