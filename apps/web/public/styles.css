@@ -26,3 +26,6 @@
 .artifact-info strong{font-size:12px;overflow-wrap:anywhere}
 .artifact-icon{display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border-radius:9px;background:#a78bfa18;color:var(--pink)}
 .artifact-row .mini-button{flex-shrink:0}
+
+
+.agent-reply-panel{margin:16px 0;padding:16px;border:1px solid var(--line);border-radius:15px;background:#120d1e7a}.agent-reply-panel h3{margin:0;font-size:15px}.agent-reply-panel>p{margin:7px 0 12px}.agent-reply-panel textarea{min-height:80px}.agent-reply-panel .composer-footer{align-items:flex-end}.agent-reply-panel .history-filter{margin-bottom:10px}.agent-reply-panel .composer-footer .tiny{max-width:65%}@media(max-width:700px){.agent-reply-panel .composer-footer{align-items:stretch}.agent-reply-panel .composer-footer .tiny{max-width:100%}.agent-reply-panel .composer-footer .button{width:100%}}
