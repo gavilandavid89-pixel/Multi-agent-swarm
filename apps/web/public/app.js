@@ -95,6 +95,24 @@ function renderConversation(data) {
   [...conversation.querySelectorAll('[data-message-key]')].forEach(node => { if (!keys.has(node.dataset.messageKey)) node.remove(); });
   if (nearBottom) conversation.scrollTop = conversation.scrollHeight;
 }
+function renderArtifacts(files, jobId) {
+  const panel = $('artifacts-panel'); const list = $('artifacts-list');
+  const items = Array.isArray(files) ? files : [];
+  panel.classList.toggle('hidden', items.length === 0);
+  $('artifacts-count').textContent = `${items.length} archivo${items.length === 1 ? '' : 's'}`;
+  list.innerHTML = items.map(file => `<div class="artifact-row"><div class="artifact-info"><span class="artifact-icon">▤</span><div><strong>${escapeHtml(file.path)}</strong><span class="muted tiny">${(Number(file.size || 0) / 1024).toFixed(1)} KB</span></div></div><button class="mini-button" data-artifact-index="${Number(file.index)}">Descargar</button></div>`).join('');
+  list.querySelectorAll('[data-artifact-index]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true; const original = button.textContent; button.textContent = 'Preparando…';
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/files/${encodeURIComponent(button.dataset.artifactIndex)}`, { headers: authHeaders(false) });
+      if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || `Error HTTP ${response.status}`); }
+      const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = String(items[Number(button.dataset.artifactIndex)]?.path || 'archivo.txt').split('/').pop() || 'archivo.txt';
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    } catch (error) { alert(`No se pudo descargar el archivo: ${error.message}`); }
+    finally { button.disabled = false; button.textContent = original; }
+  }));
+}
 function updateDetailView(data) {
   const job = data.job || {};
   $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
@@ -111,6 +129,7 @@ function updateDetailView(data) {
   $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
   $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : ['queued','running'].includes(job.status) ? 'Chat en vivo: se agregan o actualizan mensajes sin reconstruir la página. La barra animada indica actividad; el porcentaje es solo el último hito guardado.' : 'Conversación guardada. Podés revisar los mensajes y el diagnóstico técnico.';
   renderConversation(data);
+  renderArtifacts(data.artifacts, job.id);
   const diagnostic = { objective: data.objective, stage: job.stage, status: job.status, progress: job.progress, transcript: data.history, result: data.result, validation: data.validation, syntax: data.syntax, validationLevel: data.validationLevel, error: job.error, delivery: data.delivery };
   $('detail-content').textContent = JSON.stringify(diagnostic, null, 2);
   const previousStatus = state.lastJobStatus;
