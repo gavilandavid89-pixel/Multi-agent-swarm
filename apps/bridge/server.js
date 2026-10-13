@@ -123,9 +123,13 @@ app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json
 app.get('/api/jobs/:id/bundle', async (req, res) => {
   try {
     const jobId = encodeURIComponent(req.params.id);
+    const task = await workerRequest(`/internal/jobs/${jobId}/history`);
+    if (task.job?.status !== 'completed' || task.validation?.verdict === 'NEEDS_CHANGES' || task.syntax?.ok === false) {
+      return res.status(409).json({ error: 'El ZIP final se habilita cuando Swarm complete y valide la tarea. Los archivos individuales siguen disponibles para revisión técnica.' });
+    }
     const listing = await workerRequest(`/internal/jobs/${jobId}/files`);
     const metadata = Array.isArray(listing.files) ? listing.files : [];
-    if (!metadata.length) return res.status(409).json({ error: 'Esta tarea todavía no tiene archivos empaquetables. Esperá a que genere la entrega o pedile al Desarrollador que entregue archivos completos.' });
+    if (!metadata.length) return res.status(409).json({ error: 'La tarea terminó, pero no contiene archivos empaquetables. Pedile al Desarrollador que entregue los archivos completos.' });
     if (metadata.length > 40) return res.status(413).json({ error: 'La entrega supera el límite de 40 archivos por paquete.' });
     const contents = await Promise.all(metadata.map(async item => {
       const result = await workerRequest(`/internal/jobs/${jobId}/files/${encodeURIComponent(item.index)}`);
@@ -134,8 +138,17 @@ app.get('/api/jobs/:id/bundle', async (req, res) => {
     }));
     const existingReadme = contents.some(file => file.path.toLowerCase() === 'readme-swarm.txt');
     if (!existingReadme) {
-      const inventory = contents.map(file => `- ${file.path}`).join('\\n');
-      contents.push({ path: 'README-SWARM.txt', content: `Entrega generada por Swarm\\nTarea: ${req.params.id}\\n\\nContenido del paquete:\\n${inventory}\\n\\nAbrí el archivo HTML principal en un navegador para probar una web estática. Si el proyecto requiere dependencias o un servidor, consultá su README y ejecutá el comando de instalación en un entorno de desarrollo.\\n` });
+      const inventory = contents.map(file => `- ${file.path}`).join('\n');
+      contents.push({ path: 'README-SWARM.txt', content: [
+        'Entrega generada por Swarm',
+        `Tarea: ${req.params.id}`,
+        '',
+        'Contenido del paquete:',
+        inventory,
+        '',
+        'Abrí el archivo HTML principal en un navegador para probar una web estática.',
+        'Si el proyecto requiere dependencias o un servidor, consultá su README y ejecutá el comando de instalación en un entorno de desarrollo.'
+      ].join('\n') + '\n' });
     }
     const archive = createZip(contents);
     const filename = `swarm-${String(req.params.id).slice(0, 8)}.zip`;
