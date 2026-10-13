@@ -36,3 +36,30 @@ test('el cliente continúa una respuesta cortada y registra cada llamada', async
     assert.equal(usage.length, 2);
   } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; }
 });
+
+test('el cliente de Groq amplía el límite y reintenta cuando JSON mode se corta por tokens', async () => {
+  const { consultarModelo } = await import('../apps/worker/services/aiProviders.js');
+  const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch;
+  const previousBudget = process.env.MAX_OUTPUT_TOKENS_PER_CALL;
+  process.env.GROQ_API_KEY = 'test-key-not-real'; process.env.MAX_OUTPUT_TOKENS_PER_CALL = '6000';
+  const requests = []; const retryEvents = [];
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body); requests.push(request);
+    if (requests.length === 1) return new Response(JSON.stringify({ error: { code: 'json_validate_failed', message: 'Failed to generate JSON', failed_generation: 'max completion tokens reached before generating a valid document' } }), { status: 400, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"verdict":"APPROVED","findings":[],"summary":"Revisado"}' } }], usage: { prompt_tokens: 20, completion_tokens: 25, total_tokens: 45 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await consultarModelo({ model: 'test-model', messages: [{ role: 'user', content: 'auditá' }], maxTokens: 1000, responseFormat: { type: 'json_object' }, onRetry: info => retryEvents.push(info) });
+    assert.match(result, /"verdict":"APPROVED"/);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].max_completion_tokens, 1000);
+    assert.equal(requests[1].max_completion_tokens, 1750);
+    assert.deepEqual(requests[1].response_format, { type: 'json_object' });
+    assert.ok(retryEvents.some(info => /JSON incompleto/.test(info.reason || '')));
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey;
+    if (previousBudget === undefined) delete process.env.MAX_OUTPUT_TOKENS_PER_CALL; else process.env.MAX_OUTPUT_TOKENS_PER_CALL = previousBudget;
+  }
+});
+
