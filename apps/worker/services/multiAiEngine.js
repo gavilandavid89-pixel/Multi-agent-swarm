@@ -21,7 +21,18 @@ function retryNotice(jobId, info) {
   const reason = String(info.reason || 'error temporal').slice(0, 240);
   console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
-  updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, lastCheckpoint: 'provider-retry' } });
+  updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
+}
+function assertTaskTokenBudget(jobId) {
+  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '24000', 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 24000;
+  const current = getPayload(jobId);
+  const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
+  if (used >= limit) {
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; aumentá MAX_TASK_TOKENS o reducí el contexto para reanudar.`);
+    error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
+    throw error;
+  }
 }
 function startAgent(jobId, stage, progress, agent, content) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
@@ -47,21 +58,25 @@ export async function processJob(jobId) {
   try {
     if (!proposal) {
       startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
+      assertTaskTokenBudget(jobId);
       proposal = await agenteArquitecto(objective, onRetry);
       checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
     }
     if (!critique) {
       startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Estoy revisando la propuesta para encontrar riesgos, contradicciones y casos límite.');
+      assertTaskTokenBudget(jobId);
       critique = await agenteEsceptico(objective, proposal, onRetry);
       checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique });
     }
     if (!strategy) {
       startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Estoy comparando la propuesta y las objeciones para acordar un plan.');
+      assertTaskTokenBudget(jobId);
       strategy = await agenteArbitro(objective, proposal, critique, onRetry);
       checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
     }
     if (!delivery) {
       startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega a partir de la estrategia acordada.');
+      assertTaskTokenBudget(jobId);
       delivery = await agenteDesarrollador(objective, strategy, '', onRetry);
       checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, delivery });
       saveArtifacts(jobId, delivery);
@@ -74,6 +89,7 @@ export async function processJob(jobId) {
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
       if (!saved) {
         startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress, 'Validador', 'Estoy comprobando la entrega y buscando defectos antes de aprobarla.');
+        assertTaskTokenBudget(jobId);
         validation = await agenteValidador(objective, strategy, delivery, onRetry);
         syntax = await checkJavascriptSyntax(delivery);
         const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
@@ -101,7 +117,8 @@ export async function processJob(jobId) {
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
+      const assertTaskTokenBudget(jobId);
+ correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, correctedDelivery);
       delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
@@ -110,6 +127,12 @@ export async function processJob(jobId) {
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = getPayload(jobId);
+    if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
+      const reason = String(error.message || 'Presupuesto de tokens agotado').slice(0, 1200);
+      const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'budget', content: reason }]);
+      updateJob(jobId, { status: 'needs_review', stage: 'Pausada por presupuesto de tokens', progress: current.publicJob.progress, error: reason, payload: { ...current.payload, transcript, providerBlock: { code: error.code, usedTokens: error.usedTokens, tokenLimit: error.tokenLimit }, activeStage: null, lastCheckpoint: current.payload.lastCheckpoint || 'token-budget' } });
+      return { blocked: true, reason };
+    }
     if (error?.code === 'PROVIDER_TEMPORARY' && current) {
       const retryAfterMs = Math.max(1000, Math.min(604800000, Number(error.retryAfterMs) || 30000));
       const retryAt = new Date(Date.now() + retryAfterMs).toISOString();
