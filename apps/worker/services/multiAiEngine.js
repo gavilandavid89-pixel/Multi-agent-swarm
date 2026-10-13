@@ -7,10 +7,10 @@ const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function selectRepairContext(delivery, findings) {
   const source = String(delivery || '');
-  const parts = source.split(/(?=^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:)/gim).filter(part => part.trim());
-  const names = String(findings || '').match(/(?:[A-Za-z0-9_.-]+\\/)*[A-Za-z0-9_.-]+\\.(?:js|mjs|cjs|css|html?|json|webmanifest|ts|tsx|jsx|md)/g) || [];
-  const selected = parts.filter(part => names.some(name => part.split('\\n', 1)[0].includes(name)));
-  return selected.length ? selected.join('\\n\\n') : source;
+  const parts = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
+  const names = String(findings || '').match(/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:js|mjs|cjs|css|html?|json|webmanifest|ts|tsx|jsx|md)/g) || [];
+  const selected = parts.filter(part => names.some(name => part.split('\n', 1)[0].includes(name)));
+  return selected.length ? selected.join('\n\n') : source;
 }
 function mergeDelivery(previous, correction) {
   const split = value => {
