@@ -12,3 +12,17 @@
 .history-filter{width:100%;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#130d1e;color:var(--text);font:inherit;font-size:12px}
 .load-more-jobs{width:100%;margin-top:12px}
 #jobs-count{margin-top:5px}
+
+
+/* Generated task files */
+.artifacts-panel{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#100b1b66}
+.artifacts-panel h3{margin:0;font-size:15px}
+.artifacts-panel>p{margin:8px 0 12px}
+.artifacts-list{display:grid;gap:8px}
+.artifact-row,.artifact-info{display:flex;align-items:center;gap:10px;min-width:0}
+.artifact-row{justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#ffffff04}
+.artifact-info{flex:1}
+.artifact-info>div{display:grid;gap:4px;min-width:0}
+.artifact-info strong{font-size:12px;overflow-wrap:anywhere}
+.artifact-icon{display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border-radius:9px;background:#a78bfa18;color:var(--pink)}
+.artifact-row .mini-button{flex-shrink:0}
