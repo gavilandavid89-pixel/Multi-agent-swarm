@@ -1,6 +1,7 @@
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
+import { createZip } from './services/zipBundle.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +13,8 @@ const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const failedAuth = new Map();
 const jobCreateWindows = new Map();
+const previewSessions = new Map();
+const PREVIEW_TTL_MS = 10 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.resolve(__dirname, '../web/public');
 
@@ -117,6 +120,133 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/jobs/:id/bundle', async (req, res) => {
+  try {
+    const jobId = encodeURIComponent(req.params.id);
+    const listing = await workerRequest(`/internal/jobs/${jobId}/files`);
+    const metadata = Array.isArray(listing.files) ? listing.files : [];
+    if (!metadata.length) return res.status(409).json({ error: 'Esta tarea todavía no tiene archivos empaquetables. Esperá a que genere la entrega o pedile al Desarrollador que entregue archivos completos.' });
+    if (metadata.length > 40) return res.status(413).json({ error: 'La entrega supera el límite de 40 archivos por paquete.' });
+    const contents = await Promise.all(metadata.map(async item => {
+      const result = await workerRequest(`/internal/jobs/${jobId}/files/${encodeURIComponent(item.index)}`);
+      if (!result.file || typeof result.file.content !== 'string') throw new Error(`No se pudo recuperar el archivo ${item.path || item.index}.`);
+      return { path: result.file.path, content: result.file.content };
+    }));
+    const existingReadme = contents.some(file => file.path.toLowerCase() === 'readme-swarm.txt');
+    if (!existingReadme) {
+      const inventory = contents.map(file => `- ${file.path}`).join('\\n');
+      contents.push({ path: 'README-SWARM.txt', content: `Entrega generada por Swarm\\nTarea: ${req.params.id}\\n\\nContenido del paquete:\\n${inventory}\\n\\nAbrí el archivo HTML principal en un navegador para probar una web estática. Si el proyecto requiere dependencias o un servidor, consultá su README y ejecutá el comando de instalación en un entorno de desarrollo.\\n` });
+    }
+    const archive = createZip(contents);
+    const filename = `swarm-${String(req.params.id).slice(0, 8)}.zip`;
+    res.status(200).set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(archive.length),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store'
+    }).send(archive);
+  } catch (error) {
+    console.error('[bridge][bundle_error]', JSON.stringify({ taskId: req.params.id, detail: String(error.message || error).slice(0, 500) }));
+    res.status(error.status || 502).json({ error: `No se pudo crear el ZIP completo: ${String(error.message || 'error desconocido').slice(0, 700)}` });
+  }
+});
+function prunePreviewSessions() {
+  const now = Date.now();
+  for (const [token, session] of previewSessions) if (session.expiresAt <= now) previewSessions.delete(token);
+  while (previewSessions.size > 5000) previewSessions.delete(previewSessions.keys().next().value);
+}
+function validPreviewSession(token) {
+  prunePreviewSessions();
+  const session = previewSessions.get(String(token || ''));
+  return session && session.expiresAt > Date.now() ? session : null;
+}
+function safePreviewPath(value) {
+  const candidate = String(value || '').split(String.fromCharCode(92)).join('/');
+  if (!candidate || candidate.startsWith('/') || candidate.split('/').some(part => !part || part === '.' || part === '..')) return null;
+  return candidate;
+}
+function resolvePreviewReference(htmlPath, reference) {
+  const raw = String(reference || '').trim();
+  const lower = raw.toLowerCase();
+  if (!raw || raw.startsWith('//') || raw.startsWith('#') || lower.startsWith('http:') || lower.startsWith('https:') || lower.startsWith('data:') || lower.startsWith('blob:') || lower.startsWith('javascript:') || lower.startsWith('mailto:') || lower.startsWith('tel:')) return null;
+  let pathname = raw.split(/[?#]/, 1)[0];
+  try { pathname = decodeURIComponent(pathname); } catch { return null; }
+  const parts = pathname.startsWith('/') ? [] : htmlPath.split('/').slice(0, -1);
+  const relative = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  for (const part of relative.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') { if (!parts.length) return null; parts.pop(); }
+    else parts.push(part);
+  }
+  return safePreviewPath(parts.join('/'));
+}
+function rewritePreviewHtml(html, htmlPath, token) {
+  const prefix = `/preview/${encodeURIComponent(token)}/assets/`;
+  return String(html).replace(/<(script|link|img|source|video|audio|track)\b[^>]*>/gi, tag =>
+    tag.replace(/\b(src|href|poster)\s*=\s*(["'])(.*?)\2/gi, (whole, attribute, quote, value) => {
+      const resolved = resolvePreviewReference(htmlPath, value);
+      if (!resolved) return whole;
+      return `${attribute}=${quote}${prefix}${resolved.split('/').map(encodeURIComponent).join('/')}${quote}`;
+    })
+  );
+}
+async function previewFile(session, index) {
+  const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
+  const files = Array.isArray(listing.files) ? listing.files : [];
+  const item = files.find(file => Number(file.index) === Number(index));
+  if (!item) { const error = new Error('No existe ese archivo de la vista previa.'); error.status = 404; throw error; }
+  const result = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files/${encodeURIComponent(item.index)}`);
+  if (!result.file || typeof result.file.content !== 'string') { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
+  return { item, file: result.file, files };
+}
+app.post('/api/jobs/:id/preview-session', async (req, res) => {
+  try {
+    const index = Number(req.body?.index);
+    if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Índice de vista previa inválido.' });
+    const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/files`);
+    const file = (Array.isArray(listing.files) ? listing.files : []).find(item => Number(item.index) === index);
+    if (!file || !String(file.path || '').toLowerCase().endsWith('.html')) return res.status(400).json({ error: 'Solo se pueden previsualizar archivos HTML.' });
+    prunePreviewSessions();
+    const token = randomBytes(24).toString('base64url');
+    previewSessions.set(token, { jobId: req.params.id, expiresAt: Date.now() + PREVIEW_TTL_MS });
+    res.json({ url: `/preview/${token}/${index}`, expiresInSeconds: Math.floor(PREVIEW_TTL_MS / 1000) });
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
+app.get('/preview/:token/assets/*', async (req, res) => {
+  const session = validPreviewSession(req.params.token);
+  if (!session) return res.status(404).type('text/plain').send('La vista previa expiró. Volvé a abrirla desde Swarm.');
+  try {
+    const assetPath = safePreviewPath(req.params[0]);
+    if (!assetPath) return res.status(400).type('text/plain').send('Ruta de recurso inválida.');
+    const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
+    const item = (Array.isArray(listing.files) ? listing.files : []).find(file => file.path === assetPath);
+    if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
+    const result = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files/${encodeURIComponent(item.index)}`);
+    if (!result.file || typeof result.file.content !== 'string') return res.status(404).type('text/plain').send('Recurso no disponible.');
+    res.set({ 'Content-Type': item.contentType || 'text/plain; charset=utf-8', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+    res.send(result.file.content);
+  } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo cargar el recurso local.'); }
+});
+app.get('/preview/:token/:index', async (req, res) => {
+  const session = validPreviewSession(req.params.token);
+  if (!session) return res.status(404).type('text/plain').send('La vista previa expiró. Volvé a abrirla desde Swarm.');
+  try {
+    const result = await previewFile(session, req.params.index);
+    if (!String(result.item.path || '').toLowerCase().endsWith('.html')) return res.status(400).type('text/plain').send('Solo se pueden previsualizar archivos HTML.');
+    const html = rewritePreviewHtml(result.file.content, result.item.path, req.params.token);
+    const previewOrigin = `${req.protocol}://${req.get('host')}`;
+    res.set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Disposition': 'inline',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline' data: blob:; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src 'none'; form-action 'none'; object-src 'none'; base-uri 'none'; navigate-to ${previewOrigin}; frame-ancestors 'self'`
+    });
+    res.send(html);
+  } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo preparar la vista previa.'); }
+});
 app.get('/api/jobs/:id/files', async (req, res) => {
   try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/files`)); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
