@@ -141,7 +141,7 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
     results.push(parseValidationResponse(raw));
   }
   const findings = [];
-  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') result.findings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); });
+  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') { const batchFindings = result.findings.length ? result.findings : ['El lote no fue aprobado, pero el validador no dio hallazgos concretos; hace falta una revisión verificable.']; batchFindings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); } });
   return {
     verdict: results.every(result => result.verdict === 'APPROVED') ? 'APPROVED' : 'NEEDS_CHANGES',
     findings: findings.slice(0, 30),
@@ -226,7 +226,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
     results.push(parseValidationResponse(raw));
   }
   const findings = [];
-  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') result.findings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); });
+  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') { const batchFindings = result.findings.length ? result.findings : ['El lote no fue aprobado, pero el validador no dio hallazgos concretos; hace falta una revisión verificable.']; batchFindings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); } });
   return {
     verdict: results.every(result => result.verdict === 'APPROVED') ? 'APPROVED' : 'NEEDS_CHANGES',
     findings: findings.slice(0, 30),
