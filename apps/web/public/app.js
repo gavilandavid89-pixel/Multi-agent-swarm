@@ -85,7 +85,7 @@ function updateDetailView(data) {
   track.classList.toggle('indeterminate', ['queued','running'].includes(job.status));
   fill.style.width = job.status === 'completed' ? '100%' : job.status === 'needs_review' ? '99%' : job.status === 'failed' ? '100%' : '35%';
   track.classList.toggle('progress-failed', job.status === 'failed');
-  $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · último hito: ' + (job.progress ?? 0) + '%';
+  $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
   $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : ['queued','running'].includes(job.status) ? 'Chat en vivo: se agregan o actualizan mensajes sin reconstruir la página. La barra animada indica actividad; el porcentaje es solo el último hito guardado.' : 'Conversación guardada. Podés revisar los mensajes y el diagnóstico técnico.';
   renderConversation(data);
   const diagnostic = { objective: data.objective, stage: job.stage, status: job.status, progress: job.progress, transcript: data.history, result: data.result, validation: data.validation, syntax: data.syntax, validationLevel: data.validationLevel, error: job.error, delivery: data.delivery };
@@ -143,7 +143,7 @@ $('show-history').addEventListener('click', async () => {
       const failed = job.status === 'failed';
       const pct = done ? 100 : job.status === 'needs_review' ? 99 : failed ? null : null;
       const progress = active ? '<div class="history-progress indeterminate"><span></span></div>' : pct !== null ? `<div class="history-progress"><span style="width:${pct}%"></span></div>` : '';
-      const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · hito ${Number.isFinite(job.progress) ? job.progress + '%' : 'en curso'}` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
+      const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · actividad en curso` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
       return `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
     }).join('') || '<p class="muted tiny">Sin registros.</p>';
     list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.history)));
