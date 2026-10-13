@@ -1,5 +1,6 @@
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
