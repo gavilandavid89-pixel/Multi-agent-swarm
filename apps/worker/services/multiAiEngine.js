@@ -55,7 +55,7 @@ function assertTaskTokenBudget(jobId) {
   const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
-    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; aumentá MAX_TASK_TOKENS o reducí el contexto para reanudar.`);
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; ampliá el límite desde el control de presupuesto de la interfaz o reducí el contexto.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
     throw error;
   }
