@@ -68,5 +68,10 @@ export function parseValidationResponse(rawValue) {
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const boundedDelivery = boundContext(entrega, 8500, 'entrega');
   const raw = await consultarModelo({ model: validationModel(), temperature: 0, maxTokens: 700, onRetry, messages: [sys('Validador independiente', 'Auditá la entrega y devolvé ÚNICAMENTE JSON válido con este esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Usá APPROVED solo si no encontrás defectos relevantes. No incluyas APPROVED en summary/findings si el veredicto es NEEDS_CHANGES. Si la entrega fue recortada, evaluá el extracto disponible y aclaralo en summary; no afirmes haber revisado partes no incluidas.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 900, 'objetivo')}\n\nESTRATEGIA:\n${boundContext(estrategia, 1400, 'estrategia')}\n\nENTREGA A REVISAR (el chequeo determinista se ejecuta sobre el contenido completo):\n${boundedDelivery}` }] });
-  return parseValidationResponse(raw);
+  const parsed = parseValidationResponse(raw);
+  if (String(entrega ?? '').length > 8500) {
+    const note = 'La entrega supera el tamaño revisable en una sola llamada; se comprobó sintaxis por separado, pero la revisión de IA no cubrió el contenido completo.';
+    return { ...parsed, verdict: 'NEEDS_CHANGES', findings: [...parsed.findings, note].slice(0, 30), summary: `${parsed.summary} La entrega excedió el límite de revisión completa.`.slice(0, 5000) };
+  }
+  return parsed;
 }
