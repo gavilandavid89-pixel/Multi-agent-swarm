@@ -31,6 +31,6 @@ test('rechaza archivos HTML dañados por checksum', () => {
   const archive = createZip([{ path: 'index.html', content: '<h1>hola</h1>' }]);
   const endOffset = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   const centralOffset = archive.readUInt32LE(endOffset + 16);
-  archive.writeUInt32LE(archive.readUInt32LE(centralOffset + 16) ^ 1, centralOffset + 16);
+  archive.writeUInt32LE((archive.readUInt32LE(centralOffset + 16) ^ 1) >>> 0, centralOffset + 16);
   assert.throws(() => parsePreviewZip(archive), /suma de comprobación/);
 });
