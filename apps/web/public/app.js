@@ -352,7 +352,7 @@ $('extend-task-budget').addEventListener('click', async () => {
     $('token-budget-note').textContent = `Límite ampliado a ${nextBudget.toLocaleString('es-AR')} tokens. Si estaba pausada por presupuesto, se reanudará desde el último checkpoint.`;
     await updateSelectedDetail(); await loadJobs();
   } catch (error) { $('token-budget-note').textContent = `No se pudo ampliar el límite: ${error.message}`; }
-  finally { button.disabled = false; renderTokenBudget({ tokenBudget: state.currentTokenBudget }); }
+  finally { button.disabled = state.currentTokenBudget >= 100000; button.textContent = state.currentTokenBudget >= 100000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 100000 - state.currentTokenBudget).toLocaleString('es-AR')}`; }
 });
 $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
 $('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
