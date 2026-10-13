@@ -1,21 +1,32 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
-const configuredRounds = Number.parseInt(process.env.MAX_CORRECTION_ROUNDS || '3', 10);
-const MAX_ROUNDS = Number.isFinite(configuredRounds) ? Math.min(10, Math.max(2, configuredRounds)) : 3;
+// Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
+const MAX_ROUNDS = 2;
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function retryNotice(jobId, info) {
+  const current = getPayload(jobId); if (!current) return;
+  if (info.usage) {
+    const prior = current.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
+    const model = String(info.model || 'desconocido');
+    const next = { promptTokens: prior.promptTokens + (info.promptTokens || 0), completionTokens: prior.completionTokens + (info.completionTokens || 0), totalTokens: prior.totalTokens + (info.totalTokens || 0), calls: prior.calls + 1, byModel: { ...(prior.byModel || {}) } };
+    const modelPrior = next.byModel[model] || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
+    next.byModel[model] = { promptTokens: modelPrior.promptTokens + (info.promptTokens || 0), completionTokens: modelPrior.completionTokens + (info.completionTokens || 0), totalTokens: modelPrior.totalTokens + (info.totalTokens || 0), calls: modelPrior.calls + 1 };
+    const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }) }]);
+    updateJob(jobId, { payload: { transcript, tokenUsage: next } });
+    console.info('[worker][provider_usage]', JSON.stringify({ jobId, model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }));
+    return;
+  }
   const reason = String(info.reason || 'error temporal').slice(0, 240);
   console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
-  const current = getPayload(jobId); if (!current) return;
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, lastCheckpoint: 'provider-retry' } });
 }
 function startAgent(jobId, stage, progress, agent, content) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent, type: 'thinking', content }]);
-  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, lastCheckpoint: `started:${stage}` } });
+  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, retryAt: null, providerBlock: null, activeStage: stage } });
 }
 function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
@@ -27,7 +38,7 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
     }
   }
   transcript.push({ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
-  return updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, ...extra }, ...publicPatch });
+  return updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra }, ...publicPatch });
 }
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
@@ -98,13 +109,22 @@ export async function processJob(jobId) {
     const finalPayload = getPayload(jobId)?.payload || {};
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
+    const current = getPayload(jobId);
+    if (error?.code === 'PROVIDER_TEMPORARY' && current) {
+      const retryAfterMs = Math.max(1000, Math.min(604800000, Number(error.retryAfterMs) || 30000));
+      const retryAt = new Date(Date.now() + retryAfterMs).toISOString();
+      const reason = String(error.message || 'Proveedor temporalmente no disponible').slice(0, 1200);
+      const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Tarea pausada de forma segura. Motivo: ${reason} Próximo intento automático: ${retryAt}. Se conserva el checkpoint ${current.payload.lastCheckpoint || 'guardado'}.` }]);
+      updateJob(jobId, { status: 'queued', stage: 'Esperando disponibilidad del proveedor', progress: current.publicJob.progress, error: null, payload: { ...current.payload, transcript, retryAt, providerBlock: { code: error.code, model: error.providerModel || null, retry: error.providerRetry || null, reason, retryAfterMs }, lastCheckpoint: current.payload.lastCheckpoint || 'provider-deferred', activeStage: null } });
+      console.warn('[worker][provider_deferred]', JSON.stringify({ jobId, model: error.providerModel || null, retry: error.providerRetry || null, retryAfterMs, retryAt, checkpoint: current.payload.lastCheckpoint || null }));
+      return { deferred: true, retryAfterMs };
+    }
     console.error('[worker][job_failed]', JSON.stringify({
       jobId,
       name: String(error?.name || 'Error').slice(0, 100),
       message: String(error?.message || error).slice(0, 1200),
       stack: String(error?.stack || '').slice(0, 4000)
     }));
-    const current = getPayload(jobId);
     if (current) {
       const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'error', content: String(error?.stack || error?.message || error).slice(0, 12000) }]);
       updateJob(jobId, { status: 'failed', stage: 'Error de procesamiento', error: 'La tarea se interrumpió por un error. Consultá el detalle técnico y corregí la configuración si corresponde.', payload: { ...current.payload, transcript, lastCheckpoint: current.payload.lastCheckpoint || 'error' } });
