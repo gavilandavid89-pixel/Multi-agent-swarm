@@ -71,6 +71,15 @@ function boundContext(value, maxChars, label) {
   const tail = Math.floor(maxChars * 0.23);
   return `${text.slice(0, head)}\n\n[...${label} recortado para respetar el límite de tokens; se conserva el inicio y el final...]\n\n${text.slice(-tail)}`;
 }
+export async function agenteCoordinador(objetivo, estrategia, propuesta, critica, onRetry) {
+  return consultarModelo({
+    model: reasoningModel(), temperature: 0.1, maxTokens: 1800, onRetry,
+    messages: [
+      sys('Coordinador de coherencia', 'Convertí el objetivo y el plan en un contrato compartido para todos los agentes. Devolvé un mapa estructurado en español con: OBJETIVO Y ALCANCE, DECISIONES FIJAS, INVENTARIO DE MÓDULOS/ARCHIVOS ESPERADOS, CONTRATOS ENTRE ARCHIVOS (clases, funciones, formatos de datos, rutas y eventos), DEPENDENCIAS Y ORDEN DE IMPLEMENTACIÓN, REGLAS DE COMPATIBILIDAD, CRITERIOS DE COHERENCIA y RIESGOS/INCERTIDUMBRES. No inventes archivos ya existentes: distinguí entre propuestos y confirmados. Cada agente debe respetar estos contratos y avisar si necesita cambiarlos; favorecé cambios mínimos y coherentes.'),
+      { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 2200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2600, 'estrategia') + '\n\nPROPUESTA:\n' + boundContext(propuesta, 1400, 'propuesta') + '\n\nAUDITORÍA ESCÉPTICA:\n' + boundContext(critica, 1400, 'auditoría') }
+    ]
+  });
+}
 export async function agenteArquitecto(objetivo, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Diseñá una solución modular, concreta y mantenible. Enumerá supuestos, componentes, riesgos y criterios de aceptación.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
 }
@@ -80,16 +89,16 @@ export async function agenteEsceptico(objetivo, propuesta, onRetry) {
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
-export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '') {
+export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '') {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 2200 : 3000, onRetry,
+    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry,
     messages: [
       sys('Desarrollador sénior', repairing
         ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
         : 'Producí una solución utilizable. Si el objetivo requiere archivos, cada archivo debe aparecer por separado con un encabezado exacto ### Archivo: ruta/archivo.ext y debajo un bloque de código con su lenguaje; incluí el contenido completo, no fragmentos ni pseudocódigo. Usá rutas relativas seguras, sin .., y no mezcles archivos en un mismo bloque. No afirmes que pasó pruebas si no hay resultados reales.'),
       { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 1200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2200, 'estrategia') + '\n\n' +
-        (repairing ? 'HALLAZGOS QUE DEBÉS CORREGIR:\n' + boundContext(errores, 1600, 'hallazgos') + '\n\nENTREGA ACTUAL; conservá todo lo correcto y reemplazá solo los archivos afectados:\n' + boundContext(entregaActual, 6200, 'entrega actual') : 'Generá la primera versión completa.') }
+        (mapaCoherencia ? 'MAPA COMPARTIDO DE COHERENCIA; respetá estos contratos entre archivos:\n' + boundContext(mapaCoherencia, 4200, 'mapa de coherencia') + '\n\n' : '') + (repairing ? 'HALLAZGOS QUE DEBÉS CORREGIR:\n' + boundContext(errores, 1600, 'hallazgos') + '\n\nENTREGA ACTUAL; conservá todo lo correcto y reemplazá solo los archivos afectados:\n' + boundContext(entregaActual, 6200, 'entrega actual') : 'Generá la primera versión completa.') }
     ]
   });
 }
