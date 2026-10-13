@@ -1,4 +1,5 @@
 import { consultarGemini } from './geminiProvider.js';
+import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // Feature branch: bounded continuation support.
@@ -11,18 +12,10 @@ function deferredProviderError(model, retry, wait, reason) {
   error.code = 'PROVIDER_TEMPORARY'; error.retryAfterMs = wait; error.providerModel = model; error.providerRetry = retry;
   return error;
 }
-export function retryDelay(retry, retryAfter) {
+export function retryDelay(retry, retryAfter, bodyText = '') {
   const configuredBase = Number(process.env.RETRY_BASE_MS || 3000);
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
-  const numericRetryAfter = Number(retryAfter);
-  let delay; let authoritative = false;
-  if (Number.isFinite(numericRetryAfter) && numericRetryAfter > 0) { delay = Math.min(numericRetryAfter * 1000, 604800000); authoritative = true; }
-  else {
-    const dateRetryAfter = Date.parse(String(retryAfter || ''));
-    if (Number.isFinite(dateRetryAfter)) { delay = Math.min(Math.max(0, dateRetryAfter - Date.now()), 604800000); authoritative = true; }
-    else delay = Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000);
-  }
-  return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
+  return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   if (process.env.GEMINI_API_KEY) return consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
@@ -81,7 +74,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       continue;
     }
     if (retryableStatus(response.status)) {
-      retry++; const wait = retryDelay(retry, response.headers.get('retry-after')); const reason = `HTTP ${response.status}`;
+      retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
       onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait); continue;
