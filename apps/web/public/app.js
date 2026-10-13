@@ -7,7 +7,7 @@ function authHeaders(json = true) { return { ...(json ? { 'content-type': 'appli
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) } });
   const data = await response.json().catch(() => ({}));
-  if (response.status === 401) { state.accessKey = ''; sessionStorage.removeItem('swarm-access-key'); showAccess(); throw new Error('Necesitás ingresar tu clave de acceso.'); }
+  if (response.status === 401) { state.accessKey = ''; sessionStorage.removeItem('swarm-access-key'); showAccess(); throw new Error(data.error || 'La clave de acceso no es válida.'); }
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
@@ -234,12 +234,31 @@ async function showDetail(id) {
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
-$('access-form').addEventListener('submit', async event => { event.preventDefault(); state.accessKey = $('access-key').value.trim(); sessionStorage.setItem('swarm-access-key', state.accessKey); showApp(); await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000); });
+async function enterApp() {
+  await api('/api/access-check');
+  $('access-status').textContent = '';
+  showApp();
+  try { await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); }
+  catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
+  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
+  if (!state.listPollHandle) state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000);
+}
+$('access-form').addEventListener('submit', async event => {
+  event.preventDefault(); state.accessKey = $('access-key').value.trim();
+  if (!state.accessKey) { $('access-status').textContent = 'Ingresá la clave de acceso.'; return; }
+  sessionStorage.setItem('swarm-access-key', state.accessKey);
+  const button = $('access-form').querySelector('button[type="submit"]'); button.disabled = true;
+  $('access-status').textContent = 'Verificando acceso…';
+  try { await enterApp(); }
+  catch (error) { $('access-status').textContent = error.message; showAccess(); }
+  finally { button.disabled = false; }
+});
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
-  try { const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective }) }); $('objective').value = ''; await showDetail(job.id); await refresh(); }
-  catch (error) { alert(error.message); }
+  $('job-submit-status').textContent = 'Enviando la orden al motor…';
+  try { const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective }) }); $('objective').value = ''; $('job-submit-status').textContent = 'Orden recibida. Abriendo la tarea…'; await showDetail(job.id); await refresh(); }
+  catch (error) { $('job-submit-status').textContent = `No se pudo iniciar: ${error.message}`; }
   finally { button.disabled = false; button.innerHTML = 'Iniciar comité <span>↗</span>'; }
 });
 $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
@@ -307,6 +326,6 @@ async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }
   if (!state.accessKey) { showAccess(); return; }
-  showApp(); await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000);
+  try { await enterApp(); } catch (error) { showAccess(); $('access-status').textContent = error.message; }
 }
 boot();
