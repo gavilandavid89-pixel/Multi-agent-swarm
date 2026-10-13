@@ -127,7 +127,7 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
     return { verdict: 'NEEDS_CHANGES', findings: ['La entrega es demasiado larga y no tiene encabezados ### Archivo: para dividirla sin perder contenido.'], summary: 'Auditoría de coherencia incompleta; no se aprobó contenido que no pudo inspeccionarse íntegramente.', raw: '' };
   }
   if (batches.length > 8) return { verdict: 'NEEDS_CHANGES', findings: ['La entrega excede ocho lotes de auditoría. Agrupá o dividí los módulos para revisar todos los archivos completos.'], summary: 'Auditoría de coherencia detenida por límite de cobertura.', raw: '' };
-  const manifestText = sections.map(section => section.split('\n', 1)[0].replace(/^#{1,6}\\s+/, '').trim()).join('\n');
+  const manifestText = sections.map(section => section.split('\n', 1)[0].replace(/^#{1,6}\s+/, '').trim()).join('\n');
   const results = [];
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
