@@ -98,7 +98,16 @@ async function workerRequest(route, options = {}) {
   return data;
 }
 app.get('/api/history', async (_req, res) => { try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
-app.get('/api/jobs', async (_req, res) => { try { res.json(await workerRequest('/internal/jobs')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/jobs', async (req, res) => {
+  const params = new URLSearchParams();
+  for (const key of ['limit', 'offset', 'status']) {
+    const value = String(req.query[key] ?? '');
+    if (value) params.set(key, value);
+  }
+  const suffix = params.size ? `?${params.toString()}` : '';
+  try { res.json(await workerRequest(`/internal/jobs${suffix}`)); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'Escribí un objetivo para el comité.' });
