@@ -95,7 +95,7 @@ export async function agenteDesarrollador(objetivo, estrategia, errores = '', on
 }
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const source = String(entrega ?? '');
-  const maxChars = 6500;
+  const maxChars = 8500;
   const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
   const batches = [];
   if (source.length <= maxChars) batches.push(source);
