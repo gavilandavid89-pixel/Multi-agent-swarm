@@ -29,8 +29,8 @@ test('rechaza datos que no son ZIP y paquetes mayores al límite', () => {
 
 test('rechaza archivos HTML dañados por checksum', () => {
   const archive = createZip([{ path: 'index.html', content: '<h1>hola</h1>' }]);
-  const nameLength = archive.readUInt16LE(26);
-  const bodyOffset = 30 + nameLength + archive.readUInt16LE(28);
-  archive[bodyOffset] ^= 0x01;
+  const endOffset = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  const centralOffset = archive.readUInt32LE(endOffset + 16);
+  archive.writeUInt32LE(archive.readUInt32LE(centralOffset + 16) ^ 1, centralOffset + 16);
   assert.throws(() => parsePreviewZip(archive), /suma de comprobación/);
 });
