@@ -49,7 +49,7 @@ function retryNotice(jobId, info) {
   updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
 }
 function assertTaskTokenBudget(jobId) {
-  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '24000', 10);
+  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 24000;
   const current = getPayload(jobId);
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
