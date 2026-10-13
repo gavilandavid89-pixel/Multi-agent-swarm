@@ -140,10 +140,10 @@ export async function agenteEsceptico(objetivo, propuesta, onRetry) {
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
-export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '') {
+export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true) {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry,
+    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue,
     messages: [
       sys('Desarrollador sénior', repairing
         ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
