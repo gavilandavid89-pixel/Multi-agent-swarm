@@ -162,17 +162,19 @@ function validPreviewSession(token) {
   return session && session.expiresAt > Date.now() ? session : null;
 }
 function safePreviewPath(value) {
-  const candidate = String(value || '').replace(/\\\\/g, '/');
+  const candidate = String(value || '').split(String.fromCharCode(92)).join('/');
   if (!candidate || candidate.startsWith('/') || candidate.split('/').some(part => !part || part === '.' || part === '..')) return null;
   return candidate;
 }
 function resolvePreviewReference(htmlPath, reference) {
   const raw = String(reference || '').trim();
-  if (!raw || /^(?:[a-z][a-z0-9+.-]*:|\\/\\/|#)/i.test(raw)) return null;
+  const lower = raw.toLowerCase();
+  if (!raw || raw.startsWith('//') || raw.startsWith('#') || lower.startsWith('http:') || lower.startsWith('https:') || lower.startsWith('data:') || lower.startsWith('blob:') || lower.startsWith('javascript:') || lower.startsWith('mailto:') || lower.startsWith('tel:')) return null;
   let pathname = raw.split(/[?#]/, 1)[0];
   try { pathname = decodeURIComponent(pathname); } catch { return null; }
   const parts = pathname.startsWith('/') ? [] : htmlPath.split('/').slice(0, -1);
-  for (const part of pathname.replace(/^\\//, '').split('/')) {
+  const relative = pathname.startsWith('/') ? pathname.slice(1) : pathname;
+  for (const part of relative.split('/')) {
     if (!part || part === '.') continue;
     if (part === '..') { if (!parts.length) return null; parts.pop(); }
     else parts.push(part);
@@ -183,7 +185,6 @@ function rewritePreviewHtml(html, htmlPath, token) {
   const prefix = `/preview/${encodeURIComponent(token)}/assets/`;
   return String(html).replace(/<(script|link|img|source|video|audio|track)\\b[^>]*>/gi, tag =>
     tag.replace(/\\b(src|href|poster)\\s*=\\s*(["'])(.*?)\\2/gi, (whole, attribute, quote, value) => {
-      if (/^(?:https?:|data:|blob:|javascript:|mailto:|tel:|#|\\/\\/)/i.test(value.trim())) return whole;
       const resolved = resolvePreviewReference(htmlPath, value);
       if (!resolved) return whole;
       return `${attribute}=${quote}${prefix}${resolved.split('/').map(encodeURIComponent).join('/')}${quote}`;
