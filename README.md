@@ -43,4 +43,6 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 
 ## Alcance de validación
 
-La validación automática usa un segundo agente y, si la entrega contiene bloques JavaScript delimitados, ejecuta `node --check` sin ejecutar ese código. No equivale a una prueba de integración ni garantiza que la solución sea correcta. Los resultados sin bloques JavaScript se identifican como revisión de IA únicamente.
+La validación automática usa un segundo agente y revisa entregas largas por lotes delimitados por archivo. El chequeo determinista comprueba la sintaxis JavaScript como módulo ES sin ejecutar el código, valida JSON cuando detecta `package.json`, revisa referencias locales de scripts/estilos en HTML y busca señales básicas de truncamiento CSS. No equivale a una prueba de integración ni garantiza que la solución sea correcta. Si una entrega no está estructurada por archivos y no puede revisarse completa, no se aprueba automáticamente.
+
+En el detalle de cada tarea existe un chat directo con Arquitecto, Escéptico, Árbitro, Desarrollador y Validador. Sus mensajes se guardan en la misma conversación y no crean una tarea nueva. Las correcciones automáticas seleccionan los archivos mencionados por los hallazgos, integran los cambios con la entrega previa y permiten hasta dos ciclos correctivos adicionales.
