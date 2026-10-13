@@ -179,10 +179,10 @@ $('zip-preview-form').addEventListener('submit', async event => {
   const input = $('zip-preview-file');
   const file = input.files?.[0];
   if (!file) { $('zip-preview-status').textContent = 'Elegí un archivo ZIP primero.'; return; }
-  if (file.size > 8 * 1024 * 1024) { $('zip-preview-status').textContent = 'El ZIP supera el límite de 8 MB.'; return; }
+  if (file.size > 32 * 1024 * 1024) { $('zip-preview-status').textContent = 'El ZIP supera el límite de 32 MB.'; return; }
   const button = $('zip-preview-submit');
   button.disabled = true; button.textContent = 'Analizando ZIP…';
-  $('zip-preview-status').textContent = 'Comprobando rutas, tamaños y formatos compatibles…';
+  $('zip-preview-status').textContent = 'Comprobando rutas, tamaños, código web y recursos compatibles…';
   closeUploadedZipPreview();
   try {
     const response = await fetch('/api/preview-zip', {
@@ -202,7 +202,7 @@ $('zip-preview-form').addEventListener('submit', async event => {
     $('zip-preview-frame').src = result.url;
     $('zip-preview-details').textContent = `${result.filesCount} recurso(s) compatibles · ${(result.expandedBytes / 1024).toFixed(1)} KB descomprimidos. La sesión caduca en 10 minutos; los ejecutables e instaladores no se ejecutan.`;
     $('zip-preview-result').classList.remove('hidden');
-    $('zip-preview-status').textContent = `ZIP analizado: ${result.pages.length} página(s) HTML disponibles. Se abrió ${result.pages[0].path} en el entorno aislado.`;
+    $('zip-preview-status').textContent = `ZIP analizado: ${result.pages.length} página(s) HTML disponibles. Se abrió ${result.pages[0].path} en el laboratorio aislado.`;
     $('zip-preview-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     $('zip-preview-status').textContent = `No se pudo abrir el ZIP: ${error.message}`;

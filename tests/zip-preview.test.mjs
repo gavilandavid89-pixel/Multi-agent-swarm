@@ -7,7 +7,8 @@ test('ZIP de web detecta index.html y conserva assets sin extraer al disco', () 
   const archive = createZip([
     { path: 'index.html', content: '<h1>Hola</h1><script src="app.js"></script>' },
     { path: 'app.js', content: 'document.body.dataset.ready = "yes";' },
-    { path: 'assets/site.css', content: 'body { color: purple; }' }
+    { path: 'assets/site.css', content: 'body { color: purple; }' },
+    { path: 'game.wasm', content: 'WASMTEST' }
   ]);
   const parsed = parsePreviewZip(archive);
   assert.equal(parsed.pages.length, 1);
@@ -15,6 +16,8 @@ test('ZIP de web detecta index.html y conserva assets sin extraer al disco', () 
   assert.equal(parsed.files.find(file => file.path === 'app.js').content.toString('utf8'), 'document.body.dataset.ready = "yes";');
   assert.equal(parsed.files.find(file => file.path === 'assets/site.css').contentType, 'text/css; charset=utf-8');
   assert.equal(parsed.totalExpandedBytes > 0, true);
+  assert.equal(parsed.files.find(file => file.path === 'game.wasm').contentType, 'application/wasm');
+  assert.equal(parsed.files.find(file => file.path === 'game.wasm').content.length, 8);
 });
 
 test('excluye formatos ejecutables y falla si no queda HTML para previsualizar', () => {
@@ -24,7 +27,7 @@ test('excluye formatos ejecutables y falla si no queda HTML para previsualizar',
 
 test('rechaza datos que no son ZIP y paquetes mayores al límite', () => {
   assert.throws(() => parsePreviewZip(Buffer.from('not a zip')), /ZIP completo/);
-  assert.throws(() => parsePreviewZip(Buffer.alloc(8 * 1024 * 1024 + 1)), /como máximo 8 MB/);
+  assert.throws(() => parsePreviewZip(Buffer.alloc(32 * 1024 * 1024 + 1)), /como máximo 32 MB/);
 });
 
 test('rechaza archivos HTML dañados por checksum', () => {

@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=zip-preview-1">
+  <link rel="stylesheet" href="/styles.css?v=zip-game-lab-2">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -28,17 +28,17 @@
         <form id="job-form"><label class="sr-only" for="objective">Objetivo</label><textarea id="objective" rows="4" maxlength="20000" placeholder="Describí el objetivo con el contexto necesario…" required></textarea><div class="composer-footer"><span class="muted tiny">Los avances se guardan automáticamente.</span><button class="button button-primary" id="submit-job" type="submit">Iniciar comité <span>↗</span></button></div><p id="job-submit-status" class="muted tiny" role="status" aria-live="polite"></p></form>
       </section>
       <section class="panel zip-preview-panel">
-        <div class="section-head"><div><p class="panel-kicker">LABORATORIO AISLADO</p><h2>Probar un ZIP sin instalarlo</h2><p class="muted tiny">Subí una web empaquetada y Swarm intentará abrir su HTML en un entorno temporal aislado.</p></div><span class="history-icon">▣</span></div>
+        <div class="section-head"><div><p class="panel-kicker">LABORATORIO AISLADO</p><h2>Probar un ZIP sin instalarlo</h2><p class="muted tiny">Subí un juego o una app web completa: Swarm carga HTML, CSS, JS, WASM y recursos locales en un entorno temporal aislado.</p></div><span class="history-icon">▣</span></div>
         <form id="zip-preview-form" class="zip-upload-form">
-          <label class="zip-drop" for="zip-preview-file"><span class="zip-drop-icon">↑</span><strong>Elegí un archivo .zip</strong><span class="muted tiny">Máximo 8 MB comprimido · 10 MB descomprimido · 80 entradas</span><input id="zip-preview-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" required></label>
+          <label class="zip-drop" for="zip-preview-file"><span class="zip-drop-icon">↑</span><strong>Elegí un archivo .zip</strong><span class="muted tiny">Máximo 32 MB ZIP · 32 MB descomprimido · 250 archivos</span><input id="zip-preview-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" required></label>
           <button id="zip-preview-submit" class="button button-primary" type="submit">Analizar y abrir vista previa ↗</button>
         </form>
-        <p id="zip-preview-status" class="muted tiny" role="status" aria-live="polite">No se instala nada. Solo se admiten páginas web y recursos compatibles; ejecutables e instaladores se excluyen.</p>
+        <p id="zip-preview-status" class="muted tiny" role="status" aria-live="polite">No se instala nada. Admite juegos web, módulos, WASM y recursos locales. Los ejecutables nativos y los instaladores se excluyen.</p>
         <section id="zip-preview-result" class="artifact-preview hidden">
           <div class="section-head"><div><p class="panel-kicker">SESIÓN TEMPORAL · 10 MIN</p><h3>Vista previa del ZIP</h3></div><button id="close-zip-preview" class="button button-secondary" type="button">Cerrar ×</button></div>
           <label for="zip-preview-page" class="muted tiny">Página HTML</label><select id="zip-preview-page" class="history-filter"></select>
           <p id="zip-preview-details" class="muted tiny"></p>
-          <iframe id="zip-preview-frame" title="Vista previa aislada del ZIP" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy"></iframe>
+          <iframe id="zip-preview-frame" title="Vista previa aislada del ZIP" sandbox="allow-scripts allow-pointer-lock" allow="fullscreen" allowfullscreen referrerpolicy="no-referrer" loading="lazy"></iframe>
         </section>
       </section>
       <section class="dashboard-grid">
@@ -57,6 +57,6 @@
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=zip-preview-1" defer></script>
+  <script src="/app.js?v=zip-game-lab-2" defer></script>
 </body>
 </html>

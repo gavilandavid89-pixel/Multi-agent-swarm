@@ -113,6 +113,7 @@ try {
     { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="site.css"></head><body><h1>ZIP PREVIEW E2E</h1><button id="go">Probar</button><script src="app.js"></script></body></html>' },
     { path: 'app.js', content: "document.getElementById('go').addEventListener('click', () => { document.body.dataset.clicked = 'yes'; });" },
     { path: 'site.css', content: 'body { color: rebeccapurple; }' },
+    { path: 'game.wasm', content: 'WASMTEST' },
     { path: 'ignored.exe', content: 'not a real executable' }
   ]);
   const uploadedResponse = await request('/api/preview-zip', {
@@ -123,23 +124,26 @@ try {
   if (!uploaded.url || !Array.isArray(uploaded.pages) || !uploaded.pages.some(page => page.path === 'index.html')) {
     fail('La vista previa ZIP no encontró la página HTML principal.');
   }
-  if (uploaded.filesCount !== 3) fail('La vista previa ZIP no excluyó el ejecutable o no contó los recursos compatibles correctamente.');
+  if (uploaded.filesCount !== 4) fail('La vista previa ZIP no excluyó el ejecutable o no contó los recursos compatibles correctamente.');
   check('zip-upload-preview', 'ZIP procesado sin instalarlo; página HTML detectada y ejecutable excluido.');
   const uploadedHtmlResponse = await fetch(base + uploaded.url, { signal: AbortSignal.timeout(20000) });
   const uploadedHtml = await uploadedHtmlResponse.text();
   const uploadedCsp = uploadedHtmlResponse.headers.get('content-security-policy') || '';
   if (!uploadedHtmlResponse.ok || !uploadedHtml.includes('ZIP PREVIEW E2E')) fail('La vista previa del ZIP no devolvió el HTML esperado.');
-  if (!uploadedCsp.includes('sandbox') || !uploadedCsp.includes("connect-src 'none'") || !uploadedCsp.includes("frame-src 'none'")) {
+  if (!uploadedCsp.includes('sandbox') || !uploadedCsp.includes('connect-src https://') || !uploadedCsp.includes("frame-src 'none'") || !uploadedCsp.includes('worker-src https://') || !uploadedCsp.includes('wasm-unsafe-eval')) {
     fail('La vista previa ZIP no aplicó todas las restricciones CSP esperadas.');
   }
-  if (!uploadedHtml.includes('/preview/') || !uploadedHtml.includes('/assets/')) fail('Los recursos locales del ZIP no fueron reescritos para la sesión aislada.');
+  if (!uploadedHtml.includes('/preview/') || !uploadedHtml.includes('/assets/') || !uploadedHtml.includes('<base href=')) fail('Los recursos locales o la base de rutas relativas no fueron preparados para la sesión aislada.');
   check('zip-html-sandbox', 'HTML aislado con CSP restrictiva y recursos locales reescritos.');
   const assetMatch = uploadedHtml.match(/src="([^"]*app\.js[^"]*)"/i);
   if (!assetMatch) fail('No se encontró el script local reescrito en la vista previa ZIP.');
   const uploadedAssetResponse = await fetch(new URL(assetMatch[1], base), { signal: AbortSignal.timeout(20000) });
   const uploadedAsset = await uploadedAssetResponse.text();
-  if (!uploadedAssetResponse.ok || !uploadedAsset.includes("dataset.clicked = 'yes'")) fail('El JavaScript local del ZIP no se pudo cargar correctamente.');
-  check('zip-local-assets', 'JavaScript local servido desde la sesión temporal; sin instalación.');
+  if (!uploadedAssetResponse.ok || !uploadedAsset.includes("dataset.clicked = 'yes'") || uploadedAssetResponse.headers.get('access-control-allow-origin') !== '*') fail('El JavaScript local del ZIP no se pudo cargar correctamente con CORS para módulos.');
+  const token = uploaded.url.split('/')[2];
+  const wasmResponse = await fetch(base + '/preview/' + token + '/assets/game.wasm', { signal: AbortSignal.timeout(20000) });
+  if (!wasmResponse.ok || wasmResponse.headers.get('content-type') !== 'application/wasm' || wasmResponse.headers.get('access-control-allow-origin') !== '*') fail('El recurso WASM no se sirvió con MIME/CORS compatibles.');
+  check('zip-local-assets', 'JavaScript y WASM locales disponibles con MIME/CORS para juegos web.');
 
 
   report.finishedAt = new Date().toISOString();
