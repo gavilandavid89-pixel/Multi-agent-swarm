@@ -74,7 +74,7 @@ function renderConversation(data) {
     const key = String(entry.at || '') + '|' + agent + '|' + index;
     let node = existing.get(key);
     const isSystem = ['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type);
-    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : 'MENSAJE';
+    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
     const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
     if (!node) {
       node = document.createElement('article');
@@ -117,7 +117,7 @@ function updateDetailView(data) {
   const job = data.job || {};
   $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
-  $('detail-status').textContent = statusNames[job.status] || job.status || 'Sin estado';
+  $('detail-status').textContent = job.status === 'needs_review' && job.stage?.includes('presupuesto') ? 'Bloqueada · presupuesto' : statusNames[job.status] || job.status || 'Sin estado';
   $('detail-status').className = `status ${job.status || 'queued'}`;
   $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : '● ACTUALIZADO';
   $('detail-live').classList.toggle('live-active', ['queued','running'].includes(job.status));
@@ -126,7 +126,7 @@ function updateDetailView(data) {
   track.classList.toggle('indeterminate', ['queued','running'].includes(job.status));
   fill.style.width = job.status === 'completed' ? '100%' : job.status === 'needs_review' ? '99%' : job.status === 'failed' ? '100%' : '35%';
   track.classList.toggle('progress-failed', job.status === 'failed');
-  $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
+  $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' && job.stage?.includes('presupuesto') ? 'Checkpoint conservado · ajustar presupuesto para reanudar' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' && data.retryAt ? 'Pausa automática · reanudación programada' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
   $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : job.status === 'queued' && data.retryAt ? `Pausa automática por límite temporal del proveedor. Reanudación prevista: ${dateLabel(data.retryAt)}. Se conserva el checkpoint.` : ['queued','running'].includes(job.status) ? 'La tarea continúa automáticamente; el porcentaje refleja el último checkpoint guardado.' : 'El diagnóstico técnico está separado de la conversación completa y de los archivos generados.';
   renderConversation(data);
   renderArtifacts(data.artifacts, job.id);
