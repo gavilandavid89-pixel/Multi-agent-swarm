@@ -61,7 +61,8 @@ function findEndRecord(buffer) {
 /** Parse only ordinary ZIP entries; never extracts to the filesystem. */
 export function parsePreviewZip(input) {
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input || []);
-  if (buffer.length < 22 || buffer.length > 8 * 1024 * 1024) throw new Error('El ZIP debe pesar como máximo 8 MB.');
+  if (buffer.length > 8 * 1024 * 1024) throw new Error('El ZIP debe pesar como máximo 8 MB.');
+  if (buffer.length < 22) throw new Error('El archivo no parece ser un ZIP completo o está dañado.');
   const end = findEndRecord(buffer);
   if (buffer.readUInt16LE(end + 4) !== 0 || buffer.readUInt16LE(end + 6) !== 0) throw new Error('No se admiten ZIP divididos en varios volúmenes.');
   const count = buffer.readUInt16LE(end + 10);
