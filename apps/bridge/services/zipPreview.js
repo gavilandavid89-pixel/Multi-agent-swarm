@@ -1,8 +1,8 @@
 import { inflateRawSync } from 'node:zlib';
 
-const MAX_FILES = 100;
-const MAX_EXPANDED_BYTES = 20 * 1024 * 1024;
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_FILES = 80;
+const MAX_EXPANDED_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   '.html', '.htm', '.css', '.js', '.mjs', '.json', '.svg', '.png', '.jpg', '.jpeg',
   '.gif', '.webp', '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.mp4',
@@ -67,7 +67,7 @@ export function parsePreviewZip(input) {
   const count = buffer.readUInt16LE(end + 10);
   const centralSize = buffer.readUInt32LE(end + 12);
   const centralOffset = buffer.readUInt32LE(end + 16);
-  if (count > MAX_FILES) throw new Error('El ZIP supera el límite de 100 entradas.');
+  if (count > MAX_FILES) throw new Error('El ZIP supera el límite de 80 entradas.');
   if (centralOffset + centralSize > end || centralOffset + centralSize < centralOffset) throw new Error('El índice interno del ZIP está fuera de rango.');
   const files = [];
   const seen = new Set();
@@ -103,9 +103,9 @@ export function parsePreviewZip(input) {
     if (!ALLOWED_EXTENSIONS.has(ext)) continue;
     if ((flags & 1) !== 0) throw new Error('No se admiten entradas ZIP cifradas.');
     if (method !== 0 && method !== 8) throw new Error('El ZIP usa un método de compresión no compatible.');
-    if (uncompressedSize > MAX_FILE_BYTES) throw new Error('Un archivo supera el límite de 4 MB: ' + name.slice(0, 120));
+    if (uncompressedSize > MAX_FILE_BYTES) throw new Error('Un archivo supera el límite de 3 MB: ' + name.slice(0, 120));
     expandedTotal += uncompressedSize;
-    if (expandedTotal > MAX_EXPANDED_BYTES) throw new Error('El ZIP supera el límite de 20 MB descomprimidos.');
+    if (expandedTotal > MAX_EXPANDED_BYTES) throw new Error('El ZIP supera el límite de 10 MB descomprimidos.');
     if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== 0x04034b50) throw new Error('Una entrada apunta a datos ZIP inválidos.');
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
