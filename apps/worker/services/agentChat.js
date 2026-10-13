@@ -20,7 +20,9 @@ export async function replyToAgent(jobId, requestedAgent, message) {
 
   const context = [
     `OBJETIVO ORIGINAL:\n${clip(payload.objective, 1800)}`,
-    `ESTRATEGIA:\n${clip(payload.strategy, 2200)}`,\n    `MAPA DE COHERENCIA:\n${clip(payload.coherence, 3000)}`,\n    `ÚLTIMA AUDITORÍA DE COHERENCIA:\n${clip(JSON.stringify(payload.coherenceReview || {}), 1500)}`,
+    `ESTRATEGIA:\n${clip(payload.strategy, 2200)}`,
+    `MAPA DE COHERENCIA:\n${clip(payload.coherence, 3000)}`,
+    `ÚLTIMA AUDITORÍA DE COHERENCIA:\n${clip(JSON.stringify(payload.coherenceReview || {}), 1500)}`,
     `ENTREGA ACTUAL (extracto):\n${clip(payload.delivery, 2600)}`,
     `DIAGNÓSTICO DEL VALIDADOR:\n${clip(JSON.stringify(payload.validation || {}), 1800)}`,
     `SINTAXIS:\n${clip(JSON.stringify(payload.syntax || {}), 900)}`,
@@ -31,7 +33,8 @@ export async function replyToAgent(jobId, requestedAgent, message) {
     Escéptico: 'Auditor escéptico: respondé con pruebas de refutación, riesgos concretos y formas de verificarlos.',
     Árbitro: 'Árbitro técnico: resolvé desacuerdos y proponé el siguiente paso más útil.',
     Desarrollador: 'Desarrollador sénior: diagnosticá y proponé cambios concretos. Si te piden corregir código, devolvé los archivos completos afectados usando ### Archivo: ruta y bloques de código; no afirmes haberlos aplicado.',
-    Validador: 'Validador independiente: evaluá los hallazgos y separá errores demostrados de sospechas. No apruebes algo que no inspeccionaste.',\n    'Coordinador de coherencia': 'Coordinador de coherencia: explicá los contratos entre archivos, dependencias y posibles incompatibilidades del mapa compartido. No afirmes que aplicaste cambios; indicá qué agente y qué archivo deberían cambiarse.'
+    Validador: 'Validador independiente: evaluá los hallazgos y separá errores demostrados de sospechas. No apruebes algo que no inspeccionaste.',
+    'Coordinador de coherencia': 'Coordinador de coherencia: explicá los contratos entre archivos, dependencias y posibles incompatibilidades del mapa compartido. No afirmes que aplicaste cambios; indicá qué agente y qué archivo deberían cambiarse.'
   }[agent];
   const current = getPayload(jobId)?.payload || payload;
   const prior = current.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
