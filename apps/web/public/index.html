@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=packaged-preview-1">
+  <link rel="stylesheet" href="/styles.css?v=first-task-diagnostics-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -20,12 +20,12 @@
     </section>
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
-      <form id="access-form" class="inline-form"><input id="access-key" type="password" autocomplete="current-password" placeholder="Clave de acceso" required><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form>
+      <form id="access-form" class="inline-form"><input id="access-key" type="password" autocomplete="current-password" placeholder="Clave de acceso" required><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite"></p>
     </section>
     <section id="app-content" class="hidden">
       <section class="panel composer">
         <div class="section-head"><div><p class="panel-kicker">NUEVA TAREA</p><h2>¿Qué vamos a resolver?</h2></div><span class="pill"><span class="dot dot-pink"></span> Motor externo</span></div>
-        <form id="job-form"><label class="sr-only" for="objective">Objetivo</label><textarea id="objective" rows="4" maxlength="20000" placeholder="Describí el objetivo con el contexto necesario…" required></textarea><div class="composer-footer"><span class="muted tiny">Los avances se guardan automáticamente.</span><button class="button button-primary" id="submit-job" type="submit">Iniciar comité <span>↗</span></button></div></form>
+        <form id="job-form"><label class="sr-only" for="objective">Objetivo</label><textarea id="objective" rows="4" maxlength="20000" placeholder="Describí el objetivo con el contexto necesario…" required></textarea><div class="composer-footer"><span class="muted tiny">Los avances se guardan automáticamente.</span><button class="button button-primary" id="submit-job" type="submit">Iniciar comité <span>↗</span></button></div><p id="job-submit-status" class="muted tiny" role="status" aria-live="polite"></p></form>
       </section>
       <section class="dashboard-grid">
         <div class="panel history-panel"><div class="section-head"><div><p class="panel-kicker">MEMORIA</p><h2>Historial</h2></div><span class="history-icon">▤</span></div><div class="history-state"><span id="history-indicator" class="history-symbol">◌</span><div><strong id="history-title">Comprobando…</strong><p id="history-copy" class="muted">Solo consultamos el indicador.</p></div></div><button id="show-history" class="button button-secondary hidden" type="button">Ver registros <span>→</span></button><div id="history-list" class="history-list hidden"></div></div>
@@ -43,6 +43,6 @@
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=packaged-preview-1" defer></script>
+  <script src="/app.js?v=first-task-diagnostics-1" defer></script>
 </body>
 </html>
