@@ -145,6 +145,29 @@ try {
   if (!wasmResponse.ok || wasmResponse.headers.get('content-type') !== 'application/wasm' || wasmResponse.headers.get('access-control-allow-origin') !== '*') fail('El recurso WASM no se sirvió con MIME/CORS compatibles.');
   check('zip-local-assets', 'JavaScript y WASM locales disponibles con MIME/CORS para juegos web.');
 
+  const jsOnlyFixture = createZip([
+    { path: 'src/main.js', content: "document.body.innerHTML = '<main id=\\\"game\\\">JUEGO JS E2E</main>';" },
+    { path: 'src/game.css', content: '#game { min-height: 100vh; }' },
+    { path: 'assets/level.data', content: 'level-1' }
+  ]);
+  const jsOnlyResponse = await request('/api/preview-zip', {
+    method: 'POST', auth: true, body: jsOnlyFixture,
+    headers: { 'content-type': 'application/zip' }
+  });
+  const jsOnly = await json(jsOnlyResponse, 'ZIP de juego sin HTML');
+  if (!Array.isArray(jsOnly.pages) || jsOnly.pages[0]?.path !== '__swarm_preview__/index.html') {
+    fail('El ZIP de juego sin HTML no generó un lanzador para su entrypoint JavaScript.');
+  }
+  const jsOnlyHtmlResponse = await fetch(base + jsOnly.url, { signal: AbortSignal.timeout(20000) });
+  const jsOnlyHtml = await jsOnlyHtmlResponse.text();
+  if (!jsOnlyHtmlResponse.ok || !jsOnlyHtml.includes('type="module"') || !jsOnlyHtml.includes('/assets/src/main.js')) {
+    fail('El lanzador automático no cargó el entrypoint JavaScript del juego.');
+  }
+  if (!/sandbox/i.test(jsOnlyHtmlResponse.headers.get('content-security-policy') || '')) {
+    fail('El lanzador automático no se ejecuta dentro del sandbox CSP.');
+  }
+  check('zip-js-entrypoint', 'ZIP sin HTML detectado y lanzador aislado generado para src/main.js.');
+
 
   report.finishedAt = new Date().toISOString();
   report.result = 'passed';
