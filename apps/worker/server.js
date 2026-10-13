@@ -7,7 +7,7 @@ import { processJob } from './services/multiAiEngine.js';
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
 const SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
-const concurrencyRaw = Number.parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+const concurrencyRaw = Number.parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
 const MAX_CONCURRENCY = Number.isFinite(concurrencyRaw) ? Math.min(8, Math.max(1, concurrencyRaw)) : 2;
 if (SHARED_SECRET.length < 32 || /replace-with|your-/i.test(SHARED_SECRET)) throw new Error('WORKER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
 app.disable('x-powered-by');
