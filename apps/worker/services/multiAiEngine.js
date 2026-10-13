@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, 
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
-const MAX_ROUNDS = 2;
+const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function retryNotice(jobId, info) {
@@ -118,7 +118,7 @@ export async function processJob(jobId) {
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, delivery);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, correctedDelivery);
       delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
