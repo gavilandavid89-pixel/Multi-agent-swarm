@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 const runCheck = source => new Promise(resolve => {
   const child = spawn(process.execPath, ['--check', '--input-type=module'], { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -22,8 +23,16 @@ function extractFiles(delivery) {
 }
 
 export async function checkJavascriptSyntax(delivery) {
-  const files = extractFiles(delivery);
+  const sourceText = String(delivery || '');
+  const files = extractFiles(sourceText);
   const issues = [];
+  const declaredNames = [...sourceText.matchAll(/^(?:#{1,6})\\s+(?:Archivo|File|Ruta)\\s*:\\s*(.+)$/gim)]
+    .map(match => match[1].trim().replace(/[`"]/g, '').replace(/^\\.\\//, ''));
+  const seenNames = new Set();
+  for (const name of declaredNames) {
+    if (seenNames.has(name)) issues.push(`La ruta ${name} aparece más de una vez en la entrega; la integración sería ambigua.`);
+    seenNames.add(name);
+  }
   const jsFiles = [...files.entries()].filter(([name, file]) => /\.(?:js|mjs|cjs)$/i.test(name) || /^(?:javascript|js|mjs|cjs)$/.test(file.language));
   const blocks = [...String(delivery || '').matchAll(/```(?:javascript|js|mjs|cjs)\s*\n([\s\S]*?)```/gi)];
   const sources = jsFiles.length ? jsFiles.map(([name, file]) => ({ name, content: file.content })) : blocks.map((block, i) => ({ name: `bloque ${i + 1}`, content: block[1] }));
@@ -34,6 +43,25 @@ export async function checkJavascriptSyntax(delivery) {
   if (files.has('package.json')) {
     try { JSON.parse(files.get('package.json').content); }
     catch (error) { issues.push(`package.json: JSON inválido (${error.message})`); }
+  }
+  // Verificá imports relativos contra el inventario completo; la revisión de IA no puede reemplazar este control.
+  const knownFiles = new Set(files.keys());
+  const resolveLocalImport = (from, specifier) => {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
+    const candidates = [base, ...['.js', '.mjs', '.cjs', '.json', '.css', '.html'].map(ext => base.endsWith(ext) ? null : base + ext), ...['index.js', 'index.mjs', 'index.cjs'].map(index => path.posix.join(base, index))].filter(Boolean);
+    return candidates.some(candidate => knownFiles.has(candidate) || [...knownFiles].some(name => name.endsWith('/' + candidate)));
+  };
+  for (const [name, file] of files) {
+    if (!/\\.(?:js|mjs|cjs)$/i.test(name)) continue;
+    const imports = [
+      ...file.content.matchAll(/\\bfrom\\s*['"]((?:\\.\\.?\\/) [^'"]+)['"]/gx),
+      ...file.content.matchAll(/\\bimport\\s*['"]((?:\\.\\.?\\/)[^'"]+)['"]/g),
+      ...file.content.matchAll(/\\bimport\\s*\\(\\s*['"]((?:\\.\\.?\\/)[^'"]+)['"]\\s*\\)/g)
+    ];
+    for (const match of imports) {
+      const specifier = match[1].replace(/\\s/g, '');
+      if (!resolveLocalImport(name, specifier)) issues.push(`${name} importa ${specifier}, pero no se encontró ese archivo en la entrega.`);
+    }
   }
   for (const [name, file] of files) {
     if (/\.css$/i.test(name)) {
