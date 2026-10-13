@@ -1,3 +1,5 @@
+import { consultarGemini } from './geminiProvider.js';
+
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // Feature branch: bounded continuation support.
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -23,6 +25,7 @@ export function retryDelay(retry, retryAfter) {
   return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
+  if (process.env.GEMINI_API_KEY) return consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0; let formatRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
@@ -87,9 +90,9 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
-const reasoningModel = () => process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b';
-const codingModel = () => process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b';
-const validationModel = () => process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b';
+const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
+const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
+const validationModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b');
 function boundContext(value, maxChars, label) {
   const text = String(value ?? '');
   if (text.length <= maxChars) return text;
@@ -158,7 +161,7 @@ export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
 export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}) {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 5000 : 6000, onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
+    model: codingModel(), temperature: 0.15, maxTokens: process.env.GEMINI_API_KEY ? (repairing ? 50000 : 60000) : (repairing ? 5000 : 6000), onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
     messages: [
       sys('Desarrollador sénior', repairing
         ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'

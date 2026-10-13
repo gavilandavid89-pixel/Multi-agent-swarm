@@ -57,7 +57,10 @@ export async function replyToAgent(jobId, requestedAgent, message) {
       updateJob(jobId, { payload: { transcript } });
     }
   };
-  const model = agent === 'Validador' ? (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
+  const geminiEnabled = Boolean(process.env.GEMINI_API_KEY);
+  const model = agent === 'Validador'
+    ? (geminiEnabled ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b'))
+    : (geminiEnabled ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'));
   const response = await consultarModelo({
     model, temperature: agent === 'Validador' ? 0 : 0.2, maxTokens: 1800, onRetry,
     messages: [
