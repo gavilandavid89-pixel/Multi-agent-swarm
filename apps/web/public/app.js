@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null };
+const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000 };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -221,6 +221,9 @@ $('close-zip-preview').addEventListener('click', closeUploadedZipPreview);
 function renderTokenBudget(data) {
   const usage = data.tokenUsage || {};
   const total = Math.max(1, Number(data.tokenBudget) || 50000);
+  state.currentTokenBudget = total;
+  const extendButton = $('extend-task-budget');
+  if (extendButton) { extendButton.disabled = total >= 100000; extendButton.textContent = total >= 100000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 100000 - total).toLocaleString('es-AR')}`; }
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
   const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
@@ -334,9 +337,22 @@ $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
   $('job-submit-status').textContent = 'Enviando la orden al motor…';
-  try { const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective }) }); $('objective').value = ''; $('job-submit-status').textContent = 'Orden recibida. Abriendo la tarea…'; await showDetail(job.id); await refresh(); }
+  try { const tokenBudget = Number($('new-task-budget')?.value) || 50000; const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget }) }); $('objective').value = ''; $('job-submit-status').textContent = 'Orden recibida. Abriendo la tarea…'; await showDetail(job.id); await refresh(); }
   catch (error) { $('job-submit-status').textContent = `No se pudo iniciar: ${error.message}`; }
   finally { button.disabled = false; button.innerHTML = 'Iniciar comité <span>↗</span>'; }
+});
+$('extend-task-budget').addEventListener('click', async () => {
+  if (!state.currentDetailId) return;
+  const button = $('extend-task-budget');
+  const nextBudget = Math.min(100000, state.currentTokenBudget + 25000);
+  if (nextBudget <= state.currentTokenBudget) return;
+  button.disabled = true; button.textContent = 'Ampliando…';
+  try {
+    await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget: nextBudget }) });
+    $('token-budget-note').textContent = `Límite ampliado a ${nextBudget.toLocaleString('es-AR')} tokens. Si estaba pausada por presupuesto, se reanudará desde el último checkpoint.`;
+    await updateSelectedDetail(); await loadJobs();
+  } catch (error) { $('token-budget-note').textContent = `No se pudo ampliar el límite: ${error.message}`; }
+  finally { button.disabled = false; renderTokenBudget({ tokenBudget: state.currentTokenBudget }); }
 });
 $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
 $('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
