@@ -144,7 +144,7 @@ export function parsePreviewZip(input) {
     ];
     const scripts = files.filter(file => ['.js', '.mjs'].includes(extensionOf(file.path)));
     const entry = preferredEntrypoints.map(candidate => scripts.find(file => file.path.toLowerCase() === candidate))
-      .find(Boolean) || scripts.find(file => /(^|\\/)(index|main|game|app)\\.(mjs|js)$/i.test(file.path));
+      .find(Boolean) || scripts.find(file => /(^|\/)(index|main|game|app)\.(mjs|js)$/i.test(file.path));
     if (entry) {
       const entryRef = '../' + entry.path.split('/').map(encodeURIComponent).join('/');
       const entryDirectory = entry.path.includes('/') ? entry.path.split('/').slice(0, -1).join('/') : '';
@@ -162,7 +162,7 @@ export function parsePreviewZip(input) {
     }
   }
   files.forEach((file, index) => { file.index = index; });
-  pages.sort((a, b) => Number(/(^|\\/)index\\.html?$/i.test(b.path)) - Number(/(^|\\/)index\\.html?$/i.test(a.path)));
+  pages.sort((a, b) => Number(/(^|\/)index\.html?$/i.test(b.path)) - Number(/(^|\/)index\.html?$/i.test(a.path)));
   return { files, pages: pages.map(file => ({ index: file.index, path: file.path })), totalExpandedBytes: expandedTotal };
 }
 
