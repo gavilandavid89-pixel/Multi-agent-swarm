@@ -127,14 +127,15 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
     return { verdict: 'NEEDS_CHANGES', findings: ['La entrega es demasiado larga y no tiene encabezados ### Archivo: para dividirla sin perder contenido.'], summary: 'Auditoría de coherencia incompleta; no se aprobó contenido que no pudo inspeccionarse íntegramente.', raw: '' };
   }
   if (batches.length > 8) return { verdict: 'NEEDS_CHANGES', findings: ['La entrega excede ocho lotes de auditoría. Agrupá o dividí los módulos para revisar todos los archivos completos.'], summary: 'Auditoría de coherencia detenida por límite de cobertura.', raw: '' };
+  const manifestText = sections.map(section => section.split('\n', 1)[0].replace(/^#{1,6}\\s+/, '').trim()).join('\n');
   const results = [];
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
       model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
-        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. Usá el mapa para comprobar contratos con otros lotes. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
-        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nMAPA DE COHERENCIA:\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\nARCHIVOS COMPLETOS DEL LOTE:\n' + batches[i] }
+        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. Usá el mapa para comprobar contratos con otros lotes. El mensaje del usuario incluye el INVENTARIO COMPLETO de archivos de toda la entrega: un archivo que no está en este lote puede existir en otro lote. PROHIBIDO afirmar que falta un archivo si figura en ese inventario. No declares incompatibilidades entre archivos que no puedas demostrar con el lote actual o el mapa compartido. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
+        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nMAPA DE COHERENCIA:\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\nINVENTARIO COMPLETO DE ARCHIVOS DE LA ENTREGA (pueden estar distribuidos en otros lotes):\n' + manifestText + '\nARCHIVOS COMPLETOS DEL LOTE:\n' + batches[i] }
       ]
     });
     results.push(parseValidationResponse(raw));
