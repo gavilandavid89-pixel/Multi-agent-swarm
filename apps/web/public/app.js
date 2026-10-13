@@ -223,6 +223,25 @@ $('copy-detail').addEventListener('click', async () => {
     $('copy-status').textContent = 'Diagnóstico copiado. No incluye claves secretas.'; button.textContent = 'Copiado ✓';
   } catch { $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.'; }
 });
+$('agent-reply-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!state.currentDetailId) { $('agent-reply-status').textContent = 'Primero abrí una tarea del historial.'; return; }
+  const message = $('agent-reply-message').value.trim();
+  if (!message) return;
+  const button = $('agent-reply-submit');
+  button.disabled = true; button.textContent = 'Enviando…';
+  $('agent-reply-status').textContent = 'Enviando el mensaje al agente de esta tarea…';
+  try {
+    const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: $('agent-reply-target').value, message }) });
+    $('agent-reply-message').value = '';
+    $('agent-reply-status').textContent = `Respuesta de ${result.agent || 'agente'} recibida en esta tarea.`;
+    await updateSelectedDetail();
+  } catch (error) {
+    $('agent-reply-status').textContent = `No se pudo enviar: ${error.message}`;
+  } finally {
+    button.disabled = false; button.textContent = 'Enviar al agente ↗';
+  }
+});
 $('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
