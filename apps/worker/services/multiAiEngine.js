@@ -1,4 +1,4 @@
-import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, agenteValidador } from './aiProviders.js';
+import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
@@ -50,7 +50,7 @@ function retryNotice(jobId, info) {
 }
 function assertTaskTokenBudget(jobId) {
   const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 24000;
+  const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
   const current = getPayload(jobId);
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
@@ -79,7 +79,7 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
-  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', delivery = '' } = payload;
+  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '' } = payload;
   try {
     if (!proposal) {
       startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
@@ -99,11 +99,17 @@ export async function processJob(jobId) {
       strategy = await agenteArbitro(objective, proposal, critique, onRetry);
       checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
     }
-    if (!delivery) {
-      startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega a partir de la estrategia acordada.');
+    if (!coherence) {
+      startAgent(jobId, 'Mapa de coherencia', 30, 'Coordinador de coherencia', 'Estoy definiendo los contratos compartidos, dependencias y reglas que todos los agentes deberán respetar.');
       assertTaskTokenBudget(jobId);
-      delivery = await agenteDesarrollador(objective, strategy, '', onRetry);
-      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, delivery });
+      coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry);
+      checkpoint(jobId, 'Mapa de coherencia', 32, 'Coordinador de coherencia', coherence, { proposal, critique, strategy, coherence });
+    }
+    if (!delivery) {
+      startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega respetando el mapa compartido de coherencia.');
+      assertTaskTokenBudget(jobId);
+      delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence);
+      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery });
       saveArtifacts(jobId, delivery);
     }
     payload = getPayload(jobId)?.payload || {};
@@ -135,7 +141,7 @@ export async function processJob(jobId) {
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
-        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
+        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
@@ -144,14 +150,14 @@ export async function processJob(jobId) {
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
-      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
+      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
     }
     const finalPayload = getPayload(jobId)?.payload || {};
-    updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
+    updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
