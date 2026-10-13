@@ -25,9 +25,11 @@ export function retryDelay(retry, retryAfter) {
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
-  let retry = 0; let emptyRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
-  const safeMaxTokens = Math.min(Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200), Math.max(256, Number(maxTokens) || 1200));
+  const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
+  const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
+  let safeMaxTokens = Math.min(maxSafeOutputTokens, requestedMaxTokens);
   while (true) {
     let response;
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
@@ -63,6 +65,18 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       return accumulatedContent;
     }
     const body = await response.text().catch(() => '');
+    const incompleteJsonGeneration = response.status === 400 && /json_validate_failed/i.test(body) && /max completion tokens reached before generating a valid document/i.test(body);
+    if (incompleteJsonGeneration && responseFormat && formatRetries < 2 && safeMaxTokens < maxSafeOutputTokens) {
+      formatRetries++;
+      const previousMaxTokens = safeMaxTokens;
+      safeMaxTokens = Math.min(maxSafeOutputTokens, Math.max(safeMaxTokens + 512, Math.ceil(safeMaxTokens * 1.75)));
+      const wait = 250;
+      const reason = `JSON incompleto por límite de salida; se amplía el límite de ${previousMaxTokens} a ${safeMaxTokens} tokens`;
+      onRetry({ retry: formatRetries, wait, reason });
+      console.warn('[worker][provider_json_budget_retry]', JSON.stringify({ model, retry: formatRetries, previousMaxTokens, maxCompletionTokens: safeMaxTokens }));
+      await sleep(wait);
+      continue;
+    }
     if (retryableStatus(response.status)) {
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after')); const reason = `HTTP ${response.status}`;
       onRetry({ retry, wait, reason });
