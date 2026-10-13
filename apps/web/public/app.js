@@ -161,7 +161,17 @@ $('show-history').addEventListener('click', async () => {
   $('show-history').innerHTML = state.historyShown ? 'Ocultar registros <span>↑</span>' : 'Ver registros <span>→</span>';
   if (!state.historyShown) return;
   try {
-    const data = { jobs: state.jobs }; const list = $('history-list');
+    const allJobs = [];
+    let offset = 0;
+    let total = 0;
+    do {
+      const page = await api(`/api/jobs?limit=100&offset=${offset}&status=all`);
+      allJobs.push(...(page.jobs || []));
+      total = page.total || 0;
+      offset += (page.jobs || []).length;
+      if (!(page.jobs || []).length) break;
+    } while (offset < total);
+    const data = { jobs: allJobs }; const list = $('history-list');
     list.innerHTML = (data.jobs || []).map(job => {
       const active = ['queued','running'].includes(job.status);
       const done = job.status === 'completed';
