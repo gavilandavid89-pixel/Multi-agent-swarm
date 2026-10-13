@@ -25,7 +25,7 @@ export function retryDelay(retry, retryAfter) {
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
-  let retry = 0; let emptyRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const safeMaxTokens = Math.min(Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200), Math.max(256, Number(maxTokens) || 1200));
   while (true) {
