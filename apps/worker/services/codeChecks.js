@@ -26,8 +26,8 @@ export async function checkJavascriptSyntax(delivery) {
   const sourceText = String(delivery || '');
   const files = extractFiles(sourceText);
   const issues = [];
-  const declaredNames = [...sourceText.matchAll(/^(?:#{1,6})\\s+(?:Archivo|File|Ruta)\\s*:\\s*(.+)$/gim)]
-    .map(match => match[1].trim().replace(/[`"]/g, '').replace(/^\\.\\//, ''));
+  const declaredNames = [...sourceText.matchAll(/^(?:#{1,6})\s+(?:Archivo|File|Ruta)\s*:\s*(.+)$/gim)]
+    .map(match => match[1].trim().replace(/[`"]/g, '').replace(/^\.\//, ''));
   const seenNames = new Set();
   for (const name of declaredNames) {
     if (seenNames.has(name)) issues.push(`La ruta ${name} aparece más de una vez en la entrega; la integración sería ambigua.`);
