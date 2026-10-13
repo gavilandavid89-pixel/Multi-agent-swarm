@@ -80,6 +80,17 @@ export async function agenteCoordinador(objetivo, estrategia, propuesta, critica
     ]
   });
 }
+export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry) {
+  const raw = await consultarModelo({
+    model: validationModel(), temperature: 0, maxTokens: 1400, reasoningEffort: 'low',
+    responseFormat: { type: 'json_object' }, onRetry,
+    messages: [
+      sys('Coordinador de coherencia · auditor', 'Auditá el conjunto completo de archivos contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
+      { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 1000, 'objetivo') + '\n\nMAPA DE COHERENCIA ACORDADO:\n' + boundContext(mapaCoherencia, 3000, 'mapa de coherencia') + '\n\nENTREGA COMPLETA A AUDITAR:\n' + boundContext(entrega, 10000, 'entrega') }
+    ]
+  });
+  return parseValidationResponse(raw);
+}
 export async function agenteArquitecto(objetivo, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Diseñá una solución modular, concreta y mantenible. Enumerá supuestos, componentes, riesgos y criterios de aceptación.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
 }
