@@ -1,5 +1,5 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob } from './store.js';
+import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 const configuredRounds = Number.parseInt(process.env.MAX_CORRECTION_ROUNDS || '3', 10);
 const MAX_ROUNDS = Number.isFinite(configuredRounds) ? Math.min(10, Math.max(1, configuredRounds)) : 3;
@@ -53,6 +53,7 @@ export async function processJob(jobId) {
       startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega a partir de la estrategia acordada.');
       delivery = await agenteDesarrollador(objective, strategy, '', onRetry);
       checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, delivery });
+      saveArtifacts(jobId, delivery);
     }
     payload = getPayload(jobId)?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
@@ -91,6 +92,7 @@ export async function processJob(jobId) {
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
+      saveArtifacts(jobId, correctedDelivery);
       delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
     }
     const finalPayload = getPayload(jobId)?.payload || {};
