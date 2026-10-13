@@ -301,7 +301,7 @@ app.get('/preview/:token/:index', async (req, res) => {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
-      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src ${previewOrigin} data: blob:; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src ${previewOrigin} blob:; manifest-src 'none'; base-uri 'none'; navigate-to ${previewOrigin}; frame-ancestors 'self'`
+      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src ${previewOrigin} data: blob:; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src ${previewOrigin} blob:; manifest-src 'none'; base-uri ${previewOrigin}; navigate-to ${previewOrigin}; frame-ancestors 'self'`
     });
     res.send(html);
   } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo preparar la vista previa.'); }
