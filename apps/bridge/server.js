@@ -2,6 +2,7 @@ import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
 import { createZip } from './services/zipBundle.js';
+import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -207,14 +208,44 @@ function rewritePreviewHtml(html, htmlPath, token) {
   );
 }
 async function previewFile(session, index) {
+  if (Array.isArray(session.files)) {
+    const item = session.files.find(file => Number(file.index) === Number(index));
+    if (!item) { const error = new Error('No existe ese archivo de la vista previa.'); error.status = 404; throw error; }
+    return { item, file: { path: item.path, content: item.content }, files: session.files };
+  }
   const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
   const files = Array.isArray(listing.files) ? listing.files : [];
   const item = files.find(file => Number(file.index) === Number(index));
   if (!item) { const error = new Error('No existe ese archivo de la vista previa.'); error.status = 404; throw error; }
   const result = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files/${encodeURIComponent(item.index)}`);
-  if (!result.file || typeof result.file.content !== 'string') { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
+  if (!result.file || (typeof result.file.content !== 'string' && !Buffer.isBuffer(result.file.content))) { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
   return { item, file: result.file, files };
 }
+app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '8mb' }), (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
+  try {
+    const parsed = parsePreviewZip(req.body);
+    prunePreviewSessions();
+    const uploadedTokens = [...previewSessions.entries()].filter(([, session]) => session.uploaded);
+    while (uploadedTokens.length >= 4) {
+      const [oldestToken] = uploadedTokens.shift();
+      previewSessions.delete(oldestToken);
+    }
+    const token = randomBytes(24).toString('base64url');
+    previewSessions.set(token, { files: parsed.files, uploaded: true, expiresAt: Date.now() + PREVIEW_TTL_MS });
+    const first = parsed.pages[0];
+    res.set('Cache-Control', 'no-store').json({
+      url: `/preview/${token}/${first.index}`,
+      pages: parsed.pages,
+      filesCount: parsed.files.length,
+      expandedBytes: parsed.totalExpandedBytes,
+      expiresInSeconds: Math.floor(PREVIEW_TTL_MS / 1000),
+      skippedFiles: 'Los ejecutables, instaladores y formatos no compatibles se excluyen.'
+    });
+  } catch (error) {
+    res.status(422).json({ error: String(error?.message || 'No se pudo leer el ZIP.').slice(0, 500) });
+  }
+});
 app.post('/api/jobs/:id/preview-session', async (req, res) => {
   try {
     const index = Number(req.body?.index);
@@ -234,6 +265,12 @@ app.get('/preview/:token/assets/*', async (req, res) => {
   try {
     const assetPath = safePreviewPath(req.params[0]);
     if (!assetPath) return res.status(400).type('text/plain').send('Ruta de recurso inválida.');
+    if (Array.isArray(session.files)) {
+      const item = session.files.find(file => file.path === assetPath);
+      if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
+      res.set({ 'Content-Type': item.contentType || previewMimeType(item.path), 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
+      return res.send(item.content);
+    }
     const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
     const item = (Array.isArray(listing.files) ? listing.files : []).find(file => file.path === assetPath);
     if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
