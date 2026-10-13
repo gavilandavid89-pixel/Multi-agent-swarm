@@ -80,7 +80,17 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
-  const savePartial = info => { const current = getPayload(jobId); if (current && typeof info?.content === 'string') updateJob(jobId, { payload: { partialDelivery: info.content, partialOutputAt: new Date().toISOString() } }); };
+  const initialPartialDelivery = String(initial.payload.partialDelivery || '');
+  const savePartial = info => {
+    const current = getPayload(jobId);
+    if (!current || typeof info?.content !== 'string') return;
+    const fresh = info.content;
+    const hasFileHeaders = /^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:/im.test(fresh);
+    const preserved = initialPartialDelivery
+      ? (hasFileHeaders ? mergeDelivery(initialPartialDelivery, fresh) : `${initialPartialDelivery}\\n\\n${fresh}`)
+      : fresh;
+    updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
+  };
   const canContinue = () => { const record = getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
