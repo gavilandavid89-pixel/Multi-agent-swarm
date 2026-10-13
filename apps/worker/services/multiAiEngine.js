@@ -1,4 +1,4 @@
-import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteDesarrollador, agenteValidador } from './aiProviders.js';
+import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
@@ -119,9 +119,21 @@ export async function processJob(jobId) {
       const saved = payload.validationRound === round && validation && syntax;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
       if (!saved) {
-        startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress, 'Validador', 'Estoy comprobando la entrega y buscando defectos antes de aprobarla.');
+        startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
+        assertTaskTokenBudget(jobId);
+        const coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry);
+        checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, delivery, validation: null, syntax: null });
+        startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Estoy haciendo una revisión independiente y una comprobación determinista.');
         assertTaskTokenBudget(jobId);
         validation = await agenteValidador(objective, strategy, delivery, onRetry);
+        if (coherenceReview.verdict !== 'APPROVED') {
+          validation = {
+            ...validation,
+            verdict: 'NEEDS_CHANGES',
+            findings: [...(coherenceReview.findings || []).map(finding => 'Coherencia entre archivos: ' + finding), ...(validation.findings || [])].slice(0, 30),
+            summary: 'El coordinador detectó posibles incompatibilidades entre archivos. ' + String(validation.summary || '').slice(0, 3500)
+          };
+        }
         syntax = await checkJavascriptSyntax(delivery);
         const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
@@ -141,7 +153,7 @@ export async function processJob(jobId) {
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
-        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
+        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: getPayload(jobId)?.payload?.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
