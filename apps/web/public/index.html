@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=diagnostic-twobatch-2">
+  <link rel="stylesheet" href="/styles.css?v=diagnostic-agent-chat-3">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -36,7 +36,7 @@
         <div class="task-status"><div><strong id="detail-stage">Preparando tarea…</strong><span id="detail-status" class="status running">En curso</span></div><span id="detail-progress-label" class="muted tiny">Esperando actividad</span></div>
         <div id="detail-progress" class="progress-track" aria-hidden="true"><span id="detail-progress-fill"></span></div>
         <p id="detail-hint" class="muted tiny">Los mensajes se actualizan automáticamente. El porcentaje solo cambia al guardarse una etapa; durante la respuesta del proveedor verás actividad en curso.</p>
-        <details class="conversation-disclosure"><summary>Conversación completa de agentes (opcional)</summary><div id="conversation" class="conversation" aria-live="polite"><div class="empty-state"><span class="empty-glyph">✳</span><p>Preparando el comité…</p></div></div></details>
+        <section class="agent-reply-panel"><p class="panel-kicker">RESPUESTA DIRECTA</p><h3>Hablar con un agente de esta tarea</h3><p class="muted tiny">Esto responde en la tarea abierta; no crea otra tarea ni consume el campo general.</p><form id="agent-reply-form"><label for="agent-reply-target" class="sr-only">Agente destinatario</label><select id="agent-reply-target" class="history-filter"><option value="Desarrollador">Desarrollador · corregir código</option><option value="Validador">Validador · revisar hallazgos</option><option value="Arquitecto">Arquitecto · aclarar diseño</option><option value="Escéptico">Escéptico · buscar fallos</option><option value="Árbitro">Árbitro · decidir siguiente paso</option></select><label for="agent-reply-message" class="sr-only">Mensaje para el agente</label><textarea id="agent-reply-message" rows="3" maxlength="6000" placeholder="Ej.: Corregí los archivos truncados, verificá la sintaxis y explicá qué pruebas ejecutaste…" required></textarea><div class="composer-footer"><span id="agent-reply-status" class="muted tiny" role="status" aria-live="polite">La respuesta aparecerá en la conversación de esta misma tarea.</span><button id="agent-reply-submit" class="button button-primary" type="submit">Enviar al agente ↗</button></div></form></section><details class="conversation-disclosure"><summary>Conversación completa de agentes (opcional)</summary><div id="conversation" class="conversation" aria-live="polite"><div class="empty-state"><span class="empty-glyph">✳</span><p>Preparando el comité…</p></div></div></details>
         <section id="artifacts-panel" class="artifacts-panel hidden"><div class="section-head"><div><p class="panel-kicker">ESPACIO DE ARCHIVOS</p><h3>Archivos creados</h3></div><span id="artifacts-count" class="muted tiny">0 archivos</span></div><p class="muted tiny">Los archivos detectados en la entrega y en las correcciones aparecen aquí para descargarlos.</p><div id="artifacts-list" class="artifacts-list"></div></section>
         <details class="diagnostic" open><summary>Diagnóstico técnico compacto · copiar para soporte</summary><p id="copy-status" class="muted tiny" role="status" aria-live="polite"></p><pre id="detail-content"></pre></details>
       </section>

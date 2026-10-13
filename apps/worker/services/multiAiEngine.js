@@ -2,9 +2,34 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, 
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
-const MAX_ROUNDS = 2;
+const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
+function selectRepairContext(delivery, findings) {
+  const source = String(delivery || '');
+  const parts = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
+  const names = String(findings || '').match(/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.(?:js|mjs|cjs|css|html?|json|webmanifest|ts|tsx|jsx|md)/g) || [];
+  const selected = parts.filter(part => names.some(name => part.split('\n', 1)[0].includes(name)));
+  return selected.length ? selected.join('\n\n') : source;
+}
+function mergeDelivery(previous, correction) {
+  const split = value => {
+    const source = String(value || '');
+    const parts = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
+    const files = new Map(); let preamble = '';
+    for (const part of parts) {
+      const firstLine = part.split('\n', 1)[0].trim();
+      const match = firstLine.match(/^#{1,6}\s+(?:Archivo|File|Ruta)\s*:\s*(.+)$/i);
+      if (match) files.set(match[1].trim().replace(/[\x60"]/g, ''), part.trim());
+      else if (!preamble) preamble = part.trim();
+    }
+    return { preamble, files };
+  };
+  const base = split(previous); const patch = split(correction);
+  if (!patch.files.size) return String(correction || previous || '');
+  for (const [name, body] of patch.files) base.files.set(name, body);
+  return [base.preamble || patch.preamble, ...base.files.values()].filter(Boolean).join('\n\n');
+}
 function retryNotice(jobId, info) {
   const current = getPayload(jobId); if (!current) return;
   if (info.usage) {
@@ -118,10 +143,12 @@ export async function processJob(jobId) {
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
-      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
-      saveArtifacts(jobId, correctedDelivery);
-      delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
+      const repairContext = selectRepairContext(delivery, findings.join('\n'));
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext);
+      const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
+      checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
+      saveArtifacts(jobId, mergedDelivery);
+      delivery = mergedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
     }
     const finalPayload = getPayload(jobId)?.payload || {};
     updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
