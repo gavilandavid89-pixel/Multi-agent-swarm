@@ -80,25 +80,59 @@ export async function agenteEsceptico(objetivo, propuesta, onRetry) {
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
   return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
-export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry) {
-  return consultarModelo({ model: codingModel(), temperature: 0.2, maxTokens: 3000, onRetry, messages: [sys('Desarrollador sénior', 'Producí una solución utilizable. Si el objetivo requiere archivos, cada archivo debe aparecer por separado con un encabezado exacto `### Archivo: ruta/archivo.ext` y debajo un bloque de código con su lenguaje; incluí el contenido completo, no fragmentos ni pseudocódigo. Usá rutas relativas seguras, sin `..`, y no mezcles archivos en un mismo bloque. Si recibís errores o hallazgos de validación, corregilos directamente y explicá qué cambiaste. No afirmes que pasó pruebas si no hay resultados reales.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nESTRATEGIA APROBADA:\n${boundContext(estrategia, 2800, 'estrategia')}\n\n${errores ? `ERRORES QUE DEBÉS CORREGIR:\n${boundContext(errores, 1200, 'errores')}` : 'Generá la primera versión.'}` }] });
-}
-export function parseValidationResponse(rawValue) {
-  const raw = String(rawValue ?? ''); const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return { verdict: 'NEEDS_CHANGES', findings: ['El validador no devolvió JSON válido.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) };
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!['APPROVED', 'NEEDS_CHANGES'].includes(parsed.verdict) || !Array.isArray(parsed.findings) || typeof parsed.summary !== 'string') throw new Error('esquema inválido');
-    return { verdict: parsed.verdict, findings: parsed.findings.slice(0, 30).map(value => String(value).slice(0, 2000)), summary: parsed.summary.slice(0, 5000), raw: raw.slice(0, 12000) };
-  } catch { return { verdict: 'NEEDS_CHANGES', findings: ['El validador devolvió un formato inválido; no se aprueba automáticamente.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) }; }
+export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '') {
+  const repairing = Boolean(errores && String(errores).trim());
+  return consultarModelo({
+    model: codingModel(), temperature: 0.15, maxTokens: repairing ? 2200 : 3000, onRetry,
+    messages: [
+      sys('Desarrollador sénior', repairing
+        ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
+        : 'Producí una solución utilizable. Si el objetivo requiere archivos, cada archivo debe aparecer por separado con un encabezado exacto ### Archivo: ruta/archivo.ext y debajo un bloque de código con su lenguaje; incluí el contenido completo, no fragmentos ni pseudocódigo. Usá rutas relativas seguras, sin .., y no mezcles archivos en un mismo bloque. No afirmes que pasó pruebas si no hay resultados reales.'),
+      { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 1200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2200, 'estrategia') + '\n\n' +
+        (repairing ? 'HALLAZGOS QUE DEBÉS CORREGIR:\n' + boundContext(errores, 1600, 'hallazgos') + '\n\nENTREGA ACTUAL; conservá todo lo correcto y reemplazá solo los archivos afectados:\n' + boundContext(entregaActual, 6200, 'entrega actual') : 'Generá la primera versión completa.') }
+    ]
+  });
 }
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
-  const boundedDelivery = boundContext(entrega, 8500, 'entrega');
-  const raw = await consultarModelo({ model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low', responseFormat: { type: 'json_object' }, onRetry, messages: [sys('Validador independiente', 'Auditá la entrega y devolvé ÚNICAMENTE JSON válido con este esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Usá APPROVED solo si no encontrás defectos relevantes. No incluyas APPROVED en summary/findings si el veredicto es NEEDS_CHANGES. Si la entrega fue recortada, evaluá el extracto disponible y aclaralo en summary; no afirmes haber revisado partes no incluidas.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 900, 'objetivo')}\n\nESTRATEGIA:\n${boundContext(estrategia, 1400, 'estrategia')}\n\nENTREGA A REVISAR (el chequeo determinista se ejecuta sobre el contenido completo):\n${boundedDelivery}` }] });
-  const parsed = parseValidationResponse(raw);
-  if (String(entrega ?? '').length > 8500) {
-    const note = 'La entrega supera el tamaño revisable en una sola llamada; se comprobó sintaxis por separado, pero la revisión de IA no cubrió el contenido completo.';
-    return { ...parsed, verdict: 'NEEDS_CHANGES', findings: [...parsed.findings, note].slice(0, 30), summary: `${parsed.summary} La entrega excedió el límite de revisión completa.`.slice(0, 5000) };
+  const source = String(entrega ?? '');
+  const maxChars = 6500;
+  const sections = source.split(/(?=^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:)/gim).filter(part => part.trim());
+  const batches = [];
+  if (source.length <= maxChars) batches.push(source);
+  else if (sections.length > 1) {
+    let current = '';
+    for (const section of sections) {
+      if (section.length > maxChars) {
+        if (current) { batches.push(current); current = ''; }
+        batches.push(section);
+      } else if (current && current.length + section.length > maxChars) {
+        batches.push(current); current = section;
+      } else current += (current ? '\\n\\n' : '') + section;
+    }
+    if (current) batches.push(current);
+  } else {
+    return { verdict: 'NEEDS_CHANGES', findings: ['La entrega excede el tamaño revisable y no se puede dividir con seguridad por encabezados de archivo. Separá cada archivo con un encabezado ### Archivo: ruta y volvé a validar.'], summary: 'Revisión incompleta: no se aprueba una entrega que no pudo inspeccionarse por completo.', raw: '' };
   }
-  return parsed;
+  if (batches.length > 8) return { verdict: 'NEEDS_CHANGES', findings: ['La entrega contiene más de ocho lotes; dividila en grupos más pequeños para garantizar una revisión completa.'], summary: 'La revisión se detuvo por un límite explícito de seguridad, no por falta de criterio del agente.', raw: '' };
+  const results = [];
+  for (let i = 0; i < batches.length; i++) {
+    const raw = await consultarModelo({
+      model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
+      responseFormat: { type: 'json_object' }, onRetry,
+      messages: [
+        sys('Validador independiente', 'Auditá SOLO los archivos del lote actual. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento, errores lógicos y referencias a archivos faltantes. No afirmes haber revisado otros lotes.'),
+        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\\nOBJETIVO:\\n' + boundContext(objetivo, 700, 'objetivo') + '\\nESTRATEGIA:\\n' + boundContext(estrategia, 1000, 'estrategia') + '\\nARCHIVOS:\\n' + batches[i] }
+      ]
+    });
+    results.push(parseValidationResponse(raw));
+  }
+  const findings = [];
+  results.forEach((result, index) => { if (result.verdict !== 'APPROVED') result.findings.forEach(finding => findings.push('Lote ' + (index + 1) + ': ' + finding)); });
+  return {
+    verdict: results.every(result => result.verdict === 'APPROVED') ? 'APPROVED' : 'NEEDS_CHANGES',
+    findings: findings.slice(0, 30),
+    summary: results.map((result, index) => 'Lote ' + (index + 1) + '/' + results.length + ': ' + result.summary).join('\\n').slice(0, 5000),
+    raw: results.map(result => result.raw || '').join('\\n').slice(0, 12000),
+    batchesReviewed: results.length
+  };
 }
