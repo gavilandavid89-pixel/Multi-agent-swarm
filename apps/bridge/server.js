@@ -183,8 +183,8 @@ function resolvePreviewReference(htmlPath, reference) {
 }
 function rewritePreviewHtml(html, htmlPath, token) {
   const prefix = `/preview/${encodeURIComponent(token)}/assets/`;
-  return String(html).replace(/<(script|link|img|source|video|audio|track)\\b[^>]*>/gi, tag =>
-    tag.replace(/\\b(src|href|poster)\\s*=\\s*(["'])(.*?)\\2/gi, (whole, attribute, quote, value) => {
+  return String(html).replace(/<(script|link|img|source|video|audio|track)\b[^>]*>/gi, tag =>
+    tag.replace(/\b(src|href|poster)\s*=\s*(["'])(.*?)\2/gi, (whole, attribute, quote, value) => {
       const resolved = resolvePreviewReference(htmlPath, value);
       if (!resolved) return whole;
       return `${attribute}=${quote}${prefix}${resolved.split('/').map(encodeURIComponent).join('/')}${quote}`;
