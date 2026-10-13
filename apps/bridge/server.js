@@ -235,13 +235,14 @@ app.get('/preview/:token/:index', async (req, res) => {
     const result = await previewFile(session, req.params.index);
     if (!String(result.item.path || '').toLowerCase().endsWith('.html')) return res.status(400).type('text/plain').send('Solo se pueden previsualizar archivos HTML.');
     const html = rewritePreviewHtml(result.file.content, result.item.path, req.params.token);
+    const previewOrigin = `${req.protocol}://${req.get('host')}`;
     res.set({
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Disposition': 'inline',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
-      'Content-Security-Policy': "sandbox allow-scripts; default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'none'; form-action 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline' data: blob:; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src 'none'; form-action 'none'; object-src 'none'; base-uri 'none'; navigate-to ${previewOrigin}; frame-ancestors 'self'`
     });
     res.send(html);
   } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo preparar la vista previa.'); }
