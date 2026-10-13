@@ -202,16 +202,16 @@ function rewritePreviewHtml(html, htmlPath, token) {
   const prefix = `/preview/${tokenPart}/assets/`;
   const directory = String(htmlPath).includes('/') ? String(htmlPath).split('/').slice(0, -1).map(encodeURIComponent).join('/') + '/' : '';
   const baseTag = `<base href="${prefix}${directory}">`;
-  let output = String(html).replace(/<base\\b[^>]*>/gi, '');
-  output = output.replace(/<(script|link|img|source|video|audio|track)\\b[^>]*>/gi, tag =>
-    tag.replace(/\\b(src|href|poster)\\s*=\\s*(["'])(.*?)\\2/gi, (whole, attribute, quote, value) => {
+  let output = String(html).replace(/<base\b[^>]*>/gi, '');
+  output = output.replace(/<(script|link|img|source|video|audio|track)\b[^>]*>/gi, tag =>
+    tag.replace(/\b(src|href|poster)\s*=\s*(["'])(.*?)\2/gi, (whole, attribute, quote, value) => {
       const resolved = resolvePreviewReference(htmlPath, value);
       if (!resolved) return whole;
       return `${attribute}=${quote}${prefix}${resolved.split('/').map(encodeURIComponent).join('/')}${quote}`;
     })
   );
-  if (/<head\\b[^>]*>/i.test(output)) return output.replace(/<head\\b[^>]*>/i, match => match + baseTag);
-  if (/<html\\b[^>]*>/i.test(output)) return output.replace(/<html\\b[^>]*>/i, match => match + '<head>' + baseTag + '</head>');
+  if (/<head\b[^>]*>/i.test(output)) return output.replace(/<head\b[^>]*>/i, match => match + baseTag);
+  if (/<html\b[^>]*>/i.test(output)) return output.replace(/<html\b[^>]*>/i, match => match + '<head>' + baseTag + '</head>');
   return baseTag + output;
 }
 async function previewFile(session, index) {
