@@ -44,10 +44,29 @@ app.post('/internal/jobs', (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
-  try { const job = createJob(objective); enqueue(job.id); res.status(202).json(job); }
+  const requestedBudget = Number(req.body?.tokenBudget);
+  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
+  try { const job = createJob(objective, tokenBudget); enqueue(job.id); res.status(202).json(job); }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', (req, res) => { const job = getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); });
+app.post('/internal/jobs/:id/budget', (req, res) => {
+  const record = getPayload(req.params.id);
+  if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+  const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
+  const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000;
+  const currentBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || fallback));
+  const requested = Number(req.body?.tokenBudget);
+  if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
+  const nextBudget = Math.min(100000, Math.max(4000, Math.round(requested / 1000) * 1000));
+  if (nextBudget <= currentBudget) return res.status(400).json({ error: 'El nuevo límite debe superar el límite actual.' });
+  updateJob(req.params.id, { payload: { tokenBudget: nextBudget } });
+  if (record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '')) {
+    updateJob(req.params.id, { status: 'queued', stage: 'En cola para reanudar con más tokens', progress: Math.min(record.publicJob.progress, 90), error: null });
+    enqueue(req.params.id);
+  }
+  res.json({ tokenBudget: nextBudget });
+});
 app.post('/internal/jobs/:id/retry', (req, res) => {
   const record = getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
@@ -78,7 +97,8 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
 app.get('/internal/jobs/:id/history', (req, res) => {
   const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   const rawBudget = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const tokenBudget = Number.isFinite(rawBudget) ? Math.min(100000, Math.max(4000, rawBudget)) : 50000;
+  const defaultBudget = Number.isFinite(rawBudget) ? Math.min(100000, Math.max(4000, rawBudget)) : 50000;
+  const tokenBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
   const tokenUsage = record.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
   const tokensUsed = Math.max(0, Number(tokenUsage.totalTokens) || 0);
   res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, artifacts: listArtifacts(req.params.id) });

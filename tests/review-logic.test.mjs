@@ -14,3 +14,25 @@ test('una entrega sin bloques JavaScript se etiqueta como revisión solo de IA',
 test('el cliente de Groq procesa una respuesta exitosa sin usar credenciales reales', async () => { const { consultarModelo } = await import('../apps/worker/services/aiProviders.js'); const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch; process.env.GROQ_API_KEY = 'test-key-not-real'; let request; globalThis.fetch = async (url, options) => { request = { url, options }; return new Response(JSON.stringify({ choices: [{ message: { content: 'respuesta simulada' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }); }; try { const result = await consultarModelo({ model: 'test-model', messages: [{ role: 'user', content: 'test' }] }); assert.equal(result, 'respuesta simulada'); assert.match(request.url, /api\.groq\.com\/openai\/v1\/chat\/completions$/); assert.equal(request.options.headers.authorization, 'Bearer test-key-not-real'); } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; } });
 test('el cliente de Groq reintenta HTTP 429 y luego acepta el resultado', async () => { const { consultarModelo } = await import('../apps/worker/services/aiProviders.js'); const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch; const previousBase = process.env.RETRY_BASE_MS; process.env.GROQ_API_KEY = 'test-key-not-real'; process.env.RETRY_BASE_MS = '250'; let calls = 0; const retries = []; globalThis.fetch = async () => { calls += 1; if (calls === 1) return new Response('rate limited', { status: 429, headers: { 'retry-after': '0' } }); return new Response(JSON.stringify({ choices: [{ message: { content: 'recuperado' } }] }), { status: 200, headers: { 'content-type': 'application/json' } }); }; try { const result = await consultarModelo({ model: 'test-model', messages: [], onRetry: info => retries.push(info) }); assert.equal(result, 'recuperado'); assert.equal(calls, 2); assert.equal(retries.filter(info => !info.usage).length, 1); assert.match(retries[0].reason, /HTTP 429/); } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; if (previousBase === undefined) delete process.env.RETRY_BASE_MS; else process.env.RETRY_BASE_MS = previousBase; } });
 test('el cliente de Groq no reintenta errores permanentes de autenticación', async () => { const { consultarModelo } = await import('../apps/worker/services/aiProviders.js'); const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch; process.env.GROQ_API_KEY = 'test-key-not-real'; let calls = 0; globalThis.fetch = async () => { calls += 1; return new Response('unauthorized', { status: 401 }); }; try { await assert.rejects(consultarModelo({ model: 'test-model', messages: [] }), /Error permanente de Groq \(401/); assert.equal(calls, 1); } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; } });
+
+
+test('el cliente continúa una respuesta cortada y registra cada llamada', async () => {
+  const { consultarModelo } = await import('../apps/worker/services/aiProviders.js');
+  const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch;
+  process.env.GROQ_API_KEY = 'test-key-not-real';
+  const requests = []; let calls = 0; const usage = [];
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body)); calls += 1;
+    const content = calls === 1 ? 'parte 1' : ' parte 2';
+    const finish_reason = calls === 1 ? 'length' : 'stop';
+    return new Response(JSON.stringify({ choices: [{ finish_reason, message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await consultarModelo({ model: 'test-model', messages: [{ role: 'user', content: 'generá' }], continueOnLength: true, onRetry: info => { if (info.usage) usage.push(info); } });
+    assert.equal(result, 'parte 1 parte 2');
+    assert.equal(calls, 2);
+    assert.equal(requests[1].messages.at(-2).role, 'assistant');
+    assert.match(requests[1].messages.at(-1).content, /Continuá/);
+    assert.equal(usage.length, 2);
+  } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; }
+});

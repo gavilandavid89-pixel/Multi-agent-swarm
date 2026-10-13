@@ -50,11 +50,12 @@ function retryNotice(jobId, info) {
 }
 function assertTaskTokenBudget(jobId) {
   const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
+  const defaultLimit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
   const current = getPayload(jobId);
+  const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
-    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; aumentá MAX_TASK_TOKENS o reducí el contexto para reanudar.`);
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; ampliá el límite desde el control de presupuesto de la interfaz o reducí el contexto.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
     throw error;
   }
@@ -79,7 +80,19 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
-  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '' } = payload;
+  const initialPartialDelivery = String(initial.payload.partialDelivery || '');
+  const savePartial = info => {
+    const current = getPayload(jobId);
+    if (!current || typeof info?.content !== 'string') return;
+    const fresh = info.content;
+    const hasFileHeaders = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:/im.test(fresh);
+    const preserved = initialPartialDelivery
+      ? (hasFileHeaders ? mergeDelivery(initialPartialDelivery, fresh) : `${initialPartialDelivery}\n\n${fresh}`)
+      : fresh;
+    updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
+  };
+  const canContinue = () => { const record = getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
+  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
       startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
@@ -108,8 +121,14 @@ export async function processJob(jobId) {
     if (!delivery) {
       startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega respetando el mapa compartido de coherencia.');
       assertTaskTokenBudget(jobId);
-      delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence);
-      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery });
+      if (partialDelivery) {
+        delivery = partialDelivery;
+        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry, partialDelivery, coherence, canContinue, savePartial);
+        delivery = mergeDelivery(partialDelivery, continuation);
+      } else {
+        delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue, savePartial);
+      }
+      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       saveArtifacts(jobId, delivery);
     }
     payload = getPayload(jobId)?.payload || {};
@@ -162,7 +181,7 @@ export async function processJob(jobId) {
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence, canContinue, savePartial);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);

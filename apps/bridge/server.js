@@ -118,10 +118,19 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'Escribí un objetivo para el comité.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective }) }); res.status(202).json(result); }
+  const requestedBudget = Number(req.body?.tokenBudget);
+  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget }) }); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.post('/api/jobs/:id/budget', async (req, res) => {
+  const requested = Number(req.body?.tokenBudget);
+  if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
+  const tokenBudget = Math.min(100000, Math.max(4000, Math.round(requested / 1000) * 1000));
+  try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget }) })); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs/:id/bundle', async (req, res) => {
   try {
