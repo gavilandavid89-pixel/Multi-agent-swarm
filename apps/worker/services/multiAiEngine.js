@@ -133,7 +133,7 @@ export async function processJob(jobId) {
     }
     payload = getPayload(jobId)?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
-    const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\\d+)$/)?.[1]) || 0;
+    const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\d+)$/)?.[1]) || 0;
     let round = (payload.validationRound && validation && syntax)
       ? Number(payload.validationRound)
       : (Number(payload.activeValidationRound) || auditCheckpointRound || (getPayload(jobId)?.publicJob.attempt || 0) + 1);
