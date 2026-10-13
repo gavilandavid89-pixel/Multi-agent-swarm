@@ -36,9 +36,66 @@ const insert = db.prepare('INSERT INTO jobs (id,status,stage,progress,attempt,cr
 const update = db.prepare('UPDATE jobs SET status=@status, stage=@stage, progress=@progress, attempt=@attempt, updated_at=@updated_at, error=@error, encrypted_payload=@encrypted_payload WHERE id=@id');
 const byId = db.prepare('SELECT * FROM jobs WHERE id=?');
 const toPublic = row => ({ id: row.id, status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at, error: row.error || null });
+
+const artifactsRoot = path.resolve(process.env.ARTIFACTS_DIR || './data/artifacts');
+const MAX_ARTIFACTS = 40;
+const MAX_ARTIFACT_BYTES = 256 * 1024;
+const MAX_ARTIFACT_TOTAL = 2 * 1024 * 1024;
+function safeArtifactPath(value) {
+  let candidate = String(value || '').trim().replace(/^\x60|\x60$/g, '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').replace(/^\.\//, '').replace(/\\/g, '/');
+  candidate = candidate.split(/[\r\n]/)[0].trim().replace(/^['"]|['"]$/g, '');
+  if (!candidate || candidate.startsWith('/') || /^[a-zA-Z]:/.test(candidate) || candidate.split('/').some(part => !part || part === '.' || part === '..')) return null;
+  if (!/^[\p{L}\p{N}._/-]+$/u.test(candidate) || candidate.length > 180) return null;
+  return candidate;
+}
+function extractArtifacts(delivery) {
+  const source = String(delivery || '');
+  const re = /(?:^|\n)(?:#{1,6}\s+([^\n]+)|\*\*([^*\n]+)\*\*|(?:Archivo|File|Ruta)\s*:\s*([^\n]+))\s*\n\s*\x60{3}[^\n]*\n([\s\S]*?)\n\x60{3}/g;
+  const files = []; let match; let total = 0;
+  while ((match = re.exec(source)) && files.length < MAX_ARTIFACTS) {
+    const name = safeArtifactPath(match[1] || match[2] || match[3]);
+    const content = match[4];
+    const size = Buffer.byteLength(content, 'utf8');
+    if (!name || !size || size > MAX_ARTIFACT_BYTES || total + size > MAX_ARTIFACT_TOTAL) continue;
+    if (files.some(file => file.path === name)) continue;
+    files.push({ path: name, content, size, contentType: name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.json') ? 'application/json; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.js') || name.endsWith('.mjs') ? 'text/javascript; charset=utf-8' : 'text/plain; charset=utf-8' });
+    total += size;
+  }
+  return files;
+}
+export function saveArtifacts(id, delivery) {
+  const row = byId.get(id);
+  if (!row) return [];
+  const files = extractArtifacts(delivery);
+  const taskDir = path.resolve(artifactsRoot, id);
+  if (!taskDir.startsWith(artifactsRoot + path.sep)) throw new Error('Ruta de artefactos inválida.');
+  fs.rmSync(taskDir, { recursive: true, force: true });
+  if (files.length) {
+    fs.mkdirSync(taskDir, { recursive: true });
+    for (const file of files) {
+      const destination = path.resolve(taskDir, file.path);
+      if (!destination.startsWith(taskDir + path.sep)) continue;
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, file.content, { encoding: 'utf8', mode: 0o600 });
+    }
+  }
+  updateJob(id, { payload: { artifacts: files } });
+  return files.map(({ path: filePath, size, contentType }) => ({ path: filePath, size, contentType }));
+}
+export function listArtifacts(id) {
+  const record = getPayload(id);
+  return (record?.payload?.artifacts || []).map(({ path: filePath, size, contentType }, index) => ({ index, path: filePath, size, contentType }));
+}
+export function getArtifact(id, index) {
+  const record = getPayload(id);
+  const file = record?.payload?.artifacts?.[Number(index)];
+  if (!file || !Number.isInteger(Number(index)) || Number(index) < 0) return null;
+  return { path: file.path, content: file.content, size: file.size, contentType: file.contentType };
+}
+
 export function createJob(objective) {
   const timestamp = now();
-  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, transcript: [], result: null, lastCheckpoint: 'created' }) };
+  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
   insert.run(row); return toPublic(row);
 }
 export function getJob(id) { const row = byId.get(id); return row ? toPublic(row) : null; }
