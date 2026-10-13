@@ -18,9 +18,12 @@ function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c =>
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
 function agentClass(agent) { return String(agent || 'sistema').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sistema'; }
 function renderHistory(data) {
-  $('history-indicator').textContent = data.hasHistory ? '▤' : '◌';
-  $('history-title').textContent = data.hasHistory ? `Hay historial (${data.count})` : 'Todavía no hay historial';
-  $('history-copy').textContent = data.hasHistory ? 'Los detalles se cargan cuando abrís una tarea.' : 'Cuando completes tareas, aparecerán registros.';
+  const jobs = state.jobs || [];
+  const active = jobs.filter(job => ['queued','running'].includes(job.status));
+  const latest = jobs[0];
+  $('history-indicator').textContent = active.length ? '◌' : data.hasHistory ? '▤' : '◌';
+  $('history-title').textContent = active.length ? `${active.length} tarea${active.length === 1 ? '' : 's'} en marcha` : data.hasHistory ? `${data.count} tarea${data.count === 1 ? '' : 's'} guardada${data.count === 1 ? '' : 's'}` : 'Todavía no hay historial';
+  $('history-copy').textContent = active.length ? `${latest && ['queued','running'].includes(latest.status) ? latest.stage : 'El comité sigue trabajando'} · los hitos se guardan al terminar cada etapa.` : data.hasHistory ? (latest ? `Última: ${statusNames[latest.status] || latest.status} · ${latest.stage || 'sin etapa'}` : 'Abrí una tarea para ver su conversación.') : 'Las tareas y sus conversaciones aparecerán aquí.';
   $('show-history').classList.toggle('hidden', !data.hasHistory);
 }
 async function loadHistorySummary() { renderHistory(await api('/api/history')); }
@@ -35,20 +38,39 @@ async function loadJobs() {
 function renderConversation(data) {
   const conversation = $('conversation');
   const entries = Array.isArray(data.history) ? data.history : [];
-  const wasNearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
+  const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
+  const existing = new Map([...conversation.querySelectorAll('[data-message-key]')].map(node => [node.dataset.messageKey, node]));
   if (!entries.length) {
-    conversation.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>El comité está preparando la primera intervención…</p></div>';
-  } else {
-    conversation.innerHTML = entries.map(entry => {
-      const agent = String(entry.agent || 'sistema');
-      const type = String(entry.type || 'message');
-      const isSystem = ['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type);
-      const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : 'MENSAJE';
-      const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
-      return `<article class="chat-message ${isSystem ? 'system-message' : 'agent-' + agentClass(agent)} ${type === 'thinking' ? 'thinking-message' : ''}"><div class="agent-avatar">${escapeHtml(icon)}</div><div class="message-body"><div class="message-heading"><strong>${escapeHtml(agent)}</strong><span>${label}</span><time>${escapeHtml(entry.at ? new Date(entry.at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '')}</time></div><div class="message-text">${escapeHtml(entry.content || '')}</div></div></article>`;
-    }).join('');
+    if (!conversation.querySelector('.empty-state')) conversation.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>El comité está preparando la primera intervención…</p></div>';
+    return;
   }
-  if (wasNearBottom) conversation.scrollTop = conversation.scrollHeight;
+  conversation.querySelector('.empty-state')?.remove();
+  entries.forEach((entry, index) => {
+    const agent = String(entry.agent || 'sistema');
+    const type = String(entry.type || 'message');
+    const key = String(entry.at || '') + '|' + agent + '|' + index;
+    let node = existing.get(key);
+    const isSystem = ['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type);
+    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : 'MENSAJE';
+    const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
+    if (!node) {
+      node = document.createElement('article');
+      node.dataset.messageKey = key;
+      node.className = 'chat-message';
+      node.innerHTML = '<div class="agent-avatar"></div><div class="message-body"><div class="message-heading"><strong></strong><span></span><time></time></div><div class="message-text"></div></div>';
+      conversation.appendChild(node);
+    }
+    node.className = `chat-message ${isSystem ? 'system-message' : 'agent-' + agentClass(agent)} ${type === 'thinking' ? 'thinking-message' : ''}`;
+    node.querySelector('.agent-avatar').textContent = icon;
+    node.querySelector('.message-heading strong').textContent = agent;
+    node.querySelector('.message-heading span').textContent = label;
+    node.querySelector('.message-heading time').textContent = entry.at ? new Date(entry.at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+    node.querySelector('.message-text').textContent = entry.content || '';
+  });
+  // Prune messages that fell out of the bounded server transcript without replacing the conversation container.
+  const keys = new Set(entries.map((entry,index) => String(entry.at || '') + '|' + String(entry.agent || 'sistema') + '|' + index));
+  [...conversation.querySelectorAll('[data-message-key]')].forEach(node => { if (!keys.has(node.dataset.messageKey)) node.remove(); });
+  if (nearBottom) conversation.scrollTop = conversation.scrollHeight;
 }
 function updateDetailView(data) {
   const job = data.job || {};
@@ -61,13 +83,16 @@ function updateDetailView(data) {
   const fill = $('detail-progress-fill');
   const track = $('detail-progress');
   track.classList.toggle('indeterminate', ['queued','running'].includes(job.status));
-  fill.style.width = job.status === 'completed' ? '100%' : job.status === 'failed' ? '100%' : job.status === 'needs_review' ? '99%' : '100%';
+  fill.style.width = job.status === 'completed' ? '100%' : job.status === 'needs_review' ? '99%' : job.status === 'failed' ? '100%' : '35%';
   track.classList.toggle('progress-failed', job.status === 'failed');
-  $('detail-progress-label').textContent = job.status === 'completed' ? 'Proceso finalizado' : job.status === 'failed' ? 'La tarea se interrumpió' : job.status === 'needs_review' ? 'Revisión humana necesaria' : job.status === 'queued' ? 'En espera de un agente' : 'Etapa activa · progreso por hitos';
-  $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : ['queued','running'].includes(job.status) ? 'Sincronización automática cada pocos segundos. La animación indica actividad; el sistema no inventa porcentajes durante la espera del proveedor.' : 'Conversación guardada. Podés revisar los mensajes y el diagnóstico técnico.';
+  $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · último hito: ' + (job.progress ?? 0) + '%';
+  $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : ['queued','running'].includes(job.status) ? 'Chat en vivo: se agregan o actualizan mensajes sin reconstruir la página. La barra animada indica actividad; el porcentaje es solo el último hito guardado.' : 'Conversación guardada. Podés revisar los mensajes y el diagnóstico técnico.';
   renderConversation(data);
   const diagnostic = { objective: data.objective, stage: job.stage, status: job.status, progress: job.progress, transcript: data.history, result: data.result, validation: data.validation, syntax: data.syntax, validationLevel: data.validationLevel, error: job.error, delivery: data.delivery };
   $('detail-content').textContent = JSON.stringify(diagnostic, null, 2);
+  const previousStatus = state.lastJobStatus;
+  state.lastJobStatus = job.status;
+  if (previousStatus && previousStatus !== job.status) loadJobs().catch(() => {});
   state.lastDetailSignature = JSON.stringify({ id: job.id, status: job.status, stage: job.stage, updatedAt: job.updatedAt, historyLength: (data.history || []).length });
 }
 async function updateSelectedDetail() {
@@ -79,9 +104,9 @@ async function refresh() {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
-      await Promise.all([loadHistorySummary(), loadJobs()]);
-      if (state.currentDetailId) await updateSelectedDetail();
-      setConnection(true, 'Puente conectado · sincronizado');
+      await updateSelectedDetail();
+      setConnection(true, 'Conversación sincronizada');
+
     } catch (error) { setConnection(false, 'Reconectando…'); console.warn(error.message); }
   })();
   try { await refreshPromise; } finally { refreshPromise = null; }
@@ -93,10 +118,10 @@ async function showDetail(id) {
   $('detail-stage').textContent = 'Conectando con la tarea…';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
   $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  try { await updateSelectedDetail(); await loadJobs(); }
+  try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
-$('access-form').addEventListener('submit', async event => { event.preventDefault(); state.accessKey = $('access-key').value.trim(); sessionStorage.setItem('swarm-access-key', state.accessKey); showApp(); await refresh(); state.pollHandle = setInterval(refresh, 3500); });
+$('access-form').addEventListener('submit', async event => { event.preventDefault(); state.accessKey = $('access-key').value.trim(); sessionStorage.setItem('swarm-access-key', state.accessKey); showApp(); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000); });
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
@@ -125,11 +150,11 @@ $('copy-detail').addEventListener('click', async () => {
     $('copy-status').textContent = 'Diagnóstico copiado. No incluye claves secretas.'; button.textContent = 'Copiado ✓';
   } catch { $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.'; }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); state.currentDetailId = null; });
+$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }
   if (!state.accessKey) { showAccess(); return; }
-  showApp(); await refresh(); state.pollHandle = setInterval(refresh, 3500);
+  showApp(); await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000);
 }
 boot();
