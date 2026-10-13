@@ -1,4 +1,5 @@
 import { consultarGemini } from './geminiProvider.js';
+import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // Feature branch: bounded continuation support.
@@ -11,18 +12,10 @@ function deferredProviderError(model, retry, wait, reason) {
   error.code = 'PROVIDER_TEMPORARY'; error.retryAfterMs = wait; error.providerModel = model; error.providerRetry = retry;
   return error;
 }
-export function retryDelay(retry, retryAfter) {
+export function retryDelay(retry, retryAfter, bodyText = '') {
   const configuredBase = Number(process.env.RETRY_BASE_MS || 3000);
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
-  const numericRetryAfter = Number(retryAfter);
-  let delay; let authoritative = false;
-  if (Number.isFinite(numericRetryAfter) && numericRetryAfter > 0) { delay = Math.min(numericRetryAfter * 1000, 604800000); authoritative = true; }
-  else {
-    const dateRetryAfter = Date.parse(String(retryAfter || ''));
-    if (Number.isFinite(dateRetryAfter)) { delay = Math.min(Math.max(0, dateRetryAfter - Date.now()), 604800000); authoritative = true; }
-    else delay = Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000);
-  }
-  return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
+  return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   if (process.env.GEMINI_API_KEY) return consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
@@ -81,7 +74,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       continue;
     }
     if (retryableStatus(response.status)) {
-      retry++; const wait = retryDelay(retry, response.headers.get('retry-after')); const reason = `HTTP ${response.status}`;
+      retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
       onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait); continue;
@@ -134,7 +127,7 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
       model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
-        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Revisá nombres de funciones y clases, importaciones/exportaciones, rutas, formatos de datos, configuración y dependencias entre módulos. Usá el mapa para comprobar contratos con otros lotes. El mensaje del usuario incluye el INVENTARIO COMPLETO de archivos de toda la entrega: un archivo que no está en este lote puede existir en otro lote. PROHIBIDO afirmar que falta un archivo si figura en ese inventario. No declares incompatibilidades entre archivos que no puedas demostrar con el lote actual o el mapa compartido. No marques como error algo que no pueda verificarse en el texto. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
+        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Usá internamente tres alter egos y combiná sus hallazgos sin repetirlos: (1) Detective de contratos: nombres de funciones/clases, importaciones/exportaciones, rutas, formatos, configuración y dependencias; (2) Abogado del diablo: supuestos falsos, casos límite, errores lógicos, seguridad y comportamiento ante interrupciones; (3) Guardián de entrega: archivos completos, objetivo/criterios de aceptación y ausencia de contradicciones. Cada hallazgo debe incluir ruta concreta, evidencia textual verificable, impacto y corrección mínima; separá bloqueos reales de mejoras opcionales. Usá el mapa para comprobar contratos con otros lotes. El mensaje incluye el INVENTARIO COMPLETO de archivos: uno fuera de este lote puede existir en otro. PROHIBIDO afirmar que falta un archivo si figura en el inventario. No inventes incompatibilidades, no supongas pruebas ejecutadas y no marques como error algo no verificable. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nMAPA DE COHERENCIA:\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\nINVENTARIO COMPLETO DE ARCHIVOS DE LA ENTREGA (pueden estar distribuidos en otros lotes):\n' + manifestText + '\nARCHIVOS COMPLETOS DEL LOTE:\n' + batches[i] }
       ]
     });
@@ -219,7 +212,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
       model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
-        sys('Validador independiente', 'Auditá SOLO los archivos del lote actual. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento, errores lógicos y referencias a archivos faltantes. No afirmes haber revisado otros lotes.'),
+        sys('Validador independiente', 'Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nESTRATEGIA:\n' + boundContext(estrategia, 1000, 'estrategia') + '\nARCHIVOS:\n' + batches[i] }
       ]
     });

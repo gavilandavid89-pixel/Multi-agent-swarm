@@ -1,4 +1,7 @@
+import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
 
@@ -14,25 +17,10 @@ function deferredProviderError(model, retry, wait, reason) {
   return error;
 }
 
-function retryDelay(retry, retryAfter) {
+function retryDelay(retry, retryAfter, bodyText = '') {
   const configuredBase = Number(process.env.RETRY_BASE_MS || 3000);
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
-  const numericRetryAfter = Number(retryAfter);
-  let delay;
-  let authoritative = false;
-  if (Number.isFinite(numericRetryAfter) && numericRetryAfter > 0) {
-    delay = Math.min(numericRetryAfter * 1000, 604800000);
-    authoritative = true;
-  } else {
-    const dateRetryAfter = Date.parse(String(retryAfter || ''));
-    if (Number.isFinite(dateRetryAfter)) {
-      delay = Math.min(Math.max(0, dateRetryAfter - Date.now()), 604800000);
-      authoritative = true;
-    } else {
-      delay = Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000);
-    }
-  }
-  return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
+  return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 
 function toGeminiContents(messages) {
@@ -177,7 +165,7 @@ export async function consultarGemini({
     const bodyText = await response.text().catch(() => '');
     if (retryableStatus(response.status)) {
       retry++;
-      const wait = retryDelay(retry, response.headers.get('retry-after'));
+      const wait = retryDelay(retry, response.headers.get('retry-after'), bodyText);
       const reason = `HTTP ${response.status}`;
       onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);

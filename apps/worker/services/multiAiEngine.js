@@ -2,6 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
+import { getDeferredCooldownMs } from './providerRetryPolicy.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -40,7 +41,7 @@ function retryNotice(jobId, info) {
     const modelPrior = next.byModel[model] || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
     next.byModel[model] = { promptTokens: modelPrior.promptTokens + (info.promptTokens || 0), completionTokens: modelPrior.completionTokens + (info.completionTokens || 0), totalTokens: modelPrior.totalTokens + (info.totalTokens || 0), calls: modelPrior.calls + 1 };
     const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }) }]);
-    updateJob(jobId, { payload: { transcript, tokenUsage: next } });
+    updateJob(jobId, { payload: { transcript, tokenUsage: next, providerFailureStreak: 0 } });
     console.info('[worker][provider_usage]', JSON.stringify({ jobId, model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }));
     return;
   }
@@ -171,7 +172,7 @@ export async function processJob(jobId) {
           { at: new Date().toISOString(), agent: 'Validador', type: 'message', content: JSON.stringify(validation).slice(0, 20000) },
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
         );
-        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: payload.coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
+        updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
         payload = getPayload(jobId)?.payload || {};
         resumeState = getValidationResumeState(payload, round);
       }
@@ -204,11 +205,12 @@ export async function processJob(jobId) {
       return { blocked: true, reason };
     }
     if (error?.code === 'PROVIDER_TEMPORARY' && current) {
-      const retryAfterMs = Math.max(1000, Math.min(604800000, Number(error.retryAfterMs) || 30000));
+      const failureStreak = Math.min(20, (Number(current.payload.providerFailureStreak) || 0) + 1);
+      const retryAfterMs = getDeferredCooldownMs(Number(error.retryAfterMs) || 30000, failureStreak);
       const retryAt = new Date(Date.now() + retryAfterMs).toISOString();
       const reason = String(error.message || 'Proveedor temporalmente no disponible').slice(0, 1200);
       const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Tarea pausada de forma segura. Motivo: ${reason} Próximo intento automático: ${retryAt}. Se conserva el checkpoint ${current.payload.lastCheckpoint || 'guardado'}.` }]);
-      updateJob(jobId, { status: 'queued', stage: 'Esperando disponibilidad del proveedor', progress: current.publicJob.progress, error: null, payload: { ...current.payload, transcript, retryAt, providerBlock: { code: error.code, model: error.providerModel || null, retry: error.providerRetry || null, reason, retryAfterMs }, lastCheckpoint: current.payload.lastCheckpoint || 'provider-deferred', activeStage: null } });
+      updateJob(jobId, { status: 'queued', stage: 'Esperando disponibilidad del proveedor', progress: current.publicJob.progress, error: null, payload: { ...current.payload, transcript, retryAt, providerFailureStreak: failureStreak, providerBlock: { code: error.code, model: error.providerModel || null, retry: error.providerRetry || null, failureStreak, reason, retryAfterMs }, lastCheckpoint: current.payload.lastCheckpoint || 'provider-deferred', activeStage: null } });
       console.warn('[worker][provider_deferred]', JSON.stringify({ jobId, model: error.providerModel || null, retry: error.providerRetry || null, retryAfterMs, retryAt, checkpoint: current.payload.lastCheckpoint || null }));
       return { deferred: true, retryAfterMs };
     }
