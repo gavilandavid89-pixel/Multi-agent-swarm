@@ -58,7 +58,7 @@ function extractArtifacts(delivery) {
     const size = Buffer.byteLength(content, 'utf8');
     if (!name || !size || size > MAX_ARTIFACT_BYTES || total + size > MAX_ARTIFACT_TOTAL) continue;
     if (files.some(file => file.path === name)) continue;
-    files.push({ path: name, content, size, contentType: name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.json') ? 'application/json; charset=utf-8' : name.endsWith('.webmanifest') ? 'application/manifest+json; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.svg') ? 'image/svg+xml; charset=utf-8' : /\\.(?:js|mjs|cjs|jsx|ts|tsx)$/i.test(name) ? 'text/javascript; charset=utf-8' : 'text/plain; charset=utf-8' });
+    files.push({ path: name, content, size, contentType: name.endsWith('.html') ? 'text/html; charset=utf-8' : name.endsWith('.json') ? 'application/json; charset=utf-8' : name.endsWith('.webmanifest') ? 'application/manifest+json; charset=utf-8' : name.endsWith('.css') ? 'text/css; charset=utf-8' : name.endsWith('.svg') ? 'image/svg+xml; charset=utf-8' : /\.(?:js|mjs|cjs|jsx|ts|tsx)$/i.test(name) ? 'text/javascript; charset=utf-8' : 'text/plain; charset=utf-8' });
     total += size;
   }
   return files;
