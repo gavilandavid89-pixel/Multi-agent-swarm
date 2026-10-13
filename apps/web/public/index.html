@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=first-task-diagnostics-1">
+  <link rel="stylesheet" href="/styles.css?v=zip-preview-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -27,6 +27,20 @@
         <div class="section-head"><div><p class="panel-kicker">NUEVA TAREA</p><h2>¿Qué vamos a resolver?</h2></div><span class="pill"><span class="dot dot-pink"></span> Motor externo</span></div>
         <form id="job-form"><label class="sr-only" for="objective">Objetivo</label><textarea id="objective" rows="4" maxlength="20000" placeholder="Describí el objetivo con el contexto necesario…" required></textarea><div class="composer-footer"><span class="muted tiny">Los avances se guardan automáticamente.</span><button class="button button-primary" id="submit-job" type="submit">Iniciar comité <span>↗</span></button></div><p id="job-submit-status" class="muted tiny" role="status" aria-live="polite"></p></form>
       </section>
+      <section class="panel zip-preview-panel">
+        <div class="section-head"><div><p class="panel-kicker">LABORATORIO AISLADO</p><h2>Probar un ZIP sin instalarlo</h2><p class="muted tiny">Subí una web empaquetada y Swarm intentará abrir su HTML en un entorno temporal aislado.</p></div><span class="history-icon">▣</span></div>
+        <form id="zip-preview-form" class="zip-upload-form">
+          <label class="zip-drop" for="zip-preview-file"><span class="zip-drop-icon">↑</span><strong>Elegí un archivo .zip</strong><span class="muted tiny">Máximo 8 MB comprimido · 10 MB descomprimido · 80 entradas</span><input id="zip-preview-file" type="file" accept=".zip,application/zip,application/x-zip-compressed" required></label>
+          <button id="zip-preview-submit" class="button button-primary" type="submit">Analizar y abrir vista previa ↗</button>
+        </form>
+        <p id="zip-preview-status" class="muted tiny" role="status" aria-live="polite">No se instala nada. Solo se admiten páginas web y recursos compatibles; ejecutables e instaladores se excluyen.</p>
+        <section id="zip-preview-result" class="artifact-preview hidden">
+          <div class="section-head"><div><p class="panel-kicker">SESIÓN TEMPORAL · 10 MIN</p><h3>Vista previa del ZIP</h3></div><button id="close-zip-preview" class="button button-secondary" type="button">Cerrar ×</button></div>
+          <label for="zip-preview-page" class="muted tiny">Página HTML</label><select id="zip-preview-page" class="history-filter"></select>
+          <p id="zip-preview-details" class="muted tiny"></p>
+          <iframe id="zip-preview-frame" title="Vista previa aislada del ZIP" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy"></iframe>
+        </section>
+      </section>
       <section class="dashboard-grid">
         <div class="panel history-panel"><div class="section-head"><div><p class="panel-kicker">MEMORIA</p><h2>Historial</h2></div><span class="history-icon">▤</span></div><div class="history-state"><span id="history-indicator" class="history-symbol">◌</span><div><strong id="history-title">Comprobando…</strong><p id="history-copy" class="muted">Solo consultamos el indicador.</p></div></div><button id="show-history" class="button button-secondary hidden" type="button">Ver registros <span>→</span></button><div id="history-list" class="history-list hidden"></div></div>
         <div class="panel jobs-panel"><div class="section-head"><div><p class="panel-kicker">TAREAS</p><h2>Actividad</h2><p id="jobs-count" class="muted tiny">Cargando tareas…</p></div><button id="refresh-jobs" class="icon-button" title="Actualizar actividad" aria-label="Actualizar actividad">↻</button></div><label class="sr-only" for="jobs-filter">Filtrar tareas por estado</label><select id="jobs-filter" class="history-filter"><option value="all">Todos los estados</option><option value="queued">En cola</option><option value="running">En curso</option><option value="completed">Completadas</option><option value="failed">Fallidas</option><option value="needs_review">Revisión humana</option></select><div id="jobs-list" class="jobs-list"><div class="empty-state"><span class="empty-glyph">✳</span><p>Todo tranquilo por ahora.</p><span class="muted tiny">Las tareas aparecerán aquí.</span></div></div><button id="load-more-jobs" class="button button-secondary load-more-jobs hidden" type="button">Cargar más tareas ↓</button></div>
@@ -43,6 +57,6 @@
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=first-task-diagnostics-1" defer></script>
+  <script src="/app.js?v=zip-preview-1" defer></script>
 </body>
 </html>

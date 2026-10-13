@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { createZip } from '../apps/bridge/services/zipBundle.js';
 
 const base = (process.env.SWARM_BRIDGE_URL || 'https://swarm-bridge.onrender.com').replace(/\/$/, '');
 const key = process.env.SWARM_APP_ACCESS_KEY || '';
@@ -107,6 +108,39 @@ try {
   if (!/Swarm E2E/i.test(previewHtml)) fail('La vista previa no contiene el HTML de prueba esperado.');
   if (!/sandbox/i.test(previewResponse.headers.get('content-security-policy') || '')) fail('La vista previa no aplica una política CSP sandbox.');
   check('html-preview', 'La vista previa devuelve HTML y aplica CSP sandbox.');
+
+  const zipFixture = createZip([
+    { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="site.css"></head><body><h1>ZIP PREVIEW E2E</h1><button id="go">Probar</button><script src="app.js"></script></body></html>' },
+    { path: 'app.js', content: "document.getElementById('go').addEventListener('click', () => { document.body.dataset.clicked = 'yes'; });" },
+    { path: 'site.css', content: 'body { color: rebeccapurple; }' },
+    { path: 'ignored.exe', content: 'not a real executable' }
+  ]);
+  const uploadedResponse = await request('/api/preview-zip', {
+    method: 'POST', auth: true, body: zipFixture,
+    headers: { 'content-type': 'application/zip' }
+  });
+  const uploaded = await json(uploadedResponse, 'Subida de ZIP para vista previa');
+  if (!uploaded.url || !Array.isArray(uploaded.pages) || !uploaded.pages.some(page => page.path === 'index.html')) {
+    fail('La vista previa ZIP no encontró la página HTML principal.');
+  }
+  if (uploaded.filesCount !== 3) fail('La vista previa ZIP no excluyó el ejecutable o no contó los recursos compatibles correctamente.');
+  check('zip-upload-preview', 'ZIP procesado sin instalarlo; página HTML detectada y ejecutable excluido.');
+  const uploadedHtmlResponse = await fetch(base + uploaded.url, { signal: AbortSignal.timeout(20000) });
+  const uploadedHtml = await uploadedHtmlResponse.text();
+  const uploadedCsp = uploadedHtmlResponse.headers.get('content-security-policy') || '';
+  if (!uploadedHtmlResponse.ok || !uploadedHtml.includes('ZIP PREVIEW E2E')) fail('La vista previa del ZIP no devolvió el HTML esperado.');
+  if (!uploadedCsp.includes('sandbox') || !uploadedCsp.includes("connect-src 'none'") || !uploadedCsp.includes("frame-src 'none'")) {
+    fail('La vista previa ZIP no aplicó todas las restricciones CSP esperadas.');
+  }
+  if (!uploadedHtml.includes('/preview/') || !uploadedHtml.includes('/assets/')) fail('Los recursos locales del ZIP no fueron reescritos para la sesión aislada.');
+  check('zip-html-sandbox', 'HTML aislado con CSP restrictiva y recursos locales reescritos.');
+  const assetMatch = uploadedHtml.match(/src="([^"]*app\.js[^"]*)"/i);
+  if (!assetMatch) fail('No se encontró el script local reescrito en la vista previa ZIP.');
+  const uploadedAssetResponse = await fetch(new URL(assetMatch[1], base), { signal: AbortSignal.timeout(20000) });
+  const uploadedAsset = await uploadedAssetResponse.text();
+  if (!uploadedAssetResponse.ok || !uploadedAsset.includes("dataset.clicked = 'yes'")) fail('El JavaScript local del ZIP no se pudo cargar correctamente.');
+  check('zip-local-assets', 'JavaScript local servido desde la sesión temporal; sin instalación.');
+
 
   report.finishedAt = new Date().toISOString();
   report.result = 'passed';
