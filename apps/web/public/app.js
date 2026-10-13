@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], historyShown: false, pollHandle: null, currentDetailId: null, lastDetailSignature: '' };
+const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '' };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -27,13 +27,36 @@ function renderHistory(data) {
   $('show-history').classList.toggle('hidden', !data.hasHistory);
 }
 async function loadHistorySummary() { renderHistory(await api('/api/history')); }
-async function loadJobs() {
-  const data = await api('/api/jobs'); state.jobs = data.jobs || [];
+async function loadJobs({ append = false } = {}) {
+  const pageSize = 25;
+  const filter = state.jobsFilter === 'all' ? '' : `&status=${encodeURIComponent(state.jobsFilter)}`;
+  let incoming = [];
+  let total = 0;
+  if (append) {
+    const offset = state.jobs.length;
+    const data = await api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`);
+    incoming = data.jobs || []; total = data.total || 0;
+    state.jobs = [...state.jobs, ...incoming];
+  } else {
+    const offsets = [];
+    const desired = Math.max(pageSize, state.jobs.length);
+    for (let offset = 0; offset < desired; offset += pageSize) offsets.push(offset);
+    if (!offsets.length) offsets.push(0);
+    const pages = await Promise.all(offsets.map(offset => api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`)));
+    state.jobs = pages.flatMap(page => page.jobs || []);
+    total = pages[0]?.total || 0;
+  }
+  state.jobsTotal = total || state.jobs.length;
   const list = $('jobs-list');
-  if (!state.jobs.length) { list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Todo tranquilo por ahora.</p><span class="muted tiny">Las tareas aparecerán aquí.</span></div>'; return; }
-  list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name">Tarea ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+  if (!state.jobs.length) {
+    list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
+  } else {
+    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name">Tarea ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+  }
+  $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
+  $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
   list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.detail)));
-  list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); } catch (error) { alert(error.message); } }));
+  list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); await loadJobs(); } catch (error) { alert(error.message); } }));
 }
 function renderConversation(data) {
   const conversation = $('conversation');
@@ -129,14 +152,16 @@ $('job-form').addEventListener('submit', async event => {
   catch (error) { alert(error.message); }
   finally { button.disabled = false; button.innerHTML = 'Iniciar comité <span>↗</span>'; }
 });
-$('refresh-jobs').addEventListener('click', refresh);
+$('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
+$('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
+$('load-more-jobs').addEventListener('click', async () => { const button = $('load-more-jobs'); button.disabled = true; try { await loadJobs({ append: true }); } catch (error) { alert(error.message); } finally { button.disabled = false; } });
 $('show-history').addEventListener('click', async () => {
   state.historyShown = !state.historyShown;
   $('history-list').classList.toggle('hidden', !state.historyShown);
   $('show-history').innerHTML = state.historyShown ? 'Ocultar registros <span>↑</span>' : 'Ver registros <span>→</span>';
   if (!state.historyShown) return;
   try {
-    const data = await api('/api/jobs'); const list = $('history-list');
+    const data = { jobs: state.jobs }; const list = $('history-list');
     list.innerHTML = (data.jobs || []).map(job => {
       const active = ['queued','running'].includes(job.status);
       const done = job.status === 'completed';
