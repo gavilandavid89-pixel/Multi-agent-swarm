@@ -4,6 +4,18 @@ import { checkJavascriptSyntax } from './codeChecks.js';
 // Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
+export function getValidationResumeState(payload = {}, attempt = 0) {
+  const validation = payload.validation || null;
+  const syntax = payload.syntax || null;
+  const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\\d+)$/)?.[1]) || 0;
+  const round = (payload.validationRound && validation && syntax)
+    ? Number(payload.validationRound)
+    : (Number(payload.activeValidationRound) || auditCheckpointRound || Number(attempt || 0) + 1);
+  const coherenceReview = (Number(payload.coherenceReviewRound) === round && payload.coherenceReview)
+    ? payload.coherenceReview
+    : (auditCheckpointRound === round && payload.coherenceReview ? payload.coherenceReview : null);
+  return { round, coherenceReview, validationSaved: Boolean(payload.validationRound === round && validation && syntax) };
+}
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function selectRepairContext(delivery, findings) {
   const source = String(delivery || '');
@@ -133,17 +145,13 @@ export async function processJob(jobId) {
     }
     payload = getPayload(jobId)?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
-    const auditCheckpointRound = Number(String(payload.lastCheckpoint || '').match(/^Auditoría de coherencia (\d+)$/)?.[1]) || 0;
-    let round = (payload.validationRound && validation && syntax)
-      ? Number(payload.validationRound)
-      : (Number(payload.activeValidationRound) || auditCheckpointRound || (getPayload(jobId)?.publicJob.attempt || 0) + 1);
+    let resumeState = getValidationResumeState(payload, getPayload(jobId)?.publicJob.attempt || 0);
+    let round = resumeState.round;
     while (round <= MAX_ROUNDS) {
-      const saved = payload.validationRound === round && validation && syntax;
+      const saved = resumeState.validationSaved;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
       if (!saved) {
-        let coherenceReview = (Number(payload.coherenceReviewRound) === round && payload.coherenceReview)
-          ? payload.coherenceReview
-          : (auditCheckpointRound === round && payload.coherenceReview ? payload.coherenceReview : null);
+        let coherenceReview = resumeState.coherenceReview;
         if (!coherenceReview) {
           startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
           assertTaskTokenBudget(jobId);
@@ -176,6 +184,7 @@ export async function processJob(jobId) {
         );
         updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: payload.coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
         payload = getPayload(jobId)?.payload || {};
+        resumeState = getValidationResumeState(payload, round);
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
