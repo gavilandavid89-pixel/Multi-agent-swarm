@@ -1,0 +1,76 @@
+name: Swarm on-demand end-to-end test
+
+on:
+  workflow_dispatch:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: swarm-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.issue.title, '[SWARM-SELF-TEST]') &&
+       github.event.issue.user.login == 'gavilandavid89-pixel')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify required configuration
+        env:
+          SWARM_APP_ACCESS_KEY: ${{ secrets.SWARM_APP_ACCESS_KEY }}
+        run: |
+          if [ -z "$SWARM_APP_ACCESS_KEY" ]; then
+            echo "::error::Falta el secreto SWARM_APP_ACCESS_KEY en Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Run live health, task, ZIP and HTML preview checks
+        env:
+          SWARM_BRIDGE_URL: https://swarm-bridge.onrender.com
+          SWARM_APP_ACCESS_KEY: ${{ secrets.SWARM_APP_ACCESS_KEY }}
+          SWARM_E2E_TIMEOUT_MS: '1500000'
+        run: node tests/e2e-live.mjs
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swarm-e2e-report
+          path: swarm-e2e-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Report result back to triggering issue
+        if: always() && github.event_name == 'issues'
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const status = process.env.JOB_STATUS;
+            const url = process.env.RUN_URL;
+            const report = status === 'success'
+              ? '✅ La prueba E2E terminó correctamente. Se comprobó salud del puente, creación y finalización de una tarea real, archivos HTML, descarga ZIP y vista previa.'
+              : '❌ La prueba E2E falló o no pudo arrancar. Abrí el registro de ejecución para ver el paso exacto y el diagnóstico.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: report + '\n\n[Ver ejecución y diagnóstico](' + url + ')'
+            });
