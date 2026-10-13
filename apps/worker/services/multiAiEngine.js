@@ -85,9 +85,9 @@ export async function processJob(jobId) {
     const current = getPayload(jobId);
     if (!current || typeof info?.content !== 'string') return;
     const fresh = info.content;
-    const hasFileHeaders = /^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:/im.test(fresh);
+    const hasFileHeaders = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:/im.test(fresh);
     const preserved = initialPartialDelivery
-      ? (hasFileHeaders ? mergeDelivery(initialPartialDelivery, fresh) : `${initialPartialDelivery}\\n\\n${fresh}`)
+      ? (hasFileHeaders ? mergeDelivery(initialPartialDelivery, fresh) : `${initialPartialDelivery}\n\n${fresh}`)
       : fresh;
     updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
   };
