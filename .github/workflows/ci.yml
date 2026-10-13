@@ -1,0 +1,19 @@
+name: Swarm checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  syntax-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install worker dependencies
+        run: npm --prefix apps/worker install --no-audit --no-fund
+      - name: Install bridge dependencies
+        run: npm --prefix apps/bridge install --no-audit --no-fund
+      - name: Check JavaScript syntax and unit tests
+        run: npm run check
