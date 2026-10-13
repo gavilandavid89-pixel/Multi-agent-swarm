@@ -1,4 +1,5 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+// Feature branch: bounded continuation support.
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
 const configuredRetries = Number.parseInt(process.env.MAX_PROVIDER_RETRIES || '4', 10);
