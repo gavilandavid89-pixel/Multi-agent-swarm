@@ -50,8 +50,9 @@ function retryNotice(jobId, info) {
 }
 function assertTaskTokenBudget(jobId) {
   const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const limit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
+  const defaultLimit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
   const current = getPayload(jobId);
+  const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
     const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; aumentá MAX_TASK_TOKENS o reducí el contexto para reanudar.`);
@@ -79,6 +80,7 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
+  const canContinue = () => { const record = getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '' } = payload;
   try {
     if (!proposal) {
@@ -108,7 +110,7 @@ export async function processJob(jobId) {
     if (!delivery) {
       startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega respetando el mapa compartido de coherencia.');
       assertTaskTokenBudget(jobId);
-      delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence);
+      delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue);
       checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery });
       saveArtifacts(jobId, delivery);
     }
