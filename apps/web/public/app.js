@@ -106,12 +106,15 @@ async function responseError(response) {
   const data = await response.json().catch(() => ({}));
   return data.error || `Error HTTP ${response.status}`;
 }
-function renderArtifacts(files, jobId) {
+function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
   const panel = $('artifacts-panel'); const list = $('artifacts-list');
   const items = Array.isArray(files) ? files : [];
   panel.classList.toggle('hidden', items.length === 0);
   $('artifacts-count').textContent = `${items.length} archivo${items.length === 1 ? '' : 's'}`;
-  $('download-bundle').disabled = items.length === 0;
+  const bundleReady = jobStatus === 'completed' && validation?.verdict !== 'NEEDS_CHANGES' && syntax?.ok !== false;
+  $('artifacts-kicker').textContent = bundleReady ? 'ENTREGA VALIDADA' : jobStatus === 'needs_review' ? 'ARCHIVOS · REQUIEREN CORRECCIÓN' : 'ARCHIVOS GENERADOS · EN PROCESO';
+  $('download-bundle').disabled = items.length === 0 || !bundleReady;
+  $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' ? 'ZIP bloqueado · falta corregir' : 'ZIP disponible al completar la validación';
   list.innerHTML = items.map(file => {
     const ext = String(file.path || '').split('.').pop().toLowerCase();
     const kind = ext === 'html' ? 'HTML · vista previa disponible' : ext === 'apk' ? 'APK · requiere ser un binario Android válido' : ext === 'zip' ? 'ZIP · archivo proporcionado por la tarea' : 'Archivo del proyecto';
@@ -182,7 +185,7 @@ function updateDetailView(data) {
   $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' && job.stage?.includes('presupuesto') ? 'Checkpoint conservado · ajustar presupuesto para reanudar' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' && data.retryAt ? 'Pausa automática · reanudación programada' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
   $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : job.status === 'queued' && data.retryAt ? `Pausa automática por límite temporal del proveedor. Reanudación prevista: ${dateLabel(data.retryAt)}. Se conserva el checkpoint.` : ['queued','running'].includes(job.status) ? 'La tarea continúa automáticamente; el porcentaje refleja el último checkpoint guardado.' : 'El diagnóstico técnico está separado de la conversación completa y de los archivos generados.';
   renderConversation(data);
-  renderArtifacts(data.artifacts, job.id);
+  renderArtifacts(data.artifacts, job.id, job.status, data.validation, data.syntax);
   const technicalEvents = (data.history || []).filter(entry => ['retry','error','check','usage'].includes(entry.type) || entry.agent === 'Validador').slice(-30).map(entry => ({ at: entry.at || null, agent: entry.agent || 'sistema', type: entry.type || 'message', detail: String(entry.content || '').slice(0, 1800) }));
   const diagnostic = {
     diagnosticVersion: 1, taskId: job.id || null, status: job.status || null, stage: job.stage || null,
