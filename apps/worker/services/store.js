@@ -50,7 +50,24 @@ export function updateJob(id, patch = {}) {
   const next = { id, status: patch.status ?? current.status, stage: patch.stage ?? current.stage, progress: patch.progress ?? current.progress, attempt: patch.attempt ?? current.attempt, created_at: row.created_at, updated_at: now(), error: patch.error === undefined ? row.error : patch.error, encrypted_payload: seal(payload) };
   update.run(next); return toPublic(next);
 }
-export function listJobs(limit = 25) { return db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?').all(Math.min(Math.max(Number(limit) || 25, 1), 100)).map(toPublic); }
-export function historySummary() { const result = db.prepare('SELECT COUNT(*) AS count FROM jobs').get(); return { hasHistory: result.count > 0, count: result.count }; }
+const VALID_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'needs_review']);
+export function listJobs({ limit = 25, offset = 0, status = '' } = {}) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 100);
+  const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
+  const filterStatus = VALID_STATUSES.has(status) ? status : '';
+  const rows = filterStatus
+    ? db.prepare('SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(filterStatus, safeLimit, safeOffset)
+    : db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ? OFFSET ?').all(safeLimit, safeOffset);
+  const total = filterStatus
+    ? db.prepare('SELECT COUNT(*) AS count FROM jobs WHERE status = ?').get(filterStatus).count
+    : db.prepare('SELECT COUNT(*) AS count FROM jobs').get().count;
+  return { jobs: rows.map(toPublic), total, limit: safeLimit, offset: safeOffset, hasMore: safeOffset + rows.length < total, status: filterStatus || 'all' };
+}
+export function historySummary() {
+  const rows = db.prepare('SELECT status, COUNT(*) AS count FROM jobs GROUP BY status').all();
+  const byStatus = Object.fromEntries(rows.map(row => [row.status, row.count]));
+  const count = rows.reduce((sum, row) => sum + row.count, 0);
+  return { hasHistory: count > 0, count, byStatus: { queued: byStatus.queued || 0, running: byStatus.running || 0, completed: byStatus.completed || 0, failed: byStatus.failed || 0, needs_review: byStatus.needs_review || 0 } };
+}
 export function recoverableJobs() { return db.prepare("SELECT id FROM jobs WHERE status IN ('queued','running') ORDER BY created_at ASC").all().map(row => row.id); }
 export function closeStore() { if (db.open) db.close(); }
