@@ -96,7 +96,7 @@ export async function agenteDesarrollador(objetivo, estrategia, errores = '', on
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const source = String(entrega ?? '');
   const maxChars = 6500;
-  const sections = source.split(/(?=^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:)/gim).filter(part => part.trim());
+  const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
   const batches = [];
   if (source.length <= maxChars) batches.push(source);
   else if (sections.length > 1) {
@@ -107,7 +107,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
         batches.push(section);
       } else if (current && current.length + section.length > maxChars) {
         batches.push(current); current = section;
-      } else current += (current ? '\\n\\n' : '') + section;
+      } else current += (current ? '\n\n' : '') + section;
     }
     if (current) batches.push(current);
   } else {
@@ -121,7 +121,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
         sys('Validador independiente', 'Auditá SOLO los archivos del lote actual. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento, errores lógicos y referencias a archivos faltantes. No afirmes haber revisado otros lotes.'),
-        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\\nOBJETIVO:\\n' + boundContext(objetivo, 700, 'objetivo') + '\\nESTRATEGIA:\\n' + boundContext(estrategia, 1000, 'estrategia') + '\\nARCHIVOS:\\n' + batches[i] }
+        { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nESTRATEGIA:\n' + boundContext(estrategia, 1000, 'estrategia') + '\nARCHIVOS:\n' + batches[i] }
       ]
     });
     results.push(parseValidationResponse(raw));
@@ -131,8 +131,8 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   return {
     verdict: results.every(result => result.verdict === 'APPROVED') ? 'APPROVED' : 'NEEDS_CHANGES',
     findings: findings.slice(0, 30),
-    summary: results.map((result, index) => 'Lote ' + (index + 1) + '/' + results.length + ': ' + result.summary).join('\\n').slice(0, 5000),
-    raw: results.map(result => result.raw || '').join('\\n').slice(0, 12000),
+    summary: results.map((result, index) => 'Lote ' + (index + 1) + '/' + results.length + ': ' + result.summary).join('\n').slice(0, 5000),
+    raw: results.map(result => result.raw || '').join('\n').slice(0, 12000),
     batchesReviewed: results.length
   };
 }
