@@ -117,6 +117,22 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/jobs/:id/files', async (req, res) => {
+  try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/files`)); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
+app.get('/api/jobs/:id/files/:index', async (req, res) => {
+  try {
+    const data = await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/files/${encodeURIComponent(req.params.index)}`);
+    const file = data.file;
+    if (!file || typeof file.content !== 'string') return res.status(404).json({ error: 'No existe ese archivo.' });
+    const safeName = String(file.path || 'archivo.txt').split('/').pop().replace(/[^a-zA-Z0-9._-]/g, '_') || 'archivo.txt';
+    res.set('Content-Type', file.contentType || 'text/plain; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="${safeName}"`);
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.send(file.content);
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.get('/api/jobs/:id/history', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/history`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.use((error, _req, res, _next) => { console.error('[bridge]', error.message); res.status(400).json({ error: 'No se pudo procesar la solicitud.' }); });
 app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));
