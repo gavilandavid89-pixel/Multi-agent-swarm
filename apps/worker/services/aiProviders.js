@@ -1,37 +1,62 @@
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
+const configuredRetries = Number.parseInt(process.env.MAX_PROVIDER_RETRIES || '4', 10);
+const MAX_PROVIDER_RETRIES = Number.isFinite(configuredRetries) ? Math.min(8, Math.max(1, configuredRetries)) : 4;
+function deferredProviderError(model, retry, wait, reason) {
+  const error = new Error(`Proveedor temporalmente no disponible (${reason}); se reanudará en ${Math.ceil(wait / 1000)} s.`);
+  error.code = 'PROVIDER_TEMPORARY'; error.retryAfterMs = wait; error.providerModel = model; error.providerRetry = retry;
+  return error;
+}
 export function retryDelay(retry, retryAfter) {
   const configuredBase = Number(process.env.RETRY_BASE_MS || 3000);
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
   const numericRetryAfter = Number(retryAfter);
-  let delay;
-  if (Number.isFinite(numericRetryAfter) && numericRetryAfter > 0) delay = Math.min(numericRetryAfter * 1000, 900000);
-  else { const dateRetryAfter = Date.parse(String(retryAfter || '')); delay = Number.isFinite(dateRetryAfter) ? Math.min(Math.max(0, dateRetryAfter - Date.now()), 900000) : Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000); }
-  return Math.max(250, Math.round(delay * (0.8 + Math.random() * 0.4)));
+  let delay; let authoritative = false;
+  if (Number.isFinite(numericRetryAfter) && numericRetryAfter > 0) { delay = Math.min(numericRetryAfter * 1000, 604800000); authoritative = true; }
+  else {
+    const dateRetryAfter = Date.parse(String(retryAfter || ''));
+    if (Number.isFinite(dateRetryAfter)) { delay = Math.min(Math.max(0, dateRetryAfter - Date.now()), 604800000); authoritative = true; }
+    else delay = Math.min(base * (2 ** Math.min(retry - 1, 8)), 900000);
+  }
+  return Math.max(250, Math.round(authoritative ? delay : delay * (0.8 + Math.random() * 0.4)));
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {} }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0;
+  const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '3200', 10);
+  const safeMaxTokens = Math.min(Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200), Math.max(256, Number(maxTokens) || 1200));
   while (true) {
     let response;
-    try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, temperature, max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
-    catch (error) { retry++; const wait = retryDelay(retry); onRetry({ retry, wait, reason: `error de red: ${error.message}` }); await sleep(wait); continue; }
+    try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    catch (error) {
+      retry++; const wait = retryDelay(retry); const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      onRetry({ retry, wait, reason });
+      if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
+      await sleep(wait); continue;
+    }
     if (response.ok) {
       const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
+      const usage = data?.usage || {};
+      onRetry({ usage: true, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
         const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
         console.warn('[worker][provider_empty_response]', JSON.stringify({ model, attempt: emptyRetries, diagnostic }));
         if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
-        throw new Error(`El modelo ${model} devolvió una respuesta vacía después de 3 intentos. Diagnóstico: ${diagnostic}.`);
+        throw deferredProviderError(model, emptyRetries, retryDelay(emptyRetries), `respuesta vacía del modelo (${diagnostic})`);
       }
       if (content.length > 250000) throw new Error(`El modelo ${model} devolvió una respuesta demasiado grande (límite de seguridad: 250.000 caracteres).`);
       return content;
     }
     const body = await response.text().catch(() => '');
-    if (retryableStatus(response.status)) { retry++; const wait = retryDelay(retry, response.headers.get('retry-after')); onRetry({ retry, wait, reason: `HTTP ${response.status}` }); await sleep(wait); continue; }
+    if (retryableStatus(response.status)) {
+      retry++; const wait = retryDelay(retry, response.headers.get('retry-after')); const reason = `HTTP ${response.status}`;
+      onRetry({ retry, wait, reason });
+      if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
+      await sleep(wait); continue;
+    }
     throw new Error(`Error permanente de Groq (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
   }
 }

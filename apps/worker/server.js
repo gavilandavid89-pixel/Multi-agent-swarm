@@ -22,7 +22,12 @@ function pump() {
   if (shuttingDown) return;
   while (active.size < MAX_CONCURRENCY && queue.size > 0) {
     const id = queue.values().next().value; queue.delete(id); if (active.has(id)) continue; active.add(id);
-    void processJob(id).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
+    void processJob(id).then(result => {
+      if (result?.deferred && !shuttingDown) {
+        const delay = Math.max(1000, Math.min(604800000, Number(result.retryAfterMs) || 30000));
+        const timer = setTimeout(() => enqueue(id), delay); timer.unref();
+      }
+    }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
 app.get('/internal/history', (_req, res) => res.json(historySummary()));
@@ -61,7 +66,7 @@ app.get('/internal/jobs/:id/files/:index', (req, res) => {
 });
 app.get('/internal/jobs/:id/history', (req, res) => {
   const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, artifacts: listArtifacts(req.params.id) });
+  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage: record.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} }, lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, artifacts: listArtifacts(req.params.id) });
 });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
 function maybeExit() { if (shuttingDown && active.size === 0) { try { server?.close(); } catch {} try { closeStore(); } catch {} process.exit(0); } }
@@ -73,4 +78,8 @@ function shutdown() {
   timer.unref(); maybeExit();
 }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
-server = app.listen(PORT, '0.0.0.0', () => { console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`); for (const id of recoverableJobs()) enqueue(id); });
+server = app.listen(PORT, '0.0.0.0', () => { console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`); for (const job of recoverableJobs()) {
+    const delay = job.retryAt ? Math.max(0, Date.parse(job.retryAt) - Date.now()) : 0;
+    if (delay > 0) { const timer = setTimeout(() => enqueue(job.id), Math.min(delay, 604800000)); timer.unref(); }
+    else enqueue(job.id);
+  } });

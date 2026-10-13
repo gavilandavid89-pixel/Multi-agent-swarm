@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=task-files-1">
+  <link rel="stylesheet" href="/styles.css?v=diagnostic-twobatch-2">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -36,13 +36,13 @@
         <div class="task-status"><div><strong id="detail-stage">Preparando tarea…</strong><span id="detail-status" class="status running">En curso</span></div><span id="detail-progress-label" class="muted tiny">Esperando actividad</span></div>
         <div id="detail-progress" class="progress-track" aria-hidden="true"><span id="detail-progress-fill"></span></div>
         <p id="detail-hint" class="muted tiny">Los mensajes se actualizan automáticamente. El porcentaje solo cambia al guardarse una etapa; durante la respuesta del proveedor verás actividad en curso.</p>
-        <div id="conversation" class="conversation" aria-live="polite"><div class="empty-state"><span class="empty-glyph">✳</span><p>Preparando el comité…</p></div></div>
+        <details class="conversation-disclosure"><summary>Conversación completa de agentes (opcional)</summary><div id="conversation" class="conversation" aria-live="polite"><div class="empty-state"><span class="empty-glyph">✳</span><p>Preparando el comité…</p></div></div></details>
         <section id="artifacts-panel" class="artifacts-panel hidden"><div class="section-head"><div><p class="panel-kicker">ESPACIO DE ARCHIVOS</p><h3>Archivos creados</h3></div><span id="artifacts-count" class="muted tiny">0 archivos</span></div><p class="muted tiny">Los archivos detectados en la entrega y en las correcciones aparecen aquí para descargarlos.</p><div id="artifacts-list" class="artifacts-list"></div></section>
-        <details class="diagnostic"><summary>Diagnóstico técnico</summary><p id="copy-status" class="muted tiny" role="status" aria-live="polite"></p><pre id="detail-content"></pre></details>
+        <details class="diagnostic" open><summary>Diagnóstico técnico compacto · copiar para soporte</summary><p id="copy-status" class="muted tiny" role="status" aria-live="polite"></p><pre id="detail-content"></pre></details>
       </section>
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=task-history-5" defer></script>
+  <script src="/app.js?v=diagnostic-twobatch-2" defer></script>
 </body>
 </html>
