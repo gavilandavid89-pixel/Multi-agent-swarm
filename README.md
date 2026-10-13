@@ -8,7 +8,7 @@
 
 - `apps/web/public`: interfaz adaptable, historial bajo demanda y panel de actividad.
 - `apps/bridge`: API pública protegida por `APP_ACCESS_KEY`; reenvía las tareas al worker usando `WORKER_SHARED_SECRET`.
-- `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, desarrollo y validación.
+- `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, coordinación de coherencia entre archivos, desarrollo y validación.
 - `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en SQLite.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
@@ -38,10 +38,14 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `HISTORY_ENCRYPTION_KEY`: clave hexadecimal de 32 bytes para cifrar el historial.
 - `DATABASE_PATH`: ruta del archivo SQLite.
 - `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 50.000; ajustable entre 4.000 y 100.000).
+- `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
 **Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, el historial cifrado no podrá recuperarse. Guardá la clave de forma segura. SQLite está pensado para una sola instancia de worker; para persistencia real en Render se necesita un disco persistente o adaptar el almacenamiento a una base de datos externa. El sistema de archivos de un servicio gratuito puede ser efímero.
 
 ## Alcance de validación
+
+El Coordinador de coherencia construye un mapa compartido de módulos, interfaces, dependencias y reglas antes de programar; luego audita el conjunto de archivos contra ese mapa y sus hallazgos bloquean la aprobación hasta corregirse. El panel muestra el presupuesto de tokens, el consumo de entrada/salida y el saldo estimado en directo usando el uso reportado por el proveedor.
 
 La validación automática usa un segundo agente y revisa entregas largas por lotes delimitados por archivo. El chequeo determinista comprueba la sintaxis JavaScript como módulo ES sin ejecutar el código, valida JSON cuando detecta `package.json`, revisa referencias locales de scripts/estilos en HTML y busca señales básicas de truncamiento CSS. No equivale a una prueba de integración ni garantiza que la solución sea correcta. Si una entrega no está estructurada por archivos y no puede revisarse completa, no se aprueba automáticamente.
 
