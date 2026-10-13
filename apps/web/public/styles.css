@@ -6,3 +6,9 @@
 .history-row .job-meta{line-height:1.5}
 .history-row .job-main{min-width:0}
 .history-row .mini-button{align-self:center;flex-shrink:0}
+
+
+/* Task history filters and pagination */
+.history-filter{width:100%;margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#130d1e;color:var(--text);font:inherit;font-size:12px}
+.load-more-jobs{width:100%;margin-top:12px}
+#jobs-count{margin-top:5px}
