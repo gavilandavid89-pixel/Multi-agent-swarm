@@ -80,8 +80,9 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
 export async function processJob(jobId) {
   const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
+  const savePartial = info => { const current = getPayload(jobId); if (current && typeof info?.content === 'string') updateJob(jobId, { payload: { partialDelivery: info.content, partialOutputAt: new Date().toISOString() } }); };
   const canContinue = () => { const record = getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
-  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '' } = payload;
+  let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
       startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
@@ -110,8 +111,14 @@ export async function processJob(jobId) {
     if (!delivery) {
       startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega respetando el mapa compartido de coherencia.');
       assertTaskTokenBudget(jobId);
-      delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue);
-      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery });
+      if (partialDelivery) {
+        delivery = partialDelivery;
+        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry, partialDelivery, coherence, canContinue, savePartial);
+        delivery = mergeDelivery(partialDelivery, continuation);
+      } else {
+        delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue, savePartial);
+      }
+      checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       saveArtifacts(jobId, delivery);
     }
     payload = getPayload(jobId)?.payload || {};
