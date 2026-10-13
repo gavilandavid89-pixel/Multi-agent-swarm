@@ -37,7 +37,7 @@ const update = db.prepare('UPDATE jobs SET status=@status, stage=@stage, progres
 const byId = db.prepare('SELECT * FROM jobs WHERE id=?');
 const toPublic = row => ({ id: row.id, status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at, error: row.error || null });
 
-const artifactsRoot = path.resolve(process.env.ARTIFACTS_DIR || './data/artifacts');
+const artifactsRoot = path.resolve(process.env.ARTIFACTS_DIR || path.join(path.dirname(path.resolve(databasePath)), 'artifacts'));
 const MAX_ARTIFACTS = 40;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_ARTIFACT_TOTAL = 2 * 1024 * 1024;
