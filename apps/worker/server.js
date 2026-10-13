@@ -60,7 +60,7 @@ app.get('/internal/jobs/:id/files', (req, res) => {
   res.json({ files: listArtifacts(req.params.id) });
 });
 app.get('/internal/jobs/:id/files/:index', (req, res) => {
-  if (!/^\d+$.test(req.params.index)) return res.status(400).json({ error: 'Índice de archivo inválido.' });
+  if (!/^\d+$/.test(req.params.index)) return res.status(400).json({ error: 'Índice de archivo inválido.' });
   const file = getArtifact(req.params.id, Number(req.params.index));
   if (!file) return res.status(404).json({ error: 'No existe ese archivo.' });
   res.json({ file });
