@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '' };
+const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -169,6 +169,55 @@ $('close-artifact-preview').addEventListener('click', () => {
   $('artifact-preview-frame').src = 'about:blank';
   $('artifact-preview').classList.add('hidden');
 });
+function closeUploadedZipPreview() {
+  $('zip-preview-frame').src = 'about:blank';
+  $('zip-preview-result').classList.add('hidden');
+  state.uploadedZipPreview = null;
+}
+$('zip-preview-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = $('zip-preview-file');
+  const file = input.files?.[0];
+  if (!file) { $('zip-preview-status').textContent = 'Elegí un archivo ZIP primero.'; return; }
+  if (file.size > 8 * 1024 * 1024) { $('zip-preview-status').textContent = 'El ZIP supera el límite de 8 MB.'; return; }
+  const button = $('zip-preview-submit');
+  button.disabled = true; button.textContent = 'Analizando ZIP…';
+  $('zip-preview-status').textContent = 'Comprobando rutas, tamaños y formatos compatibles…';
+  closeUploadedZipPreview();
+  try {
+    const response = await fetch('/api/preview-zip', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${state.accessKey}`, 'content-type': 'application/zip' },
+      body: file
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Error HTTP ${response.status}`);
+    if (!Array.isArray(result.pages) || !result.pages.length || !result.url) throw new Error('El ZIP no devolvió páginas HTML para previsualizar.');
+    const token = result.url.split('/')[2];
+    if (!token) throw new Error('La sesión de vista previa no es válida.');
+    state.uploadedZipPreview = { token, pages: result.pages };
+    const select = $('zip-preview-page');
+    select.innerHTML = result.pages.map(page => `<option value="${Number(page.index)}">${escapeHtml(page.path)}</option>`).join('');
+    select.value = String(result.pages[0].index);
+    $('zip-preview-frame').src = result.url;
+    $('zip-preview-details').textContent = `${result.filesCount} recurso(s) compatibles · ${(result.expandedBytes / 1024).toFixed(1)} KB descomprimidos. La sesión caduca en 10 minutos; los ejecutables e instaladores no se ejecutan.`;
+    $('zip-preview-result').classList.remove('hidden');
+    $('zip-preview-status').textContent = `ZIP analizado: ${result.pages.length} página(s) HTML disponibles. Se abrió ${result.pages[0].path} en el entorno aislado.`;
+    $('zip-preview-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    $('zip-preview-status').textContent = `No se pudo abrir el ZIP: ${error.message}`;
+  } finally {
+    button.disabled = false; button.textContent = 'Analizar y abrir vista previa ↗';
+  }
+});
+$('zip-preview-page').addEventListener('change', () => {
+  const preview = state.uploadedZipPreview;
+  if (!preview) return;
+  const page = preview.pages.find(item => Number(item.index) === Number($('zip-preview-page').value));
+  if (page) $('zip-preview-frame').src = `/preview/${preview.token}/${page.index}`;
+});
+$('close-zip-preview').addEventListener('click', closeUploadedZipPreview);
+
 function updateDetailView(data) {
   const job = data.job || {};
   $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
