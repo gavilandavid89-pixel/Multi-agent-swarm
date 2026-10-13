@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
-const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
+const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
 function authHeaders(json = true) { return { ...(json ? { 'content-type': 'application/json' } : {}), ...(state.accessKey ? { authorization: `Bearer ${state.accessKey}` } : {}) }; }
 async function api(url, options = {}) {
@@ -218,6 +218,32 @@ $('zip-preview-page').addEventListener('change', () => {
 });
 $('close-zip-preview').addEventListener('click', closeUploadedZipPreview);
 
+function renderTokenBudget(data) {
+  const usage = data.tokenUsage || {};
+  const total = Math.max(1, Number(data.tokenBudget) || 50000);
+  const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
+  const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
+  const prompt = Math.max(0, Number(usage.promptTokens) || 0);
+  const completion = Math.max(0, Number(usage.completionTokens) || 0);
+  const calls = Math.max(0, Number(usage.calls) || 0);
+  const pct = Math.min(100, used / total * 100);
+  const fmt = value => Math.round(value).toLocaleString('es-AR');
+  $('tokens-remaining').textContent = fmt(remaining);
+  $('tokens-total-label').textContent = 'de ' + fmt(total);
+  $('tokens-used').textContent = fmt(used);
+  $('tokens-input').textContent = fmt(prompt);
+  $('tokens-output').textContent = fmt(completion);
+  $('tokens-calls').textContent = fmt(calls);
+  $('token-budget-fill').style.width = pct + '%';
+  $('token-budget-track').setAttribute('aria-valuemax', String(total));
+  $('token-budget-track').setAttribute('aria-valuenow', String(Math.min(total, used)));
+  $('token-budget-track').classList.toggle('token-budget-low', remaining <= total * 0.15);
+  $('token-budget-note').textContent = remaining === 0
+    ? 'Presupuesto agotado; la tarea debe pausarse hasta ampliar el límite.'
+    : remaining <= total * 0.15
+      ? 'Queda menos del 15 % del presupuesto. Priorizá correcciones y validación.'
+      : 'Actualización automática cada ~2 segundos. El consumo refleja los datos reportados por el proveedor.';
+}
 function updateDetailView(data) {
   const job = data.job || {};
   $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
@@ -233,7 +259,7 @@ function updateDetailView(data) {
   track.classList.toggle('progress-failed', job.status === 'failed');
   $('detail-progress-label').textContent = job.status === 'completed' ? '100% · resultado listo' : job.status === 'failed' ? 'Interrumpida · revisar diagnóstico' : job.status === 'needs_review' && job.stage?.includes('presupuesto') ? 'Checkpoint conservado · ajustar presupuesto para reanudar' : job.status === 'needs_review' ? '99% · necesita revisión humana' : job.status === 'queued' && data.retryAt ? 'Pausa automática · reanudación programada' : job.status === 'queued' ? 'En cola · esperando al motor' : 'Trabajando · esperando el siguiente hito';
   $('detail-hint').textContent = job.status === 'failed' ? (job.error || 'La tarea falló. Abrí el diagnóstico técnico para ver la causa.') : job.status === 'queued' && data.retryAt ? `Pausa automática por límite temporal del proveedor. Reanudación prevista: ${dateLabel(data.retryAt)}. Se conserva el checkpoint.` : ['queued','running'].includes(job.status) ? 'La tarea continúa automáticamente; el porcentaje refleja el último checkpoint guardado.' : 'El diagnóstico técnico está separado de la conversación completa y de los archivos generados.';
-  renderConversation(data);
+  renderTokenBudget(data);\n  renderConversation(data);
   renderArtifacts(data.artifacts, job.id, job.status, data.validation, data.syntax);
   const technicalEvents = (data.history || []).filter(entry => ['retry','error','check','usage'].includes(entry.type) || entry.agent === 'Validador').slice(-30).map(entry => ({ at: entry.at || null, agent: entry.agent || 'sistema', type: entry.type || 'message', detail: String(entry.content || '').slice(0, 1800) }));
   const diagnostic = {
