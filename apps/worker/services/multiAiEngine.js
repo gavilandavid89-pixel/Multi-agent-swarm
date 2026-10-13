@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteDesarrollador, 
 import { getPayload, updateJob, saveArtifacts } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 const configuredRounds = Number.parseInt(process.env.MAX_CORRECTION_ROUNDS || '3', 10);
-const MAX_ROUNDS = Number.isFinite(configuredRounds) ? Math.min(10, Math.max(1, configuredRounds)) : 3;
+const MAX_ROUNDS = Number.isFinite(configuredRounds) ? Math.min(10, Math.max(2, configuredRounds)) : 3;
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function retryNotice(jobId, info) {
