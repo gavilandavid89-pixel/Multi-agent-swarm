@@ -127,5 +127,10 @@ export function historySummary() {
   const count = rows.reduce((sum, row) => sum + row.count, 0);
   return { hasHistory: count > 0, count, byStatus: { queued: byStatus.queued || 0, running: byStatus.running || 0, completed: byStatus.completed || 0, failed: byStatus.failed || 0, needs_review: byStatus.needs_review || 0 } };
 }
-export function recoverableJobs() { return db.prepare("SELECT id FROM jobs WHERE status IN ('queued','running') ORDER BY created_at ASC").all().map(row => row.id); }
+export function recoverableJobs() {
+  return db.prepare("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY created_at ASC").all().map(row => {
+    try { const payload = unseal(row.encrypted_payload); return { id: row.id, retryAt: payload.retryAt || null }; }
+    catch { return { id: row.id, retryAt: null }; }
+  });
+}
 export function closeStore() { if (db.open) db.close(); }
