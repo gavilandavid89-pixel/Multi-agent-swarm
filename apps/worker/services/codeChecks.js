@@ -1,20 +1,68 @@
 import { spawn } from 'node:child_process';
 
-export async function checkJavascriptSyntax(delivery) {
-  const source = String(delivery);
-  const blocks = [...source.matchAll(/```(?:javascript|js|mjs|cjs)\s*\n([\s\S]*?)```/gi)];
-  if (blocks.length === 0) return { checked: false, ok: true, message: 'No se encontraron bloques JavaScript delimitados; la entrega solo recibió revisión de IA.' };
-  for (let index = 0; index < blocks.length; index += 1) {
-    const result = await new Promise(resolve => {
-      const child = spawn(process.execPath, ['--check'], { stdio: ['pipe', 'ignore', 'pipe'] });
-      let stderr = '';
-      child.stderr.setEncoding('utf8');
-      child.stderr.on('data', chunk => { if (stderr.length < 12000) stderr += chunk; });
-      child.on('error', error => resolve({ ok: false, error: error.message }));
-      child.on('close', code => resolve({ ok: code === 0, error: stderr.trim() }));
-      child.stdin.end(blocks[index][1]);
-    });
-    if (!result.ok) return { checked: true, ok: false, message: `El bloque JavaScript ${index + 1} no supera node --check: ${(result.error || 'error de sintaxis').slice(0, 2000)}` };
+const runCheck = source => new Promise(resolve => {
+  const child = spawn(process.execPath, ['--check', '--input-type=module'], { stdio: ['pipe', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { if (stderr.length < 12000) stderr += chunk; });
+  child.on('error', error => resolve({ ok: false, error: error.message }));
+  child.on('close', code => resolve({ ok: code === 0, error: stderr.trim() }));
+  child.stdin.end(source);
+});
+
+function extractFiles(delivery) {
+  const files = new Map();
+  const re = /(?:^|\n)(?:#{1,6}\s+([^\n]+)|\*\*([^*\n]+)\*\*|(?:Archivo|File|Ruta)\s*:\s*([^\n]+))\s*\n\s*`{3}([^\n]*)\n([\s\S]*?)\n`{3}/g;
+  let match;
+  while ((match = re.exec(String(delivery || '')))) {
+    let name = String(match[1] || match[2] || match[3] || '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').trim().replace(/^\x60|\x60$/g, '').replace(/^\.\//, '');
+    if (name && !name.includes('..') && name.length < 180) files.set(name, { content: match[5], language: match[4].trim().toLowerCase() });
   }
-  return { checked: true, ok: true, message: `node --check validó ${blocks.length} bloque(s) JavaScript sin ejecutarlos.` };
+  return files;
+}
+
+export async function checkJavascriptSyntax(delivery) {
+  const files = extractFiles(delivery);
+  const issues = [];
+  const jsFiles = [...files.entries()].filter(([name, file]) => /\.(?:js|mjs|cjs)$/i.test(name) || /^(?:javascript|js|mjs|cjs)$/.test(file.language));
+  const blocks = [...String(delivery || '').matchAll(/```(?:javascript|js|mjs|cjs)\s*\n([\s\S]*?)```/gi)];
+  const sources = jsFiles.length ? jsFiles.map(([name, file]) => ({ name, content: file.content })) : blocks.map((block, i) => ({ name: `bloque ${i + 1}`, content: block[1] }));
+  for (const file of sources) {
+    const result = await runCheck(file.content);
+    if (!result.ok) issues.push(`${file.name}: ${(result.error || 'error de sintaxis').slice(0, 1200)}`);
+  }
+  if (files.has('package.json')) {
+    try { JSON.parse(files.get('package.json').content); }
+    catch (error) { issues.push(`package.json: JSON inválido (${error.message})`); }
+  }
+  for (const [name, file] of files) {
+    if (/\.css$/i.test(name)) {
+      const css = file.content;
+      if ((css.match(/{/g) || []).length !== (css.match(/}/g) || []).length) issues.push(`${name}: llaves CSS desbalanceadas; posible bloque truncado.`);
+      if (/\@media[^{}]*\{[^{}]*$/s.test(css)) issues.push(`${name}: bloque @media incompleto al final del archivo.`);
+    }
+  }
+  const html = [...files.entries()].filter(([name]) => /\.html?$/i.test(name)).map(([, file]) => file.content).join('\n');
+  if (html) {
+    for (const [, rawPath] of html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|mjs|css))["']/gi)) {
+      const target = rawPath.replace(/^\.\//, '').replace(/^\//, '');
+      const normalized = target.startsWith('src/') ? target : target;
+      const exists = [...files.keys()].some(name => name === normalized || name.endsWith('/' + normalized));
+      if (!exists && !/^(?:https?:|data:)/i.test(rawPath)) issues.push(`HTML referencia ${rawPath}, pero ese archivo no aparece en la entrega.`);
+    }
+  }
+  for (const [name, file] of files) {
+    if (name === 'package.json') {
+      try {
+        const pkg = JSON.parse(file.content);
+        for (const command of Object.values(pkg.scripts || {})) {
+          const match = String(command).match(/(?:node\s+)([\w./-]+\.(?:js|mjs|cjs))/);
+          if (match && ![...files.keys()].some(path => path === match[1] || path.endsWith('/' + match[1]))) issues.push(`package.json declara un script que apunta a ${match[1]}, pero ese archivo no está en la entrega.`);
+        }
+      } catch {}
+    }
+  }
+  if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length };
+  if (!sources.length && !files.size) return { checked: false, ok: true, message: 'No se encontraron archivos o bloques de código verificables; la entrega solo recibió revisión de IA.' };
+  return { checked: true, ok: true, message: `Comprobación determinista superada: ${files.size} archivo(s) detectado(s), ${sources.length} archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.`, filesChecked: files.size, javascriptChecked: sources.length };
 }
