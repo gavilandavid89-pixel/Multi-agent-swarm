@@ -6,9 +6,9 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   '.html', '.htm', '.css', '.js', '.mjs', '.json', '.svg', '.png', '.jpg', '.jpeg',
   '.gif', '.webp', '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.mp4',
-  '.webm', '.mp3', '.wav', '.ogg', '.txt', '.xml', '.wasm', '.bin', '.dat', '.data',
+  '.webm', '.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac', '.mid', '.midi', '.txt', '.xml', '.wasm', '.bin', '.mem', '.dat', '.data',
   '.csv', '.map', '.webmanifest', '.glb', '.gltf', '.obj', '.mtl', '.ktx', '.ktx2',
-  '.basis', '.hdr', '.exr', '.vert', '.frag'
+  '.basis', '.hdr', '.exr', '.vert', '.frag', '.glsl', '.shader', '.pck', '.unityweb', '.assetbundle', '.bytes'
 ]);
 const BLOCKED_EXTENSIONS = new Set([
   '.exe', '.dll', '.so', '.dylib', '.com', '.bat', '.cmd', '.sh', '.ps1', '.msi',
@@ -24,10 +24,10 @@ const MIME_TYPES = {
   '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4', '.webm': 'video/webm',
-  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.mid': 'audio/midi', '.midi': 'audio/midi',
   '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8',
   '.wasm': 'application/wasm', '.bin': 'application/octet-stream', '.dat': 'application/octet-stream',
-  '.data': 'application/octet-stream', '.csv': 'text/csv; charset=utf-8', '.map': 'application/json; charset=utf-8',
+  '.data': 'application/octet-stream', '.mem': 'application/octet-stream', '.pck': 'application/octet-stream', '.unityweb': 'application/octet-stream', '.assetbundle': 'application/octet-stream', '.bytes': 'application/octet-stream', '.csv': 'text/csv; charset=utf-8', '.map': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8', '.glb': 'model/gltf-binary',
   '.gltf': 'model/gltf+json; charset=utf-8', '.obj': 'text/plain; charset=utf-8',
   '.mtl': 'text/plain; charset=utf-8', '.ktx': 'image/ktx', '.ktx2': 'image/ktx2',
@@ -132,13 +132,37 @@ export function parsePreviewZip(input) {
     if (content.length !== uncompressedSize || crc32(content) !== expectedCrc) throw new Error('El tamaño o la suma de comprobación no coincide para: ' + name.slice(0, 120));
     files.push({ path: name, content, size: content.length, contentType: MIME_TYPES[ext] || 'application/octet-stream' });
   }
-  const pages = files.filter(file => ['.html', '.htm'].includes(extensionOf(file.path)));
+  let pages = files.filter(file => ['.html', '.htm'].includes(extensionOf(file.path)));
   if (!pages.length) {
-    if (!files.length) throw new Error('El ZIP no contiene archivos web compatibles para previsualizar.');
-    throw new Error('El ZIP contiene archivos compatibles, pero no encontramos ninguna página .html o .htm.');
+    // A ZIP containing browser-native JavaScript can be launched with a generated HTML shell.
+    // This intentionally does not attempt to execute server-side projects or install npm packages.
+    const preferredEntrypoints = [
+      'index.js', 'main.js', 'game.js', 'app.js', 'bundle.js', 'index.mjs', 'main.mjs', 'game.mjs', 'app.mjs',
+      'dist/index.js', 'dist/main.js', 'dist/game.js', 'dist/app.js',
+      'src/main.js', 'src/index.js', 'src/game.js', 'src/app.js',
+      'js/main.js', 'js/game.js', 'js/app.js'
+    ];
+    const scripts = files.filter(file => ['.js', '.mjs'].includes(extensionOf(file.path)));
+    const entry = preferredEntrypoints.map(candidate => scripts.find(file => file.path.toLowerCase() === candidate))
+      .find(Boolean) || scripts.find(file => /(^|\/)(index|main|game|app)\.(mjs|js)$/i.test(file.path));
+    if (entry) {
+      const entryRef = '../' + entry.path.split('/').map(encodeURIComponent).join('/');
+      const entryDirectory = entry.path.includes('/') ? entry.path.split('/').slice(0, -1).join('/') : '';
+      const styles = files.filter(file => extensionOf(file.path) === '.css')
+        .sort((a, b) => Number(b.path.startsWith(entryDirectory ? entryDirectory + '/' : '__never__')) - Number(a.path.startsWith(entryDirectory ? entryDirectory + '/' : '__never__')))
+        .slice(0, 12)
+        .map(file => '<link rel="stylesheet" href="../' + file.path.split('/').map(encodeURIComponent).join('/') + '">')
+        .join('');
+      const shell = '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark light"><title>Juego · Swarm ZIP Lab</title>' + styles + '</head><body style="margin:0;min-height:100vh"><script type="module" src="' + entryRef + '"></script></body></html>';
+      files.push({ path: '__swarm_preview__/index.html', content: Buffer.from(shell), size: Buffer.byteLength(shell), contentType: MIME_TYPES['.html'], generated: true });
+      pages = [files[files.length - 1]];
+    } else {
+      if (!files.length) throw new Error('El ZIP no contiene archivos web compatibles para previsualizar.');
+      throw new Error('No encontramos index.html ni un punto de entrada JavaScript reconocido. Si es un proyecto Vite/React/Vue, subí el ZIP de la carpeta de compilación (dist/build) o incluí el HTML generado; no se instalan dependencias npm automáticamente.');
+    }
   }
   files.forEach((file, index) => { file.index = index; });
-  pages.sort((a, b) => Number(b.path.toLowerCase() === 'index.html') - Number(a.path.toLowerCase() === 'index.html'));
+  pages.sort((a, b) => Number(/(^|\/)index\.html?$/i.test(b.path)) - Number(/(^|\/)index\.html?$/i.test(a.path)));
   return { files, pages: pages.map(file => ({ index: file.index, path: file.path })), totalExpandedBytes: expandedTotal };
 }
 

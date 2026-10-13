@@ -20,9 +20,27 @@ test('ZIP de web detecta index.html y conserva assets sin extraer al disco', () 
   assert.equal(parsed.files.find(file => file.path === 'game.wasm').content.length, 8);
 });
 
-test('excluye formatos ejecutables y falla si no queda HTML para previsualizar', () => {
-  const archive = createZip([{ path: 'setup.exe', content: 'not an executable' }, { path: 'readme.txt', content: 'hello' }]);
-  assert.throws(() => parsePreviewZip(archive), /no encontramos ninguna página/);
+test('genera un lanzador HTML para ZIP de juego JavaScript sin HTML', () => {
+  const archive = createZip([
+    { path: 'src/main.js', content: 'document.body.innerHTML = "<canvas id=game></canvas>";' },
+    { path: 'src/game.js', content: 'export const ready = true;' },
+    { path: 'src/game.css', content: 'canvas { width: 100vw; height: 100vh; }' },
+    { path: 'assets/texture.bin', content: 'texture' },
+    { path: 'setup.exe', content: 'not an executable' }
+  ]);
+  const parsed = parsePreviewZip(archive);
+  assert.equal(parsed.pages.length, 1);
+  assert.equal(parsed.pages[0].path, '__swarm_preview__/index.html');
+  const shell = parsed.files.find(file => file.path === parsed.pages[0].path).content.toString('utf8');
+  assert.match(shell, /type="module"/);
+  assert.match(shell, /src\/main\.js/);
+  assert.match(shell, /src\/game\.css/);
+  assert.equal(parsed.files.some(file => file.path === 'setup.exe'), false);
+});
+
+test('da un error útil si el ZIP no tiene HTML ni un entrypoint de juego reconocido', () => {
+  const archive = createZip([{ path: 'setup.exe', content: 'not an executable' }, { path: 'readme.txt', content: 'hello' }, { path: 'utils.js', content: 'export const x = 1;' }]);
+  assert.throws(() => parsePreviewZip(archive), /No encontramos index\.html ni un punto de entrada JavaScript reconocido/);
 });
 
 test('rechaza datos que no son ZIP y paquetes mayores al límite', () => {
