@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore } from './services/store.js';
+import { createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 
 const app = express();
@@ -48,6 +48,16 @@ app.post('/internal/jobs/:id/retry', (req, res) => {
   if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
   const job = updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { validation: null, syntax: null, validationRound: 0, result: null, lastCheckpoint: 'retry-requested' } });
   enqueue(req.params.id); res.status(202).json(job);
+});
+app.get('/internal/jobs/:id/files', (req, res) => {
+  if (!getJob(req.params.id)) return res.status(404).json({ error: 'No existe esa tarea.' });
+  res.json({ files: listArtifacts(req.params.id) });
+});
+app.get('/internal/jobs/:id/files/:index', (req, res) => {
+  if (!/^\\d+$/.test(req.params.index)) return res.status(400).json({ error: 'Índice de archivo inválido.' });
+  const file = getArtifact(req.params.id, Number(req.params.index));
+  if (!file) return res.status(404).json({ error: 'No existe ese archivo.' });
+  res.json({ file });
 });
 app.get('/internal/jobs/:id/history', (req, res) => {
   const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
