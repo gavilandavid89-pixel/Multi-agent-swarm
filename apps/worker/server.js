@@ -113,7 +113,7 @@ function shutdown() {
   timer.unref(); maybeExit();
 }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
-server = app.listen(PORT, '0.0.0.0', () => { console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`); for (const job of recoverableJobs()) {
+server = app.listen(PORT, '0.0.0.0', () => { console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`); const provider = process.env.GEMINI_API_KEY ? 'Gemini' : (process.env.GROQ_API_KEY ? 'Groq' : 'ninguno'); const configuredModel = process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'); console.info('[worker][ai_provider_config]', JSON.stringify({ provider, model: configuredModel, geminiKeyConfigured: Boolean(process.env.GEMINI_API_KEY), groqKeyConfigured: Boolean(process.env.GROQ_API_KEY) })); for (const job of recoverableJobs()) {
     const delay = job.retryAt ? Math.max(0, Date.parse(job.retryAt) - Date.now()) : 0;
     if (delay > 0) { const timer = setTimeout(() => enqueue(job.id), Math.min(delay, 604800000)); timer.unref(); }
     else enqueue(job.id);
