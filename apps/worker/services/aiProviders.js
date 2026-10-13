@@ -93,6 +93,26 @@ export async function agenteDesarrollador(objetivo, estrategia, errores = '', on
     ]
   });
 }
+export function parseValidationResponse(rawValue) {
+  const raw = String(rawValue ?? '');
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) {
+    return { verdict: 'NEEDS_CHANGES', findings: ['El validador no devolvió JSON válido.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) };
+  }
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (!['APPROVED', 'NEEDS_CHANGES'].includes(parsed.verdict) || !Array.isArray(parsed.findings) || typeof parsed.summary !== 'string') throw new Error('esquema inválido');
+    return {
+      verdict: parsed.verdict,
+      findings: parsed.findings.slice(0, 30).map(value => String(value).slice(0, 2000)),
+      summary: parsed.summary.slice(0, 5000),
+      raw: raw.slice(0, 12000)
+    };
+  } catch {
+    return { verdict: 'NEEDS_CHANGES', findings: ['El validador devolvió un formato inválido; no se aprueba automáticamente.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) };
+  }
+}
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const source = String(entrega ?? '');
   const maxChars = 8500;
