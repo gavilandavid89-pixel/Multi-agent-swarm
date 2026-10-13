@@ -198,14 +198,21 @@ function resolvePreviewReference(htmlPath, reference) {
   return safePreviewPath(parts.join('/'));
 }
 function rewritePreviewHtml(html, htmlPath, token) {
-  const prefix = `/preview/${encodeURIComponent(token)}/assets/`;
-  return String(html).replace(/<(script|link|img|source|video|audio|track)\b[^>]*>/gi, tag =>
-    tag.replace(/\b(src|href|poster)\s*=\s*(["'])(.*?)\2/gi, (whole, attribute, quote, value) => {
+  const tokenPart = encodeURIComponent(token);
+  const prefix = `/preview/${tokenPart}/assets/`;
+  const directory = String(htmlPath).includes('/') ? String(htmlPath).split('/').slice(0, -1).map(encodeURIComponent).join('/') + '/' : '';
+  const baseTag = `<base href="${prefix}${directory}">`;
+  let output = String(html).replace(/<base\\b[^>]*>/gi, '');
+  output = output.replace(/<(script|link|img|source|video|audio|track)\\b[^>]*>/gi, tag =>
+    tag.replace(/\\b(src|href|poster)\\s*=\\s*(["'])(.*?)\\2/gi, (whole, attribute, quote, value) => {
       const resolved = resolvePreviewReference(htmlPath, value);
       if (!resolved) return whole;
       return `${attribute}=${quote}${prefix}${resolved.split('/').map(encodeURIComponent).join('/')}${quote}`;
     })
   );
+  if (/<head\\b[^>]*>/i.test(output)) return output.replace(/<head\\b[^>]*>/i, match => match + baseTag);
+  if (/<html\\b[^>]*>/i.test(output)) return output.replace(/<html\\b[^>]*>/i, match => match + '<head>' + baseTag + '</head>');
+  return baseTag + output;
 }
 async function previewFile(session, index) {
   if (Array.isArray(session.files)) {
@@ -221,13 +228,13 @@ async function previewFile(session, index) {
   if (!result.file || (typeof result.file.content !== 'string' && !Buffer.isBuffer(result.file.content))) { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
   return { item, file: result.file, files };
 }
-app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '8mb' }), (req, res) => {
+app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
   try {
     const parsed = parsePreviewZip(req.body);
     prunePreviewSessions();
     const uploadedTokens = [...previewSessions.entries()].filter(([, session]) => session.uploaded);
-    while (uploadedTokens.length >= 4) {
+    while (uploadedTokens.length >= 2) {
       const [oldestToken] = uploadedTokens.shift();
       previewSessions.delete(oldestToken);
     }
@@ -268,7 +275,7 @@ app.get('/preview/:token/assets/*', async (req, res) => {
     if (Array.isArray(session.files)) {
       const item = session.files.find(file => file.path === assetPath);
       if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
-      res.set({ 'Content-Type': item.contentType || previewMimeType(item.path), 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' });
+      res.set({ 'Content-Type': item.contentType || previewMimeType(item.path), 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
       return res.send(item.content);
     }
     const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
@@ -294,7 +301,7 @@ app.get('/preview/:token/:index', async (req, res) => {
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
-      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline'; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none'; base-uri 'none'; navigate-to ${previewOrigin}; frame-ancestors 'self'`
+      'Content-Security-Policy': `sandbox allow-scripts; default-src ${previewOrigin} data: blob:; script-src ${previewOrigin} 'unsafe-inline' 'wasm-unsafe-eval' blob:; style-src ${previewOrigin} 'unsafe-inline'; img-src ${previewOrigin} data: blob:; font-src ${previewOrigin} data:; media-src ${previewOrigin} data: blob:; connect-src ${previewOrigin} data: blob:; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src ${previewOrigin} blob:; manifest-src 'none'; base-uri 'none'; navigate-to ${previewOrigin}; frame-ancestors 'self'`
     });
     res.send(html);
   } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo preparar la vista previa.'); }
