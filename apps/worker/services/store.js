@@ -67,6 +67,7 @@ export function saveArtifacts(id, delivery) {
   const row = byId.get(id);
   if (!row) return [];
   const files = extractArtifacts(delivery);
+  if (!files.length) return listArtifacts(id);
   const taskDir = path.resolve(artifactsRoot, id);
   if (!taskDir.startsWith(artifactsRoot + path.sep)) throw new Error('Ruta de artefactos inválida.');
   fs.rmSync(taskDir, { recursive: true, force: true });
