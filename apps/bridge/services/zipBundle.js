@@ -14,7 +14,7 @@ function crc32(buffer) {
 function safeName(value) {
   const name = String(value || '').replace(/\\/g, '/');
   if (!name || name.startsWith('/') || /^[a-z]:/i.test(name) || name.split('/').some(part => !part || part === '.' || part === '..')) return null;
-  if (!/^[\p{L}\p{N}._/-]+$/u.test(name) || Buffer.byteLength(name, 'utf8') > 240) return null;
+  if (name.split('/').some(part => !/^[\p{L}\p{N}._-]+$/u.test(part)) || Buffer.byteLength(name, 'utf8') > 240) return null;
   return name;
 }
 export function createZip(files) {
