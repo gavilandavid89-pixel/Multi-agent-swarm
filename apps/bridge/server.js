@@ -48,6 +48,7 @@ app.use('/api', (req, res, next) => {
   const auth = req.get('authorization') || '';
   const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!safeEqual(supplied, APP_ACCESS_KEY)) {
+    console.warn('[bridge][auth_rejected]', JSON.stringify({ method: req.method, path: req.path }));
     const limit = windowLimit(failedAuth, ip, 10, 15 * 60 * 1000);
     res.set('Retry-After', String(limit.retryAfter));
     return res.status(limit.allowed ? 401 : 429).json({ error: 'Clave de acceso inválida.' });
@@ -100,6 +101,7 @@ async function workerRequest(route, options = {}) {
   console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
   return data;
 }
+app.get('/api/access-check', (_req, res) => res.json({ ok: true }));
 app.get('/api/history', async (_req, res) => { try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs', async (req, res) => {
   const params = new URLSearchParams();
