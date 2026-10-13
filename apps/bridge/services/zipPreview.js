@@ -120,7 +120,7 @@ export function parsePreviewZip(input) {
       throw new Error('No se pudo descomprimir el archivo: ' + name.slice(0, 120));
     }
     if (content.length !== uncompressedSize || crc32(content) !== expectedCrc) throw new Error('El tamaño o la suma de comprobación no coincide para: ' + name.slice(0, 120));
-    files.push({ path: name, content: content.toString('base64'), size: content.length, contentType: MIME_TYPES[ext] || 'application/octet-stream' });
+    files.push({ path: name, content, size: content.length, contentType: MIME_TYPES[ext] || 'application/octet-stream' });
   }
   const pages = files.filter(file => ['.html', '.htm'].includes(extensionOf(file.path)));
   if (!pages.length) {
