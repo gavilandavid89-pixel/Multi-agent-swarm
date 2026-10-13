@@ -171,7 +171,7 @@ export async function processJob(jobId) {
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence, canContinue, savePartial);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, mergedDelivery);
