@@ -38,6 +38,8 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `HISTORY_ENCRYPTION_KEY`: clave hexadecimal de 32 bytes para cifrar el historial.
 - `DATABASE_PATH`: ruta del archivo SQLite.
 - `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 50.000; ajustable entre 4.000 y 100.000).
+- `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
 **Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, el historial cifrado no podrá recuperarse. Guardá la clave de forma segura. SQLite está pensado para una sola instancia de worker; para persistencia real en Render se necesita un disco persistente o adaptar el almacenamiento a una base de datos externa. El sistema de archivos de un servicio gratuito puede ser efímero.
 
