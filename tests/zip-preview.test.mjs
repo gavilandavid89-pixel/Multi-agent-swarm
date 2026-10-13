@@ -8,7 +8,7 @@ test('ZIP de web detecta index.html y conserva assets sin extraer al disco', () 
     { path: 'index.html', content: '<h1>Hola</h1><script src="app.js"></script>' },
     { path: 'app.js', content: 'document.body.dataset.ready = "yes";' },
     { path: 'assets/site.css', content: 'body { color: purple; }' },
-    { path: 'game.wasm', content: '\\0asm\\u0001\\0\\0\\0' }
+    { path: 'game.wasm', content: 'WASMTEST' }
   ]);
   const parsed = parsePreviewZip(archive);
   assert.equal(parsed.pages.length, 1);
