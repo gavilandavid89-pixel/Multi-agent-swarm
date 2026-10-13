@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { checkJavascriptSyntax } from '../apps/worker/services/codeChecks.js';
 
 const file = (name, source, language = 'js') =>
-  '### Archivo: ' + name + '\n\`\`\`' + language + '\n' + source + '\n\`\`\`';
+  '### Archivo: ' + name + '\n```' + language + '\n' + source + '\n```';
 
 test('comprueba imports relativos cuando los módulos están en la entrega', async () => {
   const delivery = [
