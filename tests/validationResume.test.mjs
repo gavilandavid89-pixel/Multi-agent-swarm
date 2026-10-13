@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getValidationResumeState } from '../apps/worker/services/multiAiEngine.js';
+import { getValidationResumeState } from '../apps/worker/services/validationResume.js';
 
 test('reutiliza una auditoría aprobada al reintentar después de un error del proveedor', () => {
   const review = { verdict: 'APPROVED', findings: [] };
