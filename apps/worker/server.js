@@ -26,7 +26,14 @@ function pump() {
   }
 }
 app.get('/internal/history', (_req, res) => res.json(historySummary()));
-app.get('/internal/jobs', (_req, res) => res.json({ jobs: listJobs(25) }));
+app.get('/internal/jobs', (req, res) => {
+  const requestedStatus = String(req.query.status || '');
+  const allowedStatuses = new Set(['all', 'queued', 'running', 'completed', 'failed', 'needs_review']);
+  if (requestedStatus && !allowedStatuses.has(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit || '25', 10) || 25));
+  const offset = Math.max(0, Number.parseInt(req.query.offset || '0', 10) || 0);
+  res.json(listJobs({ limit, offset, status: requestedStatus === 'all' ? '' : requestedStatus }));
+});
 app.post('/internal/jobs', (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
