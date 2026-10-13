@@ -218,6 +218,10 @@ async function refresh() {
   try { await refreshPromise; } finally { refreshPromise = null; }
 }
 async function showDetail(id) {
+  if (state.currentDetailId !== id) {
+    $('artifact-preview-frame').src = 'about:blank';
+    $('artifact-preview').classList.add('hidden');
+  }
   state.currentDetailId = id;
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
