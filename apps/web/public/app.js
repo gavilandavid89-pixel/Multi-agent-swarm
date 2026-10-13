@@ -121,7 +121,7 @@ async function showDetail(id) {
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
-$('access-form').addEventListener('submit', async event => { event.preventDefault(); state.accessKey = $('access-key').value.trim(); sessionStorage.setItem('swarm-access-key', state.accessKey); showApp(); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000); });
+$('access-form').addEventListener('submit', async event => { event.preventDefault(); state.accessKey = $('access-key').value.trim(); sessionStorage.setItem('swarm-access-key', state.accessKey); showApp(); await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); state.pollHandle = setInterval(refresh, 1800); state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000); });
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
@@ -137,7 +137,15 @@ $('show-history').addEventListener('click', async () => {
   if (!state.historyShown) return;
   try {
     const data = await api('/api/jobs'); const list = $('history-list');
-    list.innerHTML = (data.jobs || []).map(job => `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.createdAt))}</div></div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir comité</button></div>`).join('') || '<p class="muted tiny">Sin registros.</p>';
+    list.innerHTML = (data.jobs || []).map(job => {
+      const active = ['queued','running'].includes(job.status);
+      const done = job.status === 'completed';
+      const failed = job.status === 'failed';
+      const pct = done ? 100 : job.status === 'needs_review' ? 99 : failed ? null : null;
+      const progress = active ? '<div class="history-progress indeterminate"><span></span></div>' : pct !== null ? `<div class="history-progress"><span style="width:${pct}%"></span></div>` : '';
+      const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · hito ${Number.isFinite(job.progress) ? job.progress + '%' : 'en curso'}` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
+      return `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
+    }).join('') || '<p class="muted tiny">Sin registros.</p>';
     list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.history)));
   } catch (error) { alert(error.message); }
 });
