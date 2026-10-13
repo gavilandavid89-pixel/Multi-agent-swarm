@@ -48,19 +48,21 @@ export async function checkJavascriptSyntax(delivery) {
   const knownFiles = new Set(files.keys());
   const resolveLocalImport = (from, specifier) => {
     const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
-    const candidates = [base, ...['.js', '.mjs', '.cjs', '.json', '.css', '.html'].map(ext => base.endsWith(ext) ? null : base + ext), ...['index.js', 'index.mjs', 'index.cjs'].map(index => path.posix.join(base, index))].filter(Boolean);
+    const extensions = ['', '.js', '.mjs', '.cjs', '.json', '.css', '.html'];
+    const candidates = [...extensions.map(ext => base.endsWith(ext) ? base : base + ext), ...['index.js', 'index.mjs', 'index.cjs'].map(index => path.posix.join(base, index))];
     return candidates.some(candidate => knownFiles.has(candidate) || [...knownFiles].some(name => name.endsWith('/' + candidate)));
   };
   for (const [name, file] of files) {
-    if (!/\\.(?:js|mjs|cjs)$/i.test(name)) continue;
-    const imports = [
-      ...file.content.matchAll(/\\bfrom\\s*['"]((?:\\.\\.?\\/) [^'"]+)['"]/gx),
-      ...file.content.matchAll(/\\bimport\\s*['"]((?:\\.\\.?\\/)[^'"]+)['"]/g),
-      ...file.content.matchAll(/\\bimport\\s*\\(\\s*['"]((?:\\.\\.?\\/)[^'"]+)['"]\\s*\\)/g)
+    if (!/\.(?:js|mjs|cjs)$/i.test(name)) continue;
+    const importPatterns = [
+      /\bfrom\s*['"](\.{1,2}\/[^'"]+)['"]/g,
+      /\bimport\s*['"](\.{1,2}\/[^'"]+)['"]/g,
+      /\bimport\s*\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g
     ];
-    for (const match of imports) {
-      const specifier = match[1].replace(/\\s/g, '');
-      if (!resolveLocalImport(name, specifier)) issues.push(`${name} importa ${specifier}, pero no se encontró ese archivo en la entrega.`);
+    for (const pattern of importPatterns) {
+      for (const match of file.content.matchAll(pattern)) {
+        if (!resolveLocalImport(name, match[1])) issues.push(name + ' importa ' + match[1] + ', pero no se encontró ese archivo en la entrega.');
+      }
     }
   }
   for (const [name, file] of files) {
