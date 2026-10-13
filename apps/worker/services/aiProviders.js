@@ -25,7 +25,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0;
-  const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '3200', 10);
+  const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const safeMaxTokens = Math.min(Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200), Math.max(256, Number(maxTokens) || 1200));
   while (true) {
     let response;
