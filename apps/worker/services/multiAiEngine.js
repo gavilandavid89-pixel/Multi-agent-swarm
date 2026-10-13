@@ -117,8 +117,8 @@ export async function processJob(jobId) {
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
-      const assertTaskTokenBudget(jobId);
- correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
+      assertTaskTokenBudget(jobId);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry);
       checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', correctedDelivery, { proposal, critique, strategy, delivery: correctedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       saveArtifacts(jobId, correctedDelivery);
       delivery = correctedDelivery; validation = null; syntax = null; payload = getPayload(jobId)?.payload || {}; round += 1;
