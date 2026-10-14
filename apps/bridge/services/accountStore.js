@@ -163,7 +163,8 @@ export async function saveApiKeys(userId, entries) {
       const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
         : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
         : `https://${hostname}${parsedUrl.pathname.replace(/\/+$/, '')}`;
-      if (!apiKey && previous && String(previous.base_url || '') !== canonicalBaseUrl) {
+      const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
+      if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
       const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
