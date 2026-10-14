@@ -554,7 +554,7 @@ $('show-register').addEventListener('click', () => {
 });
 $('register-form').addEventListener('submit', async event => {
   event.preventDefault();
-  const button = $('register-form').querySelector('button[type="submit]'); button.disabled = true;
+  const button = $('register-form').querySelector('button[type="submit"]'); button.disabled = true;
   $('register-status').textContent = 'Creando tu cuenta privada…';
   try {
     const body = { invite: $('register-invite').value.trim(), username: $('register-username').value.trim().toLowerCase(), password: $('register-password').value };
