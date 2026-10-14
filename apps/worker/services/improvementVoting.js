@@ -125,7 +125,7 @@ async function executeVote(jobId, proposal) {
   const voteRecord = {
     id: randomUUID(),
     proposal,
-    status: summary.answered > 0 ? 'completed' : 'failed',
+    status: summary.answered === ballots.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
     createdAt: completedAt,
     completedAt,
     votes: ballots,
