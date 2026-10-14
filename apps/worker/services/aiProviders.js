@@ -307,7 +307,7 @@ function userModel(slot) {
   const context = currentUserProviders();
   if (!context) return null;
   const primary = context.providerOrder?.[0] || context.gemini || context.providers?.[0];
-  return primary?.models?.[slot] || primary?.models?.reasoning || 'gpt-4o-mini';
+  return primary?.models?.[slot] || primary?.models?.reasoning || 'gpt-5.6-terra';
 }
 const reasoningModel = () => userModel('reasoning') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b'));
 const codingModel = () => userModel('coding') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'));
