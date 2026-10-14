@@ -137,6 +137,40 @@ export async function getPayload(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? { publicJob: toPublic(rows[0]), payload: unseal(rows[0].encrypted_payload) } : null;
 }
+/**
+ * Cross-process per-job mutex. A PostgreSQL session lock prevents duplicate work during
+ * overlapping deploys or when the service runs more than one instance. It is released
+ * automatically if the process or database connection dies.
+ */
+export async function withJobLock(id, operation) {
+  let client;
+  let locked = false;
+  let discardConnection = null;
+  const jobId = String(id);
+  try {
+    client = await pool.connect();
+    const { rows } = await client.query(
+      'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked',
+      [jobId]
+    );
+    locked = Boolean(rows[0]?.locked);
+    if (!locked) return { lockBusy: true };
+    return await operation();
+  } finally {
+    if (client) {
+      if (locked) {
+        try {
+          await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [jobId]);
+        } catch (error) {
+          discardConnection = error;
+          console.error('[worker][job_lock_release_error]', JSON.stringify({ jobId, message: String(error?.message || error).slice(0, 300) }));
+        }
+      }
+      client.release(discardConnection || undefined);
+    }
+  }
+}
+
 export async function recordTokenUsage(id, info = {}) {
   return serialized(id, async () => {
     const client = await pool.connect();
