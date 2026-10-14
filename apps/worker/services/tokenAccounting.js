@@ -75,6 +75,41 @@ export function applyTokenUsage(currentValue, info = {}, { eventIds = [], status
   };
 }
 
+const budgetStagePattern = /presupuesto|tokens/i;
+
+export function isBudgetPausedJob(job = {}) {
+  return job?.status === 'needs_review' && budgetStagePattern.test(String(job?.stage || ''));
+}
+
+export function canContinueBudgetTask(job = {}, payload = {}) {
+  return isBudgetPausedJob(job) && !payload?.continuedByJobId;
+}
+
+/** Build a durable state transition when a task runs out of its token budget. */
+export function buildBudgetPausePatch(current = {}, error = {}, timestamp = new Date().toISOString()) {
+  const payload = current?.payload && typeof current.payload === 'object' ? current.payload : {};
+  const reason = String(error?.message || 'Presupuesto de tokens agotado').slice(0, 1200);
+  const transcript = [...(Array.isArray(payload.transcript) ? payload.transcript : []), {
+    at: timestamp, agent: 'sistema', type: 'budget', content: reason
+  }].slice(-150);
+  const providerBlock = {
+    code: 'TASK_TOKEN_BUDGET',
+    ...(Number.isFinite(Number(error?.usedTokens)) ? { usedTokens: Math.max(0, Math.trunc(Number(error.usedTokens))) } : {}),
+    ...(Number.isFinite(Number(error?.tokenLimit)) ? { tokenLimit: Math.max(0, Math.trunc(Number(error.tokenLimit))) } : {}),
+    ...(Number.isFinite(Number(error?.estimatedInputTokens)) ? { estimatedInputTokens: Math.max(0, Math.trunc(Number(error.estimatedInputTokens))) } : {})
+  };
+  return {
+    status: 'needs_review',
+    stage: 'Pausada por presupuesto de tokens',
+    progress: Math.max(0, Number(current?.publicJob?.progress) || 0),
+    error: reason,
+    payload: {
+      ...payload, transcript, providerBlock, activeStage: null,
+      lastCheckpoint: payload.lastCheckpoint || 'token-budget'
+    }
+  };
+}
+
 /**
  * Prepare a fresh budget batch without losing checkpoint data or source artifacts.
  * Usage counters reset per batch; prior batches remain visible for cumulative accounting.
