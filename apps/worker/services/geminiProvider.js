@@ -107,6 +107,7 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry);
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      if (failoverOnRetryable) throw deferredProviderError(model, retry, wait, reason);
       await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);
