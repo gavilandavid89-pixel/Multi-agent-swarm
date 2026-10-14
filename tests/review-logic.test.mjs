@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseValidationResponse, retryDelay } from '../apps/worker/services/aiProviders.js';
+import { estimateInputTokens, parseValidationResponse, retryDelay } from '../apps/worker/services/aiProviders.js';
 import { checkJavascriptSyntax } from '../apps/worker/services/codeChecks.js';
 
 test('el validador acepta un resultado JSON con esquema válido', () => { const result = parseValidationResponse('{"verdict":"APPROVED","findings":[],"summary":"Revisado"}'); assert.equal(result.verdict, 'APPROVED'); assert.deepEqual(result.findings, []); assert.equal(result.summary, 'Revisado'); });
@@ -87,3 +87,5 @@ test('respeta el margen restante y no envía otra llamada si solo quedan unos po
     assert.equal(calls, 1);
   } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; }
 });
+
+test('estima entrada de forma conservadora antes de gastar presupuesto en salida', () => { assert.equal(estimateInputTokens([]), 0); assert.equal(estimateInputTokens([{ role: 'user', content: '12345' }]), 10); assert.ok(estimateInputTokens([{ content: 'x'.repeat(2500) }]) >= 1000); });
