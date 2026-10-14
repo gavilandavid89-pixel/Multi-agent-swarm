@@ -1,9 +1,9 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob, saveArtifacts, recordTokenUsage } from './store.js';
+import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
 import { getDeferredCooldownMs } from './providerRetryPolicy.js';
-// Dos tandas: entrega inicial + una corrección. Cada tanda tiene validación; la última es final.
+// Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
@@ -87,6 +87,15 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra }, ...publicPatch });
 }
 export async function processJob(jobId) {
+  const result = await withJobLock(jobId, () => runJob(jobId));
+  if (result?.lockBusy) {
+    console.info('[worker][job_lock_busy]', JSON.stringify({ jobId, retryAfterMs: 5000 }));
+    return { deferred: true, retryAfterMs: 5000, duplicateExecutionPrevented: true };
+  }
+  return result;
+}
+
+async function runJob(jobId) {
   const initial = await getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = (agent, stage) => info => retryNotice(jobId, { ...info, agent, stage, interaction: 'workflow' });
   const initialPartialDelivery = String(initial.payload.partialDelivery || '');
