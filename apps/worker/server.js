@@ -98,7 +98,8 @@ app.post('/internal/jobs/:id/vote-improvement', async (req, res) => {
   if (!proposal) return res.status(400).json({ error: 'Escribí una mejora concreta para someterla a votación.' });
   if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
   try {
-    const result = await voteOnImprovement(req.params.id, proposal);
+    const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+    const result = await withUserProviders(record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
     res.json(result);
   } catch (error) {
     res.status(error.status || 500).json({ error: String(error.message || 'No se pudo completar la votación.').slice(0, 1200) });
@@ -125,7 +126,8 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
   try {
     const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
     const message = typeof req.body?.message === 'string' ? req.body.message : '';
-    const result = await replyToAgent(req.params.id, agent, message);
+    const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+    const result = await withUserProviders(record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
     res.json(result);
   } catch (error) {
     res.status(error.status || (error.code === 'PROVIDER_TEMPORARY' ? 503 : 500)).json({ error: String(error.message || 'No se pudo responder al agente.').slice(0, 1200) });
