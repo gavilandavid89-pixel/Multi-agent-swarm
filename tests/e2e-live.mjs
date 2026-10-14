@@ -3,6 +3,7 @@ import { createZip } from '../apps/bridge/services/zipBundle.js';
 
 const base = (process.env.SWARM_BRIDGE_URL || 'https://swarm-bridge.onrender.com').replace(/\/$/, '');
 const key = process.env.SWARM_APP_ACCESS_KEY || '';
+let sessionToken = '';
 const timeoutMs = Math.max(60000, Number(process.env.SWARM_E2E_TIMEOUT_MS) || 1500000);
 const startedAt = new Date().toISOString();
 const report = { startedAt, base, checks: [], taskId: null, finalStatus: null, errors: [] };
@@ -17,7 +18,7 @@ async function request(route, options = {}) {
     ...options,
     signal: AbortSignal.timeout(30000),
     headers: {
-      ...(options.auth ? { authorization: 'Bearer ' + key } : {}),
+      ...(options.auth && sessionToken ? { authorization: 'Bearer ' + sessionToken } : {}),
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...(options.headers || {})
     }
@@ -40,9 +41,17 @@ try {
   check('bridge-health', 'El puente responde /healthz.');
   if (!healthData.workerConfigured) fail('El puente no confirma la configuración del worker.');
 
-  const access = await json(await request('/api/access-check', { auth: true }), 'Validación de acceso');
-  if (access.ok !== true) fail('La validación de acceso no devolvió ok=true.');
-  check('auth', 'La clave de acceso fue aceptada; no se registra ni se muestra.');
+  const login = await json(await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username: 'admin', password: key })
+  }), 'Inicio de sesión de administrador');
+  if (!login.token || login.user?.role !== 'admin') fail('El inicio de sesión no devolvió una sesión de administrador válida.');
+  sessionToken = login.token;
+  check('auth-session', 'Inicio de sesión correcto; la contraseña compartida no se usa como token de API.');
+
+  const access = await json(await request('/api/access-check', { auth: true }), 'Validación de sesión');
+  if (access.ok !== true || access.user?.role !== 'admin') fail('La sesión no obtuvo acceso administrativo.');
+  check('auth-protected-routes', 'Las rutas privadas aceptan la sesión y no la clave de bootstrap directamente.');
 
   const objective = [
     'PRUEBA AUTOMÁTICA E2E DE SWARM. Generá una entrega mínima, real y completa.',
