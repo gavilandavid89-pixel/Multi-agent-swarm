@@ -143,11 +143,13 @@ export async function consultarGemini({
 
       const truncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!(await canContinue())) {
+        const allowance = await canContinue(safeMaxTokens);
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
           const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
           error.code = 'TASK_TOKEN_BUDGET';
           throw error;
         }
+        if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [
           ...requestMessages,
