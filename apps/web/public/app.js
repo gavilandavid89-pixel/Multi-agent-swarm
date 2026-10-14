@@ -27,6 +27,20 @@ function renderHistory(data) {
   $('show-history').classList.toggle('hidden', !data.hasHistory);
 }
 async function loadHistorySummary() { renderHistory(await api('/api/history')); }
+function observeJobStatus(job) {
+  if (!job?.id) return { changed: false, wasActive: false, terminal: false };
+  const previousStatus = state.jobStatuses.get(job.id);
+  state.jobStatuses.set(job.id, job.status);
+  if (!previousStatus || previousStatus === job.status) return { changed: false, wasActive: false, terminal: false };
+  const wasActive = ['queued', 'running'].includes(previousStatus);
+  const terminal = ['completed', 'failed', 'needs_review'].includes(job.status);
+  const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
+  if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
+  else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
+  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tanda de la tarea ${job.id.slice(0,8)} agotó el presupuesto. Se guardó el checkpoint; abrí otra tanda para continuar.`, 'warning');
+  else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
+  return { changed: true, wasActive, terminal };
+}
 async function loadJobs({ append = false } = {}) {
   const pageSize = 25;
   const filter = state.jobsFilter === 'all' ? '' : `&status=${encodeURIComponent(state.jobsFilter)}`;
@@ -47,6 +61,8 @@ async function loadJobs({ append = false } = {}) {
     total = pages[0]?.total || 0;
   }
   state.jobsTotal = total || state.jobs.length;
+  // Watch every task currently present in the activity list, not only the open detail pane.
+  state.jobs.forEach(observeJobStatus);
   const list = $('jobs-list');
   if (!state.jobs.length) {
     list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
@@ -317,16 +333,8 @@ function updateDetailView(data) {
     technicalEvents
   };
   $('detail-content').textContent = JSON.stringify(diagnostic, null, 2);
-  const previousStatus = state.jobStatuses.get(job.id);
-  state.jobStatuses.set(job.id, job.status);
-  if (previousStatus && previousStatus !== job.status) {
-    const wasActive = ['queued', 'running'].includes(previousStatus);
-    if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
-    else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
-    else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tanda de la tarea ${job.id.slice(0,8)} agotó el presupuesto. Se guardó el checkpoint; abrí otra tanda para continuar.`, 'warning');
-    else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
-    if (wasActive && ['completed', 'failed', 'needs_review'].includes(job.status)) loadJobs().catch(() => {});
-  }
+  const transition = observeJobStatus(job);
+  if (transition.wasActive && transition.terminal) loadJobs().catch(() => {});
   state.lastJobStatus = job.status;
   state.lastDetailSignature = JSON.stringify({ id: job.id, status: job.status, stage: job.stage, updatedAt: job.updatedAt, historyLength: (data.history || []).length });
 }
