@@ -224,8 +224,9 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
       if (failoverAvailable) throw deferredProviderError(model, retry, wait, reason, providerName);
       await onRetry({ retry, wait, reason });
-      if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason, providerName);
-      await sleep(wait); continue;
+      // Persist the cooldown in the job scheduler instead of sleeping inside a worker,
+      // which may otherwise occupy a slot for minutes or hours after a 429.
+      throw deferredProviderError(model, retry, wait, reason, providerName);
     }
     throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
   }
