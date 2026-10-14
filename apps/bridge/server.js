@@ -1,6 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
+import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -35,26 +36,103 @@ function windowLimit(map, key, limit, windowMs) {
   item.count += 1; map.set(key, item);
   return { allowed: item.count <= limit, retryAfter: Math.max(1, Math.ceil((item.until - now) / 1000)) };
 }
-app.use('/api', (req, res, next) => {
-  if (!APP_ACCESS_KEY) {
-    if (IS_PROD) return res.status(503).json({ error: 'La aplicación no tiene configurada su clave de acceso.' });
-    return next();
-  }
+app.get('/api/auth/bootstrap-status', async (_req, res) => {
+  try { const { rows } = await pool.query('SELECT EXISTS(SELECT 1 FROM app_users) AS initialized'); res.json({ initialized: rows[0].initialized }); }
+  catch { res.status(503).json({ error: 'No se pudo consultar el estado de la cuenta.' }); }
+});
+app.post('/api/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const prior = failedAuth.get(ip);
-  if (prior && prior.count >= 10 && prior.until > Date.now()) {
-    res.set('Retry-After', String(Math.ceil((prior.until - Date.now()) / 1000)));
-    return res.status(429).json({ error: 'Demasiados intentos de acceso. Probá más tarde.' });
+  const limit = windowLimit(failedAuth, ip, 8, 15 * 60 * 1000);
+  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
+  const username = String(req.body?.username || '').trim().toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512) return res.status(400).json({ error: 'Ingresá usuario y contraseña válidos.' });
+  try {
+    let { rows } = await pool.query('SELECT id,username,password_hash,role FROM app_users WHERE username=$1 AND disabled_at IS NULL', [username]);
+    let user = rows[0];
+    if (!user) {
+      const count = await pool.query('SELECT count(*)::int AS total FROM app_users');
+      if (count.rows[0].total !== 0 || username !== 'admin' || !APP_ACCESS_KEY || !safeEqual(password, APP_ACCESS_KEY)) {
+        return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+      }
+      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role", [hashPassword(password)]);
+      user = created.rows[0];
+
+    } else if (!verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+    }
+    if (user.role === 'admin') {
+      try {
+        const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
+        console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
+      } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
+      try {
+        let offset = 0; let total = 0;
+        do {
+          const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+          const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
+          total = Number(legacy?.total) || jobs.length;
+          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+          offset += jobs.length;
+          if (!jobs.length) break;
+        } while (offset < total);
+      } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+    }
+    failedAuth.delete(ip);
+    const token = await createSession(user.id);
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+  } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
+});
+app.post('/api/auth/register', async (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const invite = typeof req.body?.invite === 'string' ? req.body.invite.trim() : '';
+  if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512 || invite.length < 20 || invite.length > 200) return res.status(400).json({ error: 'Usuario, contraseña o invitación inválidos.' });
+  try {
+    const user = await registerFromInvite(username, password, invite);
+    const token = await createSession(user.id);
+    res.status(201).json({ token, user });
+  } catch (error) {
+    const message = String(error?.message || '');
+    res.status(message.includes('invitación') ? 400 : message.includes('duplicate') ? 409 : 400).json({ error: message.includes('invitación') ? message : 'No se pudo crear la cuenta. Revisá el usuario o la invitación.' });
   }
+});
+app.use('/api', async (req, res, next) => {
+  if (['/auth/login','/auth/register','/auth/bootstrap-status'].includes(req.path)) return next();
   const auth = req.get('authorization') || '';
-  const supplied = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!safeEqual(supplied, APP_ACCESS_KEY)) {
-    console.warn('[bridge][auth_rejected]', JSON.stringify({ method: req.method, path: req.path }));
-    const limit = windowLimit(failedAuth, ip, 10, 15 * 60 * 1000);
-    res.set('Retry-After', String(limit.retryAfter));
-    return res.status(limit.allowed ? 401 : 429).json({ error: 'Clave de acceso inválida.' });
-  }
-  failedAuth.delete(ip); next();
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  try {
+    const user = await findSession(token);
+    if (!user) return res.status(401).json({ error: 'La sesión venció. Volvé a iniciar sesión.' });
+    req.user = user; req.sessionToken = token;
+    next();
+  } catch { res.status(503).json({ error: 'No se pudo validar la sesión.' }); }
+});
+app.post('/api/auth/logout', async (req, res) => { try { await revokeSession(req.sessionToken); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo cerrar la sesión.' }); } });
+app.get('/api/account', (req, res) => res.json({ user: req.user }));
+app.get('/api/account/apis', async (req, res) => { try { res.json({ apis: await listApiKeys(req.user.id) }); } catch { res.status(503).json({ error: 'No se pudieron cargar las APIs.' }); } });
+app.put('/api/account/apis', async (req, res) => {
+  try {
+    const apis = await saveApiKeys(req.user.id, req.body?.apis);
+    res.json({ apis });
+  } catch (error) { res.status(400).json({ error: error?.message || 'No se pudieron guardar las APIs.' }); }
+});
+app.delete('/api/account/apis/:slot', async (req, res) => {
+  const slot = Number(req.params.slot);
+  if (!Number.isInteger(slot) || slot < 1 || slot > 10) return res.status(400).json({ error: 'Campo de API inválido.' });
+  try { await deleteApiKey(req.user.id, slot); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo quitar la API.' }); }
+});
+app.post('/api/admin/invites', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede crear invitaciones.' });
+  try { const invite = await createInvite(req.user.id, req.body?.hours); res.status(201).json(invite); }
+  catch { res.status(503).json({ error: 'No se pudo crear la invitación.' }); }
+});
+app.param('id', async (req, res, next, id) => {
+  try {
+    const owned = await pool.query('SELECT 1 FROM user_job_ownership WHERE job_id=$1 AND user_id=$2', [String(id), req.user.id]);
+    if (!owned.rows.length) return res.status(404).json({ error: 'No se encontró esa tarea en tu espacio.' });
+    next();
+  } catch { res.status(503).json({ error: 'No se pudo verificar la propiedad de la tarea.' }); }
 });
 function limitJobCreation(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -102,17 +180,21 @@ async function workerRequest(route, options = {}) {
   console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
   return data;
 }
-app.get('/api/access-check', (_req, res) => res.json({ ok: true }));
-app.get('/api/history', async (_req, res) => { try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/access-check', (req, res) => res.json({ ok: true, user: req.user }));
+app.get('/api/history', async (req, res) => { if (req.user.role !== 'admin') return res.json({ history: [], isolated: true }); try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs', async (req, res) => {
-  const params = new URLSearchParams();
-  for (const key of ['limit', 'offset', 'status']) {
-    const value = String(req.query[key] ?? '');
-    if (value) params.set(key, value);
-  }
-  const suffix = params.size ? `?${params.toString()}` : '';
-  try { res.json(await workerRequest(`/internal/jobs${suffix}`)); }
-  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+  const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
+  const requestedStatus = String(req.query.status || '');
+  if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
+  try {
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
+    const jobs = (await Promise.all(owned.rows.map(async row => {
+      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
+    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
@@ -120,7 +202,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget }) }); res.status(202).json(result); }
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
@@ -132,8 +214,12 @@ app.post('/api/jobs/:id/budget', async (req, res) => {
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs/:id/continue-budget', async (req, res) => {
-  try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' })); }
-  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+  try {
+    const result = await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' });
+    const childId = String(result?.job?.id || result?.id || '');
+    if (childId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [childId, req.user.id]);
+    res.status(202).json(result);
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs/:id/vote-improvement', async (req, res) => {
   const proposal = typeof req.body?.proposal === 'string' ? req.body.proposal.trim() : '';
@@ -357,4 +443,5 @@ app.post('/api/jobs/:id/reply', async (req, res) => {
 });
 app.get('/api/jobs/:id/history', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/history`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.use((error, _req, res, _next) => { console.error('[bridge]', error.message); res.status(400).json({ error: 'No se pudo procesar la solicitud.' }); });
+await initAccountStore();
 app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));

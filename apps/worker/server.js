@@ -6,6 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
+import { withUserProviders, importLegacyProvidersForUser } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -20,12 +21,17 @@ const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.e
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
 app.use('/internal', (req, res, next) => { if (!safeEqual(req.get('x-swarm-bridge-secret') || '', SHARED_SECRET)) return res.status(401).json({ error: 'No autorizado.' }); next(); });
 function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b)); if (aa.length !== bb.length || aa.length === 0) return false; return timingSafeEqual(aa, bb); }
+async function runJobWithAccountProviders(id) {
+  const record = await getPayload(id);
+  const userId = record?.payload?.userId || null;
+  return withUserProviders(userId, () => processJob(id));
+}
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
   if (shuttingDown) return;
   while (active.size < MAX_CONCURRENCY && queue.size > 0) {
     const id = queue.values().next().value; queue.delete(id); if (active.has(id)) continue; active.add(id);
-    void processJob(id).then(result => {
+    void runJobWithAccountProviders(id).then(result => {
       if (result?.deferred && !shuttingDown) {
         const delay = Math.max(1000, Math.min(604800000, Number(result.retryAfterMs) || 30000));
         const nextJobId = result.continuationJobId || id;
@@ -34,6 +40,12 @@ function pump() {
     }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
+app.post('/internal/admin/import-legacy-apis', async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : '';
+  if (!userId) return res.status(400).json({ error: 'Cuenta de administrador inválida.' });
+  try { res.json({ imported: await importLegacyProvidersForUser(userId) }); }
+  catch (error) { console.error('[worker][legacy_api_import_failed]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudieron migrar las APIs heredadas.' }); }
+});
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
 app.get('/internal/jobs', async (req, res, next) => {
   const requestedStatus = String(req.query.status || '');
@@ -49,7 +61,7 @@ app.post('/internal/jobs', async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const job = await createJob(objective, tokenBudget); enqueue(job.id); res.status(202).json(job); }
+  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
@@ -92,7 +104,8 @@ app.post('/internal/jobs/:id/vote-improvement', async (req, res) => {
   if (!proposal) return res.status(400).json({ error: 'Escribí una mejora concreta para someterla a votación.' });
   if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
   try {
-    const result = await voteOnImprovement(req.params.id, proposal);
+    const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+    const result = await withUserProviders(record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
     res.json(result);
   } catch (error) {
     res.status(error.status || 500).json({ error: String(error.message || 'No se pudo completar la votación.').slice(0, 1200) });
@@ -119,7 +132,8 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
   try {
     const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
     const message = typeof req.body?.message === 'string' ? req.body.message : '';
-    const result = await replyToAgent(req.params.id, agent, message);
+    const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+    const result = await withUserProviders(record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
     res.json(result);
   } catch (error) {
     res.status(error.status || (error.code === 'PROVIDER_TEMPORARY' ? 503 : 500)).json({ error: String(error.message || 'No se pudo responder al agente.').slice(0, 1200) });

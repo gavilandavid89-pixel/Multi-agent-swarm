@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=improvement-vote-1">
+  <link rel="stylesheet" href="/styles.css?v=security-accounts-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -12,7 +12,7 @@
     <div id="task-notice" class="task-notice hidden" role="status" aria-live="polite"><span id="task-notice-text"></span><button id="task-notice-close" type="button" aria-label="Cerrar aviso">×</button></div>
     <header class="topbar">
       <a class="brand" href="/"><span class="brand-mark">✳</span><span>swarm<span class="brand-dot">.</span></span></a>
-      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span></div>
+      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span><div id="account-menu" class="account-menu hidden"><button id="account-menu-toggle" class="icon-button" type="button" aria-label="Abrir menú de cuenta">⋮</button><div id="account-menu-items" class="account-menu-items hidden"><button id="open-api-settings" type="button">API 🔐</button><button id="logout-button" type="button">Cerrar sesión</button></div></div></div>
     </header>
     <section class="hero">
       <p class="eyebrow">CENTRO DE MANDO · MULTIAGENTE</p>
@@ -21,7 +21,22 @@
     </section>
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
-      <form id="access-form" class="inline-form"><input id="access-key" type="password" autocomplete="current-password" placeholder="Clave de acceso" required><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña (o clave actual la primera vez)" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Primera entrada: usuario admin y tu clave de acceso actual. Se convertirá en contraseña de administrador.</p>
+      <button id="show-register" class="button button-secondary" type="button">Tengo una invitación · Crear cuenta</button>
+      <form id="register-form" class="auth-form hidden">
+        <label><span class="muted tiny">Código de invitación</span><input id="register-invite" autocomplete="off" required></label>
+        <label><span class="muted tiny">Nuevo usuario</span><input id="register-username" autocomplete="username" minlength="3" maxlength="32" required></label>
+        <label><span class="muted tiny">Contraseña (mínimo 12 caracteres)</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label>
+        <button class="button button-primary" type="submit">Crear cuenta <span>↗</span></button>
+      </form>
+      <p id="register-status" class="muted tiny" role="status" aria-live="polite"></p>
+    </section>
+    <section id="api-settings-panel" class="panel api-settings-panel hidden">
+      <div class="section-head"><div><p class="panel-kicker">CUENTA PRIVADA</p><h2>API 🔐</h2><p class="muted">Las claves se cifran en el servidor. Por seguridad, las claves guardadas nunca se vuelven a mostrar.</p></div><button id="back-to-app" class="button button-secondary" type="button">← Volver</button></div>
+      <div id="api-fields" class="api-fields"></div>
+      <div class="api-settings-actions"><button id="add-api-field" class="button button-secondary" type="button">＋ Añadir otra API</button><button id="save-api-settings" class="button button-primary" type="button">Guardar APIs ↗</button></div>
+      <p id="api-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <section id="invite-admin-panel" class="invite-admin-panel hidden"><div class="section-head"><div><p class="panel-kicker">ACCESO DE AMIGOS</p><h3>Invitación privada</h3><p class="muted tiny">Cada invitación sirve para crear una cuenta y se puede usar una sola vez.</p></div></div><button id="create-invite" class="button button-secondary" type="button">Crear invitación ↗</button><p id="invite-status" class="muted tiny" role="status" aria-live="polite"></p><div id="invite-result" class="hidden"></div></section>
     </section>
     <section id="app-content" class="hidden">
       <section class="panel composer">
@@ -67,6 +82,6 @@
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=improvement-vote-1" defer></script>
+  <script src="/app.js?v=security-accounts-1" defer></script>
 </body>
 </html>
