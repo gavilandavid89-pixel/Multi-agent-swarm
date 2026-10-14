@@ -22,6 +22,14 @@
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
       <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña (o clave actual la primera vez)" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Primera entrada: usuario admin y tu clave de acceso actual. Se convertirá en contraseña de administrador.</p>
+      <button id="show-register" class="button button-secondary" type="button">Tengo una invitación · Crear cuenta</button>
+      <form id="register-form" class="auth-form hidden">
+        <label><span class="muted tiny">Código de invitación</span><input id="register-invite" autocomplete="off" required></label>
+        <label><span class="muted tiny">Nuevo usuario</span><input id="register-username" autocomplete="username" minlength="3" maxlength="32" required></label>
+        <label><span class="muted tiny">Contraseña (mínimo 12 caracteres)</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label>
+        <button class="button button-primary" type="submit">Crear cuenta <span>↗</span></button>
+      </form>
+      <p id="register-status" class="muted tiny" role="status" aria-live="polite"></p>
     </section>
     <section id="api-settings-panel" class="panel api-settings-panel hidden">
       <div class="section-head"><div><p class="panel-kicker">CUENTA PRIVADA</p><h2>API 🔐</h2><p class="muted">Las claves se cifran en el servidor. Por seguridad, las claves guardadas nunca se vuelven a mostrar.</p></div><button id="back-to-app" class="button button-secondary" type="button">← Volver</button></div>
