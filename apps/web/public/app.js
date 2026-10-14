@@ -452,10 +452,10 @@ $('access-form').addEventListener('submit', async event => {
 
 // Account menu and compact, dynamically-added API fields.
 const API_PROVIDERS = [
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', reasoning: 'gpt-5.6-terra', coding: 'gpt-5.6-terra', validation: 'gpt-5.6-luna' },
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', reasoning: 'gpt-6-sol', coding: 'gpt-6-sol', validation: 'gpt-6-luna' },
   { label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com', reasoning: 'gemini-3.8-flash', coding: 'gemini-3.8-flash', validation: 'gemini-3.8-flash' },
   { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', reasoning: 'openai/gpt-oss-120b', coding: 'openai/gpt-oss-120b', validation: 'openai/gpt-oss-20b' },
-  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: 'openai/gpt-5.6-terra', coding: 'openai/gpt-5.6-terra', validation: 'openai/gpt-5.6-luna' },
+  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: 'openai/gpt-6-sol', coding: 'openai/gpt-6-sol', validation: 'openai/gpt-6-luna' },
   { label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', reasoning: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', coding: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', validation: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
   { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', reasoning: 'deepseek-chat', coding: 'deepseek-chat', validation: 'deepseek-chat' },
   { label: 'Mistral AI', baseUrl: 'https://api.mistral.ai/v1', reasoning: 'mistral-small-latest', coding: 'mistral-small-latest', validation: 'mistral-small-latest' },
