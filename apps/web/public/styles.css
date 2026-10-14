@@ -108,6 +108,8 @@
 .api-field-main{display:grid;gap:7px;min-width:0}
 .api-field-main label{font-size:.82rem;color:var(--muted,#aaa)}
 .api-field-main input{width:100%;min-width:0}
+.api-field-main select{width:100%;min-width:0;padding:11px 12px;border:1px solid var(--line,rgba(255,255,255,.14));border-radius:10px;background:#171025;color:var(--text,#fff);font:inherit}
+.api-field-main select:focus,.api-field-main input:focus{outline:2px solid #b68cff80;outline-offset:1px}
 .api-field-meta{font-size:.76rem;color:var(--muted,#aaa);overflow-wrap:anywhere}
 .api-field-row .button{white-space:nowrap}
 .api-settings-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between}
