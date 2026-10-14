@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders, importLegacyProvidersForUser } from './services/userProviders.js';
+import { withJobProviders, copyJobOwnership, importLegacyProvidersForUser } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -24,7 +24,7 @@ function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.
 async function runJobWithAccountProviders(id) {
   const record = await getPayload(id);
   const userId = record?.payload?.userId || null;
-  return withUserProviders(userId, () => processJob(id));
+  return withJobProviders(id, userId, () => processJob(id));
 }
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
@@ -94,6 +94,8 @@ app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
   try {
     const result = await createContinuationJob(req.params.id);
     if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    const source = await getPayload(req.params.id);
+    await copyJobOwnership(req.params.id, result.job.id, source?.payload?.userId || null);
     enqueue(result.job.id);
     console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 100000 }));
     res.status(202).json(result.job);
@@ -105,7 +107,7 @@ app.post('/internal/jobs/:id/vote-improvement', async (req, res) => {
   if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
   try {
     const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-    const result = await withUserProviders(record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
+    const result = await withJobProviders(req.params.id, record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
     res.json(result);
   } catch (error) {
     res.status(error.status || 500).json({ error: String(error.message || 'No se pudo completar la votación.').slice(0, 1200) });
@@ -133,7 +135,7 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
     const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
     const message = typeof req.body?.message === 'string' ? req.body.message : '';
     const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-    const result = await withUserProviders(record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
+    const result = await withJobProviders(req.params.id, record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
     res.json(result);
   } catch (error) {
     res.status(error.status || (error.code === 'PROVIDER_TEMPORARY' ? 503 : 500)).json({ error: String(error.message || 'No se pudo responder al agente.').slice(0, 1200) });
@@ -178,6 +180,7 @@ async function start() {
       for (const paused of await recoverableBudgetContinuations()) {
         const continuation = await createContinuationJob(paused.id);
         if (continuation?.job) {
+          await copyJobOwnership(paused.id, continuation.job.id, paused.userId || null);
           enqueue(continuation.job.id);
           console.info('[worker][token_batch_continuation_recovered]', JSON.stringify({
             sourceJobId: paused.id, continuationJobId: continuation.job.id,
