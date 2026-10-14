@@ -12,7 +12,7 @@
     <div id="task-notice" class="task-notice hidden" role="status" aria-live="polite"><span id="task-notice-text"></span><button id="task-notice-close" type="button" aria-label="Cerrar aviso">×</button></div>
     <header class="topbar">
       <a class="brand" href="/"><span class="brand-mark">✳</span><span>swarm<span class="brand-dot">.</span></span></a>
-      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span></div>
+      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span><div id="account-menu" class="account-menu hidden"><button id="account-menu-toggle" class="icon-button" type="button" aria-label="Abrir menú de cuenta">⋮</button><div id="account-menu-items" class="account-menu-items hidden"><button id="open-api-settings" type="button">API 🔐</button><button id="logout-button" type="button">Cerrar sesión</button></div></div></div>
     </header>
     <section class="hero">
       <p class="eyebrow">CENTRO DE MANDO · MULTIAGENTE</p>
@@ -21,7 +21,14 @@
     </section>
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
-      <form id="access-form" class="inline-form"><input id="access-key" type="password" autocomplete="current-password" placeholder="Clave de acceso" required><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña (o clave actual la primera vez)" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Primera entrada: usuario admin y tu clave de acceso actual. Se convertirá en contraseña de administrador.</p>
+    </section>
+    <section id="api-settings-panel" class="panel api-settings-panel hidden">
+      <div class="section-head"><div><p class="panel-kicker">CUENTA PRIVADA</p><h2>API 🔐</h2><p class="muted">Las claves se cifran en el servidor. Por seguridad, las claves guardadas nunca se vuelven a mostrar.</p></div><button id="back-to-app" class="button button-secondary" type="button">← Volver</button></div>
+      <div id="api-fields" class="api-fields"></div>
+      <div class="api-settings-actions"><button id="add-api-field" class="button button-secondary" type="button">＋ Añadir otra API</button><button id="save-api-settings" class="button button-primary" type="button">Guardar APIs ↗</button></div>
+      <p id="api-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <section id="invite-admin-panel" class="invite-admin-panel hidden"><div class="section-head"><div><p class="panel-kicker">ACCESO DE AMIGOS</p><h3>Invitación privada</h3><p class="muted tiny">Cada invitación sirve para crear una cuenta y se puede usar una sola vez.</p></div></div><button id="create-invite" class="button button-secondary" type="button">Crear invitación ↗</button><p id="invite-status" class="muted tiny" role="status" aria-live="polite"></p><div id="invite-result" class="hidden"></div></section>
     </section>
     <section id="app-content" class="hidden">
       <section class="panel composer">
