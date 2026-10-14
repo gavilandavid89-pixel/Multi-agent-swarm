@@ -243,6 +243,7 @@ async function runJob(jobId) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
       const patch = buildBudgetPausePatch(current, error);
+      console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);
       return { blocked: true, reason: patch.error };
     }
