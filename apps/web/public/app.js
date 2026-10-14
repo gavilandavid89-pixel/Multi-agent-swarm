@@ -451,23 +451,62 @@ $('access-form').addEventListener('submit', async event => {
 });
 
 // Account menu and compact, dynamically-added API fields.
+const API_PROVIDERS = [
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: 'gemini-3.8-flash' },
+  { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' },
+  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+  { label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
+  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { label: 'Mistral AI', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest' },
+  { label: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
+  { label: 'Perplexity', baseUrl: 'https://api.perplexity.ai', model: 'sonar' },
+  { label: 'Cohere', baseUrl: 'https://api.cohere.com/compatibility/v1', model: 'command-a-03-2025' }
+];
+function providerForUrl(url) {
+  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
+  return API_PROVIDERS.find(provider => { try { return new URL(provider.baseUrl).hostname.toLowerCase() === host; } catch { return false; } }) || API_PROVIDERS[0];
+}
 function apiFieldRow(api = {}) {
   const row = document.createElement('div');
   row.className = 'api-field-row';
   row.dataset.slot = String(api.slot || state.apiFields.length + 1);
   row.dataset.saved = api.saved ? 'true' : 'false';
-  row.dataset.label = api.label || `API ${row.dataset.slot}`;
-  row.dataset.baseUrl = api.base_url || '';
-  row.dataset.model = api.model_reasoning || '';
+  const initialProvider = providerForUrl(api.base_url || '');
+  const initialModel = api.model_reasoning || initialProvider.model;
   const main = document.createElement('div'); main.className = 'api-field-main';
-  const label = document.createElement('label'); label.textContent = `API ${row.dataset.slot} · Clave`;
+  const providerLabel = document.createElement('label'); providerLabel.textContent = `API ${row.dataset.slot} · Proveedor`;
+  const provider = document.createElement('select'); provider.className = 'api-provider-select';
+  provider.setAttribute('aria-label', `Proveedor API ${row.dataset.slot}`);
+  API_PROVIDERS.forEach(item => { const option = document.createElement('option'); option.value = item.baseUrl; option.textContent = item.label; provider.append(option); });
+  provider.value = initialProvider.baseUrl;
+  const keyLabel = document.createElement('label'); keyLabel.textContent = 'Clave API privada';
   const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
-  input.placeholder = api.saved ? 'Clave guardada (oculta por seguridad)' : 'Pegá la clave de tu API';
+  input.placeholder = api.saved ? 'Clave guardada (oculta; dejá vacío para conservarla)' : 'Pegá tu clave del proveedor elegido';
   input.setAttribute('aria-label', `Clave API ${row.dataset.slot}`);
-  main.append(label, input);
+  const modelLabel = document.createElement('label'); modelLabel.textContent = 'Modelo';
+  const modelInput = document.createElement('input'); modelInput.type = 'text'; modelInput.autocomplete = 'off'; modelInput.spellcheck = false;
+  modelInput.value = initialModel; modelInput.placeholder = initialProvider.model;
+  modelInput.setAttribute('aria-label', `Modelo API ${row.dataset.slot}`);
   const meta = document.createElement('div'); meta.className = 'api-field-meta';
-  meta.textContent = api.saved ? `${api.label || 'API guardada'} · ${api.base_url || 'Proveedor configurado'}` : 'Se guardará cifrada en tu cuenta.';
-  main.append(meta);
+  meta.textContent = api.saved ? 'Clave cifrada guardada. Cambiar proveedor/modelo no reemplaza la clave si dejás el campo vacío.' : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
+  provider.addEventListener('change', () => {
+    const next = API_PROVIDERS.find(item => item.baseUrl === provider.value) || API_PROVIDERS[0];
+    const previous = API_PROVIDERS.find(item => item.baseUrl === row.dataset.baseUrl) || initialProvider;
+    if (!modelInput.value.trim() || modelInput.value.trim() === previous.model) modelInput.value = next.model;
+    row.dataset.baseUrl = next.baseUrl;
+    row.dataset.label = next.label;
+    modelInput.placeholder = next.model;
+    meta.textContent = api.saved && !input.value.trim()
+      ? 'La clave guardada se conserva; confirmá que pertenece al proveedor seleccionado antes de ejecutar tareas.'
+      : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
+  });
+  modelInput.addEventListener('input', () => { row.dataset.model = modelInput.value.trim(); });
+  row.dataset.baseUrl = initialProvider.baseUrl;
+  row.dataset.label = initialProvider.label;
+  row.dataset.model = initialModel;
+  providerLabel.append(provider); keyLabel.append(input); modelLabel.append(modelInput);
+  main.append(providerLabel, keyLabel, input, modelLabel, modelInput, meta);
   const actions = document.createElement('div');
   if (api.saved) {
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Quitar';
@@ -519,9 +558,10 @@ $('save-api-settings').addEventListener('click', async () => {
   try {
     const apis = Array.from($('api-fields').children).map(row => ({
       slot: Number(row.dataset.slot), label: row.dataset.label || `API ${row.dataset.slot}`,
-      baseUrl: row.dataset.baseUrl || '', model: row.dataset.model || '',
-      apiKey: row.querySelector('input').value.trim()
-    })).filter(item => item.apiKey);
+      baseUrl: row.querySelector('select').value || row.dataset.baseUrl || '',
+      model: row.querySelectorAll('input')[1].value.trim() || row.dataset.model || '',
+      apiKey: row.querySelectorAll('input')[0].value.trim()
+    }));
     await api('/api/account/apis', { method: 'PUT', body: JSON.stringify({ apis }) });
     await loadApiSettings(); $('api-settings-status').textContent = 'Cambios guardados. Las claves permanecen cifradas y ocultas.';
   } catch (error) { $('api-settings-status').textContent = error.message; }
