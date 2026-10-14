@@ -187,6 +187,8 @@ export async function consultarModelo(options) {
 }
 
 async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', failoverAvailable = false }) {
+  let providerHostname = '';
+  try { providerHostname = new URL(String(baseUrl)).hostname.toLowerCase(); } catch {}
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -216,7 +218,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     }
     const usageId = randomUUID();
     let response;
-    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (/^api\\.openai\\.com$/i.test(new URL(String(baseUrl)).hostname) ? { max_completion_tokens: safeMaxTokens } : { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (providerHostname === 'api.openai.com' ? { max_completion_tokens: safeMaxTokens } { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
