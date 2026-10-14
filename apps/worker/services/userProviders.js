@@ -28,6 +28,8 @@ function encrypt(value) {
 }
 export async function importLegacyProvidersForUser(userId) {
   if (!pool) throw new Error('User API database is not configured.');
+  const migration = await pool.query('SELECT 1 FROM user_api_migrations WHERE user_id=$1', [userId]);
+  if (migration.rows.length) return 0;
   const candidates = [];
   if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
   if (process.env.GROQ_API_KEY) candidates.push({ label: 'Groq', key: process.env.GROQ_API_KEY, baseUrl: 'https://api.groq.com/openai/v1', reasoning: process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b', coding: process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b', validation: process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b' });
@@ -43,6 +45,7 @@ export async function importLegacyProvidersForUser(userId) {
       }
     }
   } catch { /* Never log legacy provider configuration or credentials. */ }
+  if (!candidates.length) return 0;
   let imported = 0;
   for (const item of candidates.slice(0, 10)) {
     const exists = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 AND label=$3 LIMIT 1', [userId, item.baseUrl, item.label]);
@@ -52,6 +55,7 @@ export async function importLegacyProvidersForUser(userId) {
       [userId,item.label,item.baseUrl,item.reasoning,item.coding,item.validation,encrypt(item.key)]);
     imported++;
   }
+  await pool.query('INSERT INTO user_api_migrations(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [userId]);
   return imported;
 }
 
