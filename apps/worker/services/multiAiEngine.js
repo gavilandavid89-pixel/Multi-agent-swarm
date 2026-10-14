@@ -173,7 +173,7 @@ export async function processJob(jobId) {
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
         );
         await updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
-        payload = await getPayload(jobId)?.payload || {};
+        payload = (await getPayload(jobId))?.payload || {};
         resumeState = getValidationResumeState(payload, round);
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
@@ -192,9 +192,9 @@ export async function processJob(jobId) {
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
-      delivery = mergedDelivery; validation = null; syntax = null; payload = await getPayload(jobId)?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
+      delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
-    const finalPayload = await getPayload(jobId)?.payload || {};
+    const finalPayload = (await getPayload(jobId))?.payload || {};
     await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
