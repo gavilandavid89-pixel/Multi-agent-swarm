@@ -193,7 +193,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id]); res.status(202).json(result); }
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
@@ -205,8 +205,12 @@ app.post('/api/jobs/:id/budget', async (req, res) => {
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs/:id/continue-budget', async (req, res) => {
-  try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' })); }
-  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+  try {
+    const result = await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' });
+    const childId = String(result?.job?.id || result?.id || '');
+    if (childId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [childId, req.user.id]);
+    res.status(202).json(result);
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs/:id/vote-improvement', async (req, res) => {
   const proposal = typeof req.body?.proposal === 'string' ? req.body.proposal.trim() : '';
