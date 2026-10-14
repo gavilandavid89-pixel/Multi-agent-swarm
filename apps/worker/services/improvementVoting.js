@@ -84,6 +84,7 @@ async function executeVote(jobId, proposal) {
       };
       const response = await consultarModelo({
         model: voteModel(agent.name),
+        providerSlot: agent.name === 'Desarrollador' ? 'coding' : agent.name === 'Validador' ? 'validation' : 'reasoning',
         temperature: 0.1,
         maxTokens: 320,
         onRetry,
