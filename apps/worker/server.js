@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getJobsByIds, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -24,6 +24,9 @@ function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.
 async function runJobWithAccountProviders(id) {
   const record = await getPayload(id);
   const userId = record?.payload?.userId || null;
+  if (record?.payload?.continuationOf) {
+    await copyJobOwnership(record.payload.continuationOf, id, userId);
+  }
   return withJobProviders(id, userId, () => processJob(id));
 }
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
@@ -54,6 +57,13 @@ app.get('/internal/jobs', async (req, res, next) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit || '25', 10) || 25));
   const offset = Math.max(0, Number.parseInt(req.query.offset || '0', 10) || 0);
   try { res.json(await listJobs({ limit, offset, status: requestedStatus === 'all' ? '' : requestedStatus })); } catch (error) { next(error); }
+});
+app.post('/internal/jobs/batch', async (req, res, next) => {
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id.trim() || id.length > 100)) {
+    return res.status(400).json({ error: 'La lista de tareas debe contener hasta 100 identificadores válidos.' });
+  }
+  try { res.json({ jobs: await getJobsByIds(ids) }); } catch (error) { next(error); }
 });
 app.post('/internal/jobs', async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
