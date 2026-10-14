@@ -178,12 +178,35 @@ export async function deleteApiKey(userId, slot) {
   await pool.query('DELETE FROM user_api_keys WHERE user_id=$1 AND slot=$2', [userId, slot]);
 }
 export async function createInvite(userId, hours = 72) {
-  await pool.query('DELETE FROM app_invites WHERE expires_at <= now()');
-  const code = randomBytes(24).toString('base64url');
-  const codeHash = digest(code);
-  const expiresHours = Math.max(1, Math.min(720, Number(hours) || 72));
-  await pool.query('INSERT INTO app_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+($3 * interval \'1 hour\'))', [codeHash, userId, expiresHours]);
-  return { code, expiresHours };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', ['invites:' + String(userId)]);
+    await client.query('DELETE FROM app_invites WHERE expires_at <= now() OR used_at IS NOT NULL');
+    const active = await client.query(
+      'SELECT count(*)::int AS total FROM app_invites WHERE created_by=$1 AND used_at IS NULL AND expires_at>now()',
+      [userId]
+    );
+    if (active.rows[0].total >= 10) {
+      const error = new Error('Ya tenés 10 invitaciones activas. Esperá a que se usen o caduquen.');
+      error.code = 'INVITE_ACTIVE_LIMIT';
+      throw error;
+    }
+    const code = randomBytes(24).toString('base64url');
+    const codeHash = digest(code);
+    const expiresHours = Math.max(1, Math.min(720, Number(hours) || 72));
+    await client.query(
+      'INSERT INTO app_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+($3 * interval \'1 hour\'))',
+      [codeHash, userId, expiresHours]
+    );
+    await client.query('COMMIT');
+    return { code, expiresHours };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 export async function registerFromInvite(username, password, code) {
   const client = await pool.connect();
