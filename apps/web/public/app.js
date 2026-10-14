@@ -229,6 +229,8 @@ function renderTokenBudget(data) {
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
   const completion = Math.max(0, Number(usage.completionTokens) || 0);
   const calls = Math.max(0, Number(usage.calls) || 0);
+  const wasted = Math.max(0, Number(usage.wastedTokens) || 0);
+  const chatTokens = Math.max(0, Number(usage.byInteraction?.['direct-chat']?.totalTokens) || 0);
   const pct = Math.min(100, used / total * 100);
   const fmt = value => Math.round(value).toLocaleString('es-AR');
   $('tokens-remaining').textContent = fmt(remaining);
@@ -237,6 +239,8 @@ function renderTokenBudget(data) {
   $('tokens-input').textContent = fmt(prompt);
   $('tokens-output').textContent = fmt(completion);
   $('tokens-calls').textContent = fmt(calls);
+  if ($('tokens-wasted')) $('tokens-wasted').textContent = fmt(wasted);
+  if ($('tokens-chat')) $('tokens-chat').textContent = fmt(chatTokens);
   $('token-budget-fill').style.width = pct + '%';
   $('token-budget-track').setAttribute('aria-valuemax', String(total));
   $('token-budget-track').setAttribute('aria-valuenow', String(Math.min(total, used)));
@@ -245,7 +249,7 @@ function renderTokenBudget(data) {
     ? 'Presupuesto agotado; la tarea debe pausarse hasta ampliar el límite.'
     : remaining <= total * 0.15
       ? 'Queda menos del 15 % del presupuesto. Priorizá correcciones y validación.'
-      : 'Actualización automática cada ~2 segundos. El consumo refleja los datos reportados por el proveedor.';
+      : 'Consumo real reportado por el proveedor. “Tras cierre” detecta respuestas automáticas tardías; el chat se separa para no confundirlo con el trabajo del comité.';
 }
 function updateDetailView(data) {
   const job = data.job || {};
