@@ -142,6 +142,8 @@ try {
     { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="site.css"></head><body><h1>ZIP PREVIEW E2E</h1><button id="go">Probar</button><script src="app.js"></script></body></html>' },
     { path: 'app.js', content: "document.getElementById('go').addEventListener('click', () => { document.body.dataset.clicked = 'yes'; });" },
     { path: 'site.css', content: 'body { color: rebeccapurple; }' },
+    { path: 'assets/untrusted.html', content: "<script>parent.document.body.dataset.pwned = 'yes';</script>" },
+    { path: 'assets/untrusted.svg', content: "<svg xmlns='http://www.w3.org/2000/svg'><script>parent.document.body.dataset.pwned='yes'</script></svg>" },
     { path: 'game.wasm', content: 'WASMTEST' },
     { path: 'ignored.exe', content: 'not a real executable' }
   ]);
@@ -170,6 +172,18 @@ try {
   const uploadedAsset = await uploadedAssetResponse.text();
   if (!uploadedAssetResponse.ok || !uploadedAsset.includes("dataset.clicked = 'yes'") || uploadedAssetResponse.headers.get('access-control-allow-origin') !== '*') fail('El JavaScript local del ZIP no se pudo cargar correctamente con CORS para módulos.');
   const token = uploaded.url.split('/')[2];
+  const htmlAssetResponse = await fetch(base + '/preview/' + token + '/assets/assets/untrusted.html', { signal: AbortSignal.timeout(20000) });
+  const htmlAssetType = htmlAssetResponse.headers.get('content-type') || '';
+  const htmlAssetCsp = htmlAssetResponse.headers.get('content-security-policy') || '';
+  if (!htmlAssetResponse.ok || !/^text\/plain/i.test(htmlAssetType) || !htmlAssetCsp.includes('sandbox') || !htmlAssetCsp.includes("script-src 'none'")) {
+    fail('Un HTML incluido como recurso debe servirse como texto y con CSP aislada.');
+  }
+  const svgAssetResponse = await fetch(base + '/preview/' + token + '/assets/assets/untrusted.svg', { signal: AbortSignal.timeout(20000) });
+  const svgAssetCsp = svgAssetResponse.headers.get('content-security-policy') || '';
+  if (!svgAssetResponse.ok || !svgAssetCsp.includes('sandbox') || !svgAssetCsp.includes("script-src 'none'")) {
+    fail('Un SVG abierto como recurso no debe ejecutarse con el origen privilegiado de la aplicación.');
+  }
+  check('preview-resource-sandbox', 'Los HTML/SVG auxiliares se aíslan para evitar XSS del origen de la aplicación.');
   const wasmResponse = await fetch(base + '/preview/' + token + '/assets/game.wasm', { signal: AbortSignal.timeout(20000) });
   if (!wasmResponse.ok || wasmResponse.headers.get('content-type') !== 'application/wasm' || wasmResponse.headers.get('access-control-allow-origin') !== '*') fail('El recurso WASM no se sirvió con MIME/CORS compatibles.');
   check('zip-local-assets', 'JavaScript y WASM locales disponibles con MIME/CORS para juegos web.');
