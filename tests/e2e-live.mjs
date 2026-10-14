@@ -41,6 +41,14 @@ try {
   check('bridge-health', 'El puente responde /healthz.');
   if (!healthData.workerConfigured) fail('El puente no confirma la configuración del worker.');
 
+  const anonymousAccess = await request('/api/access-check');
+  if (anonymousAccess.status !== 401) fail('Una solicitud sin sesión debe recibir HTTP 401.');
+  const rawPasswordAccess = await request('/api/access-check', {
+    headers: { authorization: 'Bearer ' + key }
+  });
+  if (rawPasswordAccess.status !== 401) fail('La contraseña de bootstrap no debe servir como token Bearer.');
+  check('session-required', 'Rutas privadas rechazan tanto solicitudes anónimas como la contraseña usada directamente como token.');
+
   const login = await json(await request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username: 'admin', password: key })
@@ -177,6 +185,40 @@ try {
   }
   check('zip-js-entrypoint', 'ZIP sin HTML detectado y lanzador aislado generado para src/main.js.');
 
+  const adminToken = sessionToken;
+  const invitation = await json(await request('/api/admin/invites', {
+    method: 'POST', auth: true, body: JSON.stringify({ hours: 1 })
+  }), 'Creación de invitación de prueba');
+  if (!invitation.code) fail('No se generó el código de invitación para la prueba de aislamiento.');
+  const suffix = Date.now().toString(36);
+  const secondaryUsername = 'e2e-' + suffix;
+  const secondaryPassword = 'E2E-' + suffix + '-SecurePass42!';
+  const secondary = await json(await request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ invite: invitation.code, username: secondaryUsername, password: secondaryPassword })
+  }), 'Registro de cuenta aislada');
+  if (!secondary.token || secondary.user?.role !== 'user') fail('El registro mediante invitación no creó una cuenta estándar.');
+  sessionToken = secondary.token;
+
+  const secondaryJobs = await json(await request('/api/jobs?status=all&limit=100', { auth: true }), 'Tareas de la segunda cuenta');
+  if ((secondaryJobs.total || 0) !== 0) fail('La cuenta recién creada no debería ver las tareas de la cuenta administradora.');
+  const crossAccountResponse = await request('/api/jobs/' + encodeURIComponent(report.taskId) + '/history', { auth: true });
+  if (crossAccountResponse.status !== 404) fail('La segunda cuenta debe recibir HTTP 404 al consultar la tarea del administrador.');
+  check('account-task-isolation', 'La segunda cuenta no lista ni abre la tarea del administrador.');
+
+  const reusedInvite = await request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      invite: invitation.code,
+      username: 'e2ereuse-' + suffix,
+      password: 'Reuse-' + suffix + '-SecurePass42!'
+    })
+  });
+  if (reusedInvite.status !== 400) fail('Una invitación ya consumida debe rechazarse con HTTP 400.');
+  check('invite-single-use', 'Una invitación consumida no permite crear otra cuenta.');
+
+  await request('/api/auth/logout', { method: 'POST', auth: true, body: '{}' });
+  sessionToken = adminToken;
 
   report.finishedAt = new Date().toISOString();
   report.result = 'passed';
