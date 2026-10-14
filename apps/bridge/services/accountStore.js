@@ -116,18 +116,19 @@ export async function listApiKeys(userId) {
 export async function saveApiKeys(userId, entries) {
   if (!Array.isArray(entries) || entries.length > 10) throw new Error('Podés guardar hasta 10 APIs.');
   const client = await pool.connect();
-  const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.com']);
+  const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.ai','api.cohere.com']);
   const defaults = {
-    'api.openai.com': ['OpenAI', 'gpt-4o-mini', 'gpt-4o-mini', 'gpt-4o-mini'],
+    'api.openai.com': ['OpenAI', 'gpt-5.6-terra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     'api.groq.com': ['Groq', 'openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-    'openrouter.ai': ['OpenRouter', 'openai/gpt-4o-mini', 'openai/gpt-4o-mini', 'openai/gpt-4o-mini'],
+    'openrouter.ai': ['OpenRouter', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna'],
     'generativelanguage.googleapis.com': ['Gemini', 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash'],
     'api.together.xyz': ['Together AI', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
     'api.deepseek.com': ['DeepSeek', 'deepseek-chat', 'deepseek-chat', 'deepseek-chat'],
     'api.mistral.ai': ['Mistral AI', 'mistral-small-latest', 'mistral-small-latest', 'mistral-small-latest'],
     'api.fireworks.ai': ['Fireworks AI', 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],
     'api.perplexity.ai': ['Perplexity', 'sonar', 'sonar', 'sonar'],
-    'api.cohere.com': ['Cohere', 'command-a-03-2025', 'command-a-03-2025', 'command-a-03-2025']
+    'api.cohere.ai': ['Cohere', 'command-a-plus-05-2026', 'command-a-plus-05-2026', 'command-a-plus-05-2026'],
+    'api.cohere.com': ['Cohere (compatibilidad anterior)', 'command-a-plus-05-2026', 'command-a-plus-05-2026', 'command-a-plus-05-2026']
   };
   try {
     await client.query('BEGIN');
