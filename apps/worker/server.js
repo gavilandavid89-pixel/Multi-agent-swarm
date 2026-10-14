@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -158,6 +158,18 @@ async function start() {
         const delay = job.retryAt ? Math.max(0, Date.parse(job.retryAt) - Date.now()) : 0;
         if (delay > 0) { const timer = setTimeout(() => enqueue(job.id), Math.min(delay, 604800000)); timer.unref(); }
         else enqueue(job.id);
+      }
+      // Recover the narrow crash window between persisting a budget pause and
+      // creating its next batch. The DB transaction keeps each continuation idempotent.
+      for (const paused of await recoverableBudgetContinuations()) {
+        const continuation = await createContinuationJob(paused.id);
+        if (continuation?.job) {
+          enqueue(continuation.job.id);
+          console.info('[worker][token_batch_continuation_recovered]', JSON.stringify({
+            sourceJobId: paused.id, continuationJobId: continuation.job.id,
+            created: continuation.created, checkpoint: paused.checkpoint
+          }));
+        }
       }
     } catch (error) { console.error('[worker] no se pudieron recuperar las tareas', error?.message || error); }
   });
