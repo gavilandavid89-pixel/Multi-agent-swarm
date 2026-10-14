@@ -131,6 +131,10 @@ app.post('/api/jobs/:id/budget', async (req, res) => {
   try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget }) })); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+app.post('/api/jobs/:id/continue-budget', async (req, res) => {
+  try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' })); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs/:id/bundle', async (req, res) => {
   try {
