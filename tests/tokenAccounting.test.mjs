@@ -29,6 +29,14 @@ test('ignora el mismo evento si un callback se repite y no duplica tokens', () =
   assert.equal(second.usage.dedupedEvents, 1);
 });
 
+test('separa los tokens de la votación de mejoras del trabajo automático', () => {
+  const result = applyTokenUsage(null, usageEvent({ interaction: 'improvement-vote', stage: 'Votación de mejora' }), { status: 'completed' });
+  assert.equal(result.usage.totalTokens, 140);
+  assert.equal(result.usage.wastedTokens, 0);
+  assert.equal(result.usage.byInteraction['improvement-vote'].totalTokens, 140);
+  assert.equal(result.event.interaction, 'improvement-vote');
+});
+
 test('marca como desperdicio una respuesta de flujo que llega después del cierre', () => {
   const result = applyTokenUsage(null, usageEvent({ usageId: 'late-1' }), { status: 'completed' });
   assert.equal(result.usage.totalTokens, 140);
