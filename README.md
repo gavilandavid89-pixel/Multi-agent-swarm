@@ -49,7 +49,7 @@ Para comprobar sintaxis y ejecutar las pruebas unitarias: `npm run check`. La pr
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 50.000; ajustable entre 4.000 y 100.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
-**Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, el historial cifrado no podrá recuperarse. Guardá la clave de forma segura. El historial activo se almacena en PostgreSQL; el código conserva una importación de SQLite heredada si encuentra un archivo anterior.
+**Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, las tareas, los checkpoints y el historial cifrado no podrán recuperarse. Si se pierde `SWARM_API_ENCRYPTION_KEY`, las claves de proveedor guardadas tampoco podrán descifrarse. Guardá ambas claves en un gestor de secretos o copia segura; la clave `SWARM_API_ENCRYPTION_KEY` debe ser la misma en bridge y worker. El historial activo se almacena en PostgreSQL; el código conserva una importación de SQLite heredada si encuentra un archivo anterior.
 
 ## Alcance de validación
 
