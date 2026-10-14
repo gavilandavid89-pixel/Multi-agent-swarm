@@ -506,7 +506,7 @@ function apiFieldRow(api = {}) {
   row.dataset.label = initialProvider.label;
   row.dataset.model = initialModel;
   providerLabel.append(provider); keyLabel.append(input); modelLabel.append(modelInput);
-  main.append(providerLabel, keyLabel, input, modelLabel, modelInput, meta);
+  main.append(providerLabel, keyLabel, modelLabel, meta);
   const actions = document.createElement('div');
   if (api.saved) {
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Quitar';
