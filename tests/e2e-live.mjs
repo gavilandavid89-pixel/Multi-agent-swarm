@@ -226,6 +226,28 @@ try {
   if (!secondary.token || secondary.user?.role !== 'user') fail('El registro mediante invitación no creó una cuenta estándar.');
   sessionToken = secondary.token;
 
+  // Use only a fake test credential on the throwaway E2E account; always remove it.
+  const probeApiKey = 'sk-test-only-e2e-secret-1234567890';
+  await json(await request('/api/account/apis', {
+    method: 'PUT', auth: true,
+    body: JSON.stringify({ apis: [{
+      slot: 1, label: 'E2E probe', baseUrl: 'https://api.openai.com/v1',
+      models: { reasoning: 'gpt-6-sol', coding: 'gpt-6-sol', validation: 'gpt-6-luna' },
+      apiKey: probeApiKey
+    }] })
+  }), 'Guardar clave de prueba cifrada');
+  const listedApis = await json(await request('/api/account/apis', { auth: true }), 'Listar APIs de la cuenta de prueba');
+  if (!Array.isArray(listedApis.apis) || listedApis.apis.some(item =>
+      Object.hasOwn(item, 'encrypted_api_key') || Object.hasOwn(item, 'apiKey') ||
+      JSON.stringify(item).includes(probeApiKey))) {
+    fail('La API de listado expuso una credencial o su representación cifrada.');
+  }
+  const removedProbe = await json(await request('/api/account/apis/1', {
+    method: 'DELETE', auth: true, body: '{}'
+  }), 'Eliminar clave de prueba');
+  if (removedProbe.ok !== true) fail('No se pudo eliminar la API de prueba temporal.');
+  check('api-secret-not-returned', 'Una clave ficticia se guarda y se elimina sin devolverse en las respuestas de listado.');
+
   const secondaryJobs = await json(await request('/api/jobs?status=all&limit=100', { auth: true }), 'Tareas de la segunda cuenta');
   if ((secondaryJobs.total || 0) !== 0) fail('La cuenta recién creada no debería ver las tareas de la cuenta administradora.');
   const crossAccountResponse = await request('/api/jobs/' + encodeURIComponent(report.taskId) + '/history', { auth: true });
