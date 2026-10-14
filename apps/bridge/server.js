@@ -39,7 +39,17 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '64kb' }));
-app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
+app.use(express.static(webDir, {
+  etag: true,
+  maxAge: IS_PROD ? '1h' : 0,
+  setHeaders(res, filePath) {
+    // Revalidate the HTML shell on every navigation so its versioned asset URLs
+    // cannot stay stale for an hour after a deploy. Versioned JS/CSS may be cached.
+    if (path.resolve(filePath) === path.join(webDir, 'index.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
