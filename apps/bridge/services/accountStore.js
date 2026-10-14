@@ -1,0 +1,128 @@
+import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import pg from 'pg';
+
+const { Pool } = pg;
+const connectionString = process.env.SWARM_DATABASE_URL || '';
+const encryptionKeyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
+if (!connectionString) throw new Error('Falta SWARM_DATABASE_URL para la base de cuentas de Swarm.');
+if (!/^[a-f0-9]{64}$/i.test(encryptionKeyHex)) throw new Error('SWARM_API_ENCRYPTION_KEY debe ser una clave hexadecimal de 32 bytes.');
+export const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: false } });
+const encryptionKey = Buffer.from(encryptionKeyHex, 'hex');
+const digest = value => createHash('sha256').update(String(value)).digest('hex');
+
+export function hashPassword(password) {
+  const salt = randomBytes(16);
+  const derived = scryptSync(password, salt, 64);
+  return `scrypt:${salt.toString('hex')}:${derived.toString('hex')}`;
+}
+export function verifyPassword(password, encoded) {
+  try {
+    const [kind, saltHex, hashHex] = String(encoded).split(':');
+    if (kind !== 'scrypt' || !/^[a-f0-9]{32}$/i.test(saltHex) || !/^[a-f0-9]{128}$/i.test(hashHex)) return false;
+    const expected = Buffer.from(hashHex, 'hex');
+    const actual = scryptSync(password, Buffer.from(saltHex, 'hex'), expected.length);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  } catch { return false; }
+}
+export function encryptSecret(value) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey, iv);
+  const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), encrypted.toString('hex')].join(':');
+}
+export function decryptSecret(value) {
+  const [ivHex, tagHex, encryptedHex] = String(value).split(':');
+  const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(encryptedHex, 'hex')), decipher.final()]).toString('utf8');
+}
+export async function createSession(userId) {
+  const token = randomBytes(32).toString('base64url');
+  await pool.query('INSERT INTO app_sessions(user_id, token_hash, expires_at) VALUES($1,$2,now()+interval \'7 days\')', [userId, digest(token)]);
+  return token;
+}
+export async function findSession(token) {
+  if (!token) return null;
+  const { rows } = await pool.query(`SELECT u.id, u.username, u.role FROM app_sessions s JOIN app_users u ON u.id=s.user_id
+    WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.disabled_at IS NULL`, [digest(token)]);
+  return rows[0] || null;
+}
+export async function revokeSession(token) {
+  if (token) await pool.query('UPDATE app_sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL', [digest(token)]);
+}
+export async function importLegacyApiKeys(userId) {
+  const candidates = [];
+  if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', model: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
+  if (process.env.GROQ_API_KEY) candidates.push({ label: 'Groq', key: process.env.GROQ_API_KEY, baseUrl: 'https://api.groq.com/openai/v1', model: process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b', coding: process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b', validation: process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b' });
+  try {
+    const extra = JSON.parse(process.env.AI_FALLBACK_PROVIDERS || '[]');
+    if (Array.isArray(extra)) for (const item of extra) {
+      const keyName = String(item?.apiKeyEnv || '');
+      const key = /^[A-Z][A-Z0-9_]{1,79}$/.test(keyName) ? process.env[keyName] : '';
+      const baseUrl = String(item?.baseUrl || '').trim().replace(/\/+$/, '');
+      if (key && /^https:\/\//i.test(baseUrl) && !candidates.some(x => x.baseUrl === baseUrl)) candidates.push({ label: String(item.name || 'Proveedor externo').slice(0, 80), key, baseUrl, model: String(item.model || 'openai/gpt-oss-120b'), coding: String(item.model || 'openai/gpt-oss-120b'), validation: String(item.model || 'openai/gpt-oss-120b') });
+    }
+  } catch { /* Invalid legacy metadata is intentionally not logged. */ }
+  let imported = 0;
+  for (const item of candidates.slice(0, 10)) {
+    const { rows } = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 LIMIT 1', [userId, item.baseUrl]);
+    if (rows.length) continue;
+    await pool.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
+      VALUES($1, (SELECT COALESCE(MAX(slot),0)+1 FROM user_api_keys WHERE user_id=$1), $2,$3,$4,$5,$6,$7)`,
+      [userId, item.label, item.baseUrl, item.model, item.coding, item.validation, encryptSecret(item.key)]);
+    imported++;
+  }
+  return imported;
+}
+export async function listApiKeys(userId) {
+  const { rows } = await pool.query('SELECT id,slot,label,base_url,model_reasoning,model_coding,model_validation,created_at,updated_at FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
+  return rows;
+}
+export async function saveApiKeys(userId, entries) {
+  if (!Array.isArray(entries) || entries.length > 10) throw new Error('Podés guardar hasta 10 APIs.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query('SELECT slot FROM user_api_keys WHERE user_id=$1', [userId]);
+    const bySlot = new Map(existing.rows.map(row => [Number(row.slot), row]));
+    for (const item of entries) {
+      const slot = Number(item.slot);
+      if (!Number.isInteger(slot) || slot < 1 || slot > 10) throw new Error('Campo de API inválido.');
+      const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
+      const label = String(item.label || `API ${slot}`).trim().slice(0,80);
+      const baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
+      const model = String(item.model || 'openai/gpt-oss-120b').trim().slice(0,120);
+      if (!apiKey) continue;
+      if (!(baseUrl.startsWith('https://') || /^http:\/\/(localhost|127\.0\.0\.1)(:\\d+)?/.test(baseUrl))) throw new Error(`La URL de ${label} debe usar HTTPS.`);
+      await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
+        VALUES($1,$2,$3,$4,$5,$5,$5,$6) ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
+        [userId, slot, label || `API ${slot}`, baseUrl, model, encryptSecret(apiKey)]);
+    }
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+  return listApiKeys(userId);
+}
+export async function deleteApiKey(userId, slot) {
+  await pool.query('DELETE FROM user_api_keys WHERE user_id=$1 AND slot=$2', [userId, slot]);
+}
+export async function createInvite(userId, hours = 72) {
+  const code = randomBytes(24).toString('base64url');
+  const codeHash = digest(code);
+  const expiresHours = Math.max(1, Math.min(720, Number(hours) || 72));
+  await pool.query('INSERT INTO app_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+($3 * interval \'1 hour\'))', [codeHash, userId, expiresHours]);
+  return { code, expiresHours };
+}
+export async function registerFromInvite(username, password, code) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const invite = await client.query('SELECT id FROM app_invites WHERE code_hash=$1 AND used_at IS NULL AND expires_at>now() FOR UPDATE', [digest(code)]);
+    if (!invite.rows.length) throw new Error('La invitación no existe, venció o ya fue usada.');
+    const inserted = await client.query('INSERT INTO app_users(username,password_hash,role) VALUES($1,$2,\'user\') RETURNING id,username,role', [username, hashPassword(password)]);
+    await client.query('UPDATE app_invites SET used_at=now(),used_by=$1 WHERE id=$2', [inserted.rows[0].id, invite.rows[0].id]);
+    await client.query('COMMIT');
+    return inserted.rows[0];
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}
