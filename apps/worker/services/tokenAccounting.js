@@ -102,7 +102,7 @@ export function buildAutomaticBudgetExtensionPatch(current = {}, fromBudget, toB
     at: timestamp,
     agent: 'sistema',
     type: 'budget',
-    content: `Se agotó el límite de ${from.toLocaleString('es-AR')} tokens. El presupuesto se amplió automáticamente a ${to.toLocaleString('es-AR')} (+${(to-from).toLocaleString('es-AR')}); la tarea seguirá desde el checkpoint ${checkpoint}.`
+    content: `Se agotó el límite de ${from.toLocaleString('es-AR')} tokens. El presupuesto se amplió a ${to.toLocaleString('es-AR')} (+${(to-from).toLocaleString('es-AR')}); la tarea seguirá desde el checkpoint ${checkpoint}.`
   }].slice(-150);
   return {
     status: 'queued',
