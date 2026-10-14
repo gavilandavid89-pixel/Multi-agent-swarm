@@ -11,7 +11,7 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; }
+function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
 function showApp() { $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -444,7 +444,7 @@ $('access-form').addEventListener('submit', async event => {
     if (!response.ok) throw new Error(data.error || 'No se pudo iniciar sesión.');
     state.accessKey = data.token; state.user = data.user;
     sessionStorage.setItem('swarm-session-token', state.accessKey);
-    $('access-key').value = '';
+    sessionStorage.removeItem('swarm-access-key'); $('access-key').value = '';
     await enterApp();
   } catch (error) { $('access-status').textContent = error.message; showAccess(); }
   finally { button.disabled = false; }
