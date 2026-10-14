@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { createDecipheriv } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -18,6 +18,43 @@ function decrypt(value) {
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
   return Buffer.concat([decipher.update(Buffer.from(bodyHex, 'hex')), decipher.final()]).toString('utf8');
 }
+
+function encrypt(value) {
+  if (!key) throw new Error('API encryption is not configured.');
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const body = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), body.toString('hex')].join(':');
+}
+export async function importLegacyProvidersForUser(userId) {
+  if (!pool) throw new Error('User API database is not configured.');
+  const candidates = [];
+  if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
+  if (process.env.GROQ_API_KEY) candidates.push({ label: 'Groq', key: process.env.GROQ_API_KEY, baseUrl: 'https://api.groq.com/openai/v1', reasoning: process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b', coding: process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b', validation: process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b' });
+  try {
+    const entries = JSON.parse(process.env.AI_FALLBACK_PROVIDERS || '[]');
+    if (Array.isArray(entries)) for (const item of entries) {
+      const keyName = String(item?.apiKeyEnv || '');
+      const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(keyName) ? process.env[keyName] : '';
+      const baseUrl = String(item?.baseUrl || '').trim().replace(/\/+$/, '');
+      const model = String(item?.model || item?.models?.reasoning || '').trim();
+      if (apiKey && model && /^https:\/\//i.test(baseUrl) && !candidates.some(x => x.baseUrl === baseUrl)) {
+        candidates.push({ label: String(item.name || 'Proveedor externo').slice(0,80), key: apiKey, baseUrl, reasoning: String(item.models?.reasoning || model), coding: String(item.models?.coding || model), validation: String(item.models?.validation || model) });
+      }
+    }
+  } catch { /* Never log legacy provider configuration or credentials. */ }
+  let imported = 0;
+  for (const item of candidates.slice(0, 10)) {
+    const exists = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 LIMIT 1', [userId, item.baseUrl]);
+    if (exists.rows.length) continue;
+    await pool.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
+      VALUES($1,(SELECT COALESCE(MAX(slot),0)+1 FROM user_api_keys WHERE user_id=$1),$2,$3,$4,$5,$6,$7)`,
+      [userId,item.label,item.baseUrl,item.reasoning,item.coding,item.validation,encrypt(item.key)]);
+    imported++;
+  }
+  return imported;
+}
+
 export function currentUserProviders() { return context.getStore() || null; }
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
