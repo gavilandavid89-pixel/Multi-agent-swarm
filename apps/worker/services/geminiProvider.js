@@ -67,9 +67,10 @@ export async function consultarGemini({
   maxContinuations = 4,
   canContinue = () => true,
   onPartialOutput = () => {},
-  failoverOnRetryable = false
+  failoverOnRetryable = false,
+  apiKey: suppliedApiKey
 }) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = suppliedApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GEMINI_API_KEY en el servicio swarm-worker.');
 
   const configuredOutput = Number.parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS_PER_CALL || '60000', 10);
