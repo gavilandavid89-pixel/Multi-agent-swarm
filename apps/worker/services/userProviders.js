@@ -75,7 +75,7 @@ export async function withUserProviders(userId, operation) {
         validation: String(row.model_validation || '').trim()
       }
     };
-    if (/generativelanguage\\.googleapis\\.com/i.test(provider.baseUrl)) {
+    if (/generativelanguage\.googleapis\.com/i.test(provider.baseUrl)) {
       if (!gemini) gemini = { apiKey, models: provider.models, name: provider.name };
     } else if (/^https:\/\//i.test(provider.baseUrl)) providers.push(provider);
   }
