@@ -99,7 +99,7 @@ export async function saveApiKeys(userId, entries) {
         else if (/^sk-or-v1-[0-9a-f]{20,}$/i.test(apiKey)) { baseUrl = 'https://openrouter.ai/api/v1'; model = model || 'openai/gpt-4o-mini'; }
         else { baseUrl = 'https://api.openai.com/v1'; model = model || 'gpt-4o-mini'; }
       } else model = model || 'gpt-4o-mini';
-      if (!(baseUrl.startsWith('https://') || /^http:\/\/(localhost|127\.0\.0\.1)(:\\d+)?/.test(baseUrl))) throw new Error(`La URL de ${label} debe usar HTTPS.`);
+      if (!(baseUrl.startsWith('https://') || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(baseUrl))) throw new Error(`La URL de ${label} debe usar HTTPS.`);
       await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
         VALUES($1,$2,$3,$4,$5,$5,$5,$6) ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
         [userId, slot, label || `API ${slot}`, baseUrl, model, encryptSecret(apiKey)]);
