@@ -57,6 +57,20 @@ async function retryNotice(jobId, info) {
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   await updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
 }
+async function getOutputAllowance(jobId, requested) {
+  const current = await getPayload(jobId);
+  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
+  const fallback = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
+  const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || fallback));
+  const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
+  const remaining = Math.max(0, limit - used);
+  if (remaining < 256) {
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; ampliá el límite para reanudar.`);
+    error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
+    throw error;
+  }
+  return Math.min(Math.max(256, Number(requested) || 1200), remaining);
+}
 async function assertTaskTokenBudget(jobId) {
   const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
   const defaultLimit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
@@ -97,7 +111,12 @@ export async function processJob(jobId) {
 
 async function runJob(jobId) {
   const initial = await getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
-  const objective = initial.payload.objective; const onRetry = (agent, stage) => info => retryNotice(jobId, { ...info, agent, stage, interaction: 'workflow' });
+  const objective = initial.payload.objective;
+  const onRetry = (agent, stage) => {
+    const notify = info => retryNotice(jobId, { ...info, agent, stage, interaction: 'workflow' });
+    notify.getMaxOutputTokens = requested => getOutputAllowance(jobId, requested);
+    return notify;
+  };
   const initialPartialDelivery = String(initial.payload.partialDelivery || '');
   const savePartial = async info => {
     const current = await getPayload(jobId);
@@ -109,7 +128,7 @@ async function runJob(jobId) {
       : fresh;
     await updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
   };
-  const canContinue = async () => { const record = await getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
+  const canContinue = async () => { const record = await getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return Math.max(0, budget - (Number(record?.payload?.tokenUsage?.totalTokens) || 0)); };
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
