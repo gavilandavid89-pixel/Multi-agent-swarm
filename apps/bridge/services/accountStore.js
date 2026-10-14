@@ -116,31 +116,61 @@ export async function listApiKeys(userId) {
 export async function saveApiKeys(userId, entries) {
   if (!Array.isArray(entries) || entries.length > 10) throw new Error('Podés guardar hasta 10 APIs.');
   const client = await pool.connect();
+  const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.com']);
+  const defaults = {
+    'api.openai.com': ['OpenAI', 'gpt-4o-mini'],
+    'api.groq.com': ['Groq', 'openai/gpt-oss-120b'],
+    'openrouter.ai': ['OpenRouter', 'openai/gpt-4o-mini'],
+    'generativelanguage.googleapis.com': ['Gemini', 'gemini-3.8-flash'],
+    'api.together.xyz': ['Together AI', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
+    'api.deepseek.com': ['DeepSeek', 'deepseek-chat'],
+    'api.mistral.ai': ['Mistral AI', 'mistral-small-latest'],
+    'api.fireworks.ai': ['Fireworks AI', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],
+    'api.perplexity.ai': ['Perplexity', 'sonar'],
+    'api.cohere.com': ['Cohere', 'command-a-03-2025']
+  };
   try {
     await client.query('BEGIN');
-    const existing = await client.query('SELECT slot FROM user_api_keys WHERE user_id=$1', [userId]);
+    const existing = await client.query('SELECT slot,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
     const bySlot = new Map(existing.rows.map(row => [Number(row.slot), row]));
+    const seen = new Set();
     for (const item of entries) {
       const slot = Number(item.slot);
-      if (!Number.isInteger(slot) || slot < 1 || slot > 10) throw new Error('Campo de API inválido.');
+      if (!Number.isInteger(slot) || slot < 1 || slot > 10 || seen.has(slot)) throw new Error('Campo de API inválido o repetido.');
+      seen.add(slot);
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
-      const label = String(item.label || `API ${slot}`).trim().slice(0,80);
-      let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
+      const previous = bySlot.get(slot);
+      let baseUrl = String(item.baseUrl || '').trim().replace(/\\/+$/, '');
       let model = String(item.model || '').trim().slice(0,120);
-      if (!apiKey) continue;
-      if (!baseUrl || baseUrl === 'https://api.openai.com/v1') {
-        if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) { baseUrl = 'https://generativelanguage.googleapis.com'; model = model || 'gemini-3.8-flash'; }
-        else if (/^gsk_[0-9A-Za-z]{20,}$/.test(apiKey)) { baseUrl = 'https://api.groq.com/openai/v1'; model = model || 'openai/gpt-oss-120b'; }
-        else if (/^sk-or-v1-[0-9a-f]{20,}$/i.test(apiKey)) { baseUrl = 'https://openrouter.ai/api/v1'; model = model || 'openai/gpt-4o-mini'; }
-        else { baseUrl = 'https://api.openai.com/v1'; model = model || 'gpt-4o-mini'; }
-      } else model = model || 'gpt-4o-mini';
+      if (!baseUrl && apiKey) {
+        if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) baseUrl = 'https://generativelanguage.googleapis.com';
+        else if (/^gsk_[0-9A-Za-z]{20,}$/.test(apiKey)) baseUrl = 'https://api.groq.com/openai/v1';
+        else if (/^sk-or-v1-[0-9a-f]{20,}$/i.test(apiKey)) baseUrl = 'https://openrouter.ai/api/v1';
+        else baseUrl = 'https://api.openai.com/v1';
+      }
+      if (!apiKey && !previous) continue;
+      if (!baseUrl) throw new Error(`Elegí un proveedor para la API ${slot}.`);
       let parsedUrl;
-      try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL de ${label} no es válida.`); }
-      const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.com']);
-      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(parsedUrl.hostname.toLowerCase()) || parsedUrl.username || parsedUrl.password || parsedUrl.hash) throw new Error(`El proveedor de ${label} no está permitido por la política de seguridad.`);
-      await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
-        VALUES($1,$2,$3,$4,$5,$5,$5,$6) ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
-        [userId, slot, label || `API ${slot}`, baseUrl, model, encryptSecret(apiKey)]);
+      try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL del proveedor de la API ${slot} no es válida.`); }
+      const hostname = parsedUrl.hostname.toLowerCase();
+      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(hostname) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
+        throw new Error(`El proveedor de la API ${slot} no está permitido por la política de seguridad.`);
+      }
+      const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
+        : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
+        : `https://${hostname}${parsedUrl.pathname.replace(/\\/+$/, '')}`;
+      const [defaultLabel, defaultModel] = defaults[hostname];
+      const label = String(item.label || defaultLabel).trim().slice(0,80) || defaultLabel;
+      model = model || defaultModel;
+      if (!apiKey && previous) {
+        await client.query(`UPDATE user_api_keys SET label=$3,base_url=$4,model_reasoning=$5,model_coding=$5,model_validation=$5,updated_at=now() WHERE user_id=$1 AND slot=$2`,
+          [userId, slot, label, canonicalBaseUrl, model]);
+      } else {
+        await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
+          VALUES($1,$2,$3,$4,$5,$5,$5,$6)
+          ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
+          [userId, slot, label, canonicalBaseUrl, model, encryptSecret(apiKey)]);
+      }
     }
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
