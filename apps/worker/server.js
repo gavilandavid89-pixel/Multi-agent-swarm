@@ -28,7 +28,8 @@ function pump() {
     void processJob(id).then(result => {
       if (result?.deferred && !shuttingDown) {
         const delay = Math.max(1000, Math.min(604800000, Number(result.retryAfterMs) || 30000));
-        const timer = setTimeout(() => enqueue(id), delay); timer.unref();
+        const nextJobId = result.continuationJobId || id;
+        const timer = setTimeout(() => enqueue(nextJobId), delay); timer.unref();
       }
     }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
