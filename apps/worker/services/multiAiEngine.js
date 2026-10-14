@@ -1,5 +1,5 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob, saveArtifacts } from './store.js';
+import { getPayload, updateJob, saveArtifacts, recordTokenUsage } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
 import { getDeferredCooldownMs } from './providerRetryPolicy.js';
@@ -35,19 +35,26 @@ function mergeDelivery(previous, correction) {
 async function retryNotice(jobId, info) {
   const current = await getPayload(jobId); if (!current) return;
   if (info.usage) {
-    const prior = current.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
+    const accounted = await recordTokenUsage(jobId, info);
     const model = String(info.model || 'desconocido');
-    const next = { promptTokens: prior.promptTokens + (info.promptTokens || 0), completionTokens: prior.completionTokens + (info.completionTokens || 0), totalTokens: prior.totalTokens + (info.totalTokens || 0), calls: prior.calls + 1, byModel: { ...(prior.byModel || {}) } };
-    const modelPrior = next.byModel[model] || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
-    next.byModel[model] = { promptTokens: modelPrior.promptTokens + (info.promptTokens || 0), completionTokens: modelPrior.completionTokens + (info.completionTokens || 0), totalTokens: modelPrior.totalTokens + (info.totalTokens || 0), calls: modelPrior.calls + 1 };
-    const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }) }]);
-    await updateJob(jobId, { payload: { transcript, tokenUsage: next, providerFailureStreak: 0 } });
-    console.info('[worker][provider_usage]', JSON.stringify({ jobId, model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }));
+    console.info('[worker][provider_usage]', JSON.stringify({
+      jobId, model, agent: info.agent || 'Agente sin clasificar', stage: info.stage || 'Etapa sin clasificar',
+      interaction: info.interaction || 'workflow',
+      promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0,
+      totalTokens: info.totalTokens || 0, duplicateIgnored: Boolean(accounted.duplicate),
+      countedAsWaste: Boolean(accounted.event?.countedAsWaste)
+    }));
+    if (!accounted.duplicate) {
+      const fresh = await getPayload(jobId);
+      if (fresh && fresh.publicJob.status !== 'completed') {
+        await updateJob(jobId, { payload: { providerFailureStreak: 0 } });
+      }
+    }
     return;
   }
   const reason = String(info.reason || 'error temporal').slice(0, 240);
   console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
+  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   await updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
 }
 async function assertTaskTokenBudget(jobId) {
@@ -81,7 +88,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
 }
 export async function processJob(jobId) {
   const initial = await getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
-  const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
+  const objective = initial.payload.objective; const onRetry = (agent, stage) => info => retryNotice(jobId, { ...info, agent, stage, interaction: 'workflow' });
   const initialPartialDelivery = String(initial.payload.partialDelivery || '');
   const savePartial = async info => {
     const current = await getPayload(jobId);
@@ -99,25 +106,25 @@ export async function processJob(jobId) {
     if (!proposal) {
       await startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
       await assertTaskTokenBudget(jobId);
-      proposal = await agenteArquitecto(objective, onRetry);
+      proposal = await agenteArquitecto(objective, onRetry('Arquitecto', 'Arquitectura'));
       await checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
     }
     if (!critique) {
       await startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Estoy revisando la propuesta para encontrar riesgos, contradicciones y casos límite.');
       await assertTaskTokenBudget(jobId);
-      critique = await agenteEsceptico(objective, proposal, onRetry);
+      critique = await agenteEsceptico(objective, proposal, onRetry('Escéptico', 'Auditoría escéptica'));
       await checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique });
     }
     if (!strategy) {
       await startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Estoy comparando la propuesta y las objeciones para acordar un plan.');
       await assertTaskTokenBudget(jobId);
-      strategy = await agenteArbitro(objective, proposal, critique, onRetry);
+      strategy = await agenteArbitro(objective, proposal, critique, onRetry('Árbitro', 'Síntesis técnica'));
       await checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
     }
     if (!coherence) {
       await startAgent(jobId, 'Mapa de coherencia', 30, 'Coordinador de coherencia', 'Estoy definiendo los contratos compartidos, dependencias y reglas que todos los agentes deberán respetar.');
       await assertTaskTokenBudget(jobId);
-      coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry);
+      coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry('Coordinador de coherencia', 'Mapa de coherencia'));
       await checkpoint(jobId, 'Mapa de coherencia', 32, 'Coordinador de coherencia', coherence, { proposal, critique, strategy, coherence });
     }
     if (!delivery) {
@@ -125,10 +132,10 @@ export async function processJob(jobId) {
       await assertTaskTokenBudget(jobId);
       if (partialDelivery) {
         delivery = partialDelivery;
-        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry, partialDelivery, coherence, canContinue, savePartial);
+        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry('Desarrollador', 'Desarrollo'), partialDelivery, coherence, canContinue, savePartial);
         delivery = mergeDelivery(partialDelivery, continuation);
       } else {
-        delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue, savePartial);
+        delivery = await agenteDesarrollador(objective, strategy, '', onRetry('Desarrollador', 'Desarrollo'), '', coherence, canContinue, savePartial);
       }
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
@@ -145,12 +152,12 @@ export async function processJob(jobId) {
         if (!coherenceReview) {
           await startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
           await assertTaskTokenBudget(jobId);
-          coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry);
+          coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry('Coordinador de coherencia', `Auditoría de coherencia ${round}`));
           await checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, coherenceReviewRound: round, activeValidationRound: round, delivery, validation: null, syntax: null });
         }
         await startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Estoy haciendo una revisión independiente y una comprobación determinista.');
         await assertTaskTokenBudget(jobId);
-        validation = await agenteValidador(objective, strategy, delivery, onRetry);
+        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`));
         if (coherenceReview.verdict !== 'APPROVED') {
           validation = {
             ...validation,
@@ -188,7 +195,7 @@ export async function processJob(jobId) {
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       await assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry, repairContext, coherence, canContinue, savePartial);
+      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial);
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
