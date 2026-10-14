@@ -152,7 +152,7 @@ export async function consultarGemini({
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
         const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
         if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
-          const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
+          const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.');
           error.code = 'TASK_TOKEN_BUDGET';
           throw error;
         }
