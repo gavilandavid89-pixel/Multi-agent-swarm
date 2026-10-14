@@ -194,7 +194,7 @@ export async function recoverableBudgetContinuations() {
   return rows.flatMap(row => {
     try {
       const payload = unseal(row.encrypted_payload);
-      return payload.continuedByJobId ? [] : [{ id: row.id, checkpoint: payload.lastCheckpoint || null }];
+      return payload.continuedByJobId ? [] : [{ id: row.id, checkpoint: payload.lastCheckpoint || null, userId: payload.userId || null }];
     } catch (error) {
       console.error('[worker][budget_continuation_recovery_read_failed]', JSON.stringify({ jobId: row.id, message: String(error?.message || error).slice(0, 200) }));
       return [];
@@ -321,7 +321,20 @@ export async function listJobs({ limit = 25, offset = 0, status = '' } = {}) {
   const countArgs = filterStatus ? [filterStatus] : [];
   const count = await pool.query(`SELECT COUNT(*)::int AS count FROM jobs${where}`, countArgs);
   const total = count.rows[0].count;
-  return { jobs: rows.map(toPublic), total, limit: safeLimit, offset: safeOffset, hasMore: safeOffset + rows.length < total, status: filterStatus || 'all' };
+  const jobs = rows.map(row => {
+    const publicJob = toPublic(row);
+    try {
+      const payload = unseal(row.encrypted_payload);
+      return {
+        ...publicJob,
+        userId: typeof payload.userId === 'string' ? payload.userId : null,
+        continuationOf: typeof payload.continuationOf === 'string' ? payload.continuationOf : null
+      };
+    } catch {
+      return { ...publicJob, userId: null, continuationOf: null };
+    }
+  });
+  return { jobs, total, limit: safeLimit, offset: safeOffset, hasMore: safeOffset + rows.length < total, status: filterStatus || 'all' };
 }
 export async function historySummary() {
   const { rows } = await pool.query('SELECT status, COUNT(*)::int AS count FROM jobs GROUP BY status');
