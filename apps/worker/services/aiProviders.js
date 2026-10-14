@@ -52,7 +52,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   }
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
@@ -101,6 +101,30 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       return accumulatedContent;
     }
     const body = await response.text().catch(() => '');
+    // Groq puede devolver 413 cuando entrada + salida solicitada exceden el TPM disponible.
+    // Reducimos la salida y reintentamos; la solicitud rechazada no genera tokens de respuesta.
+    if (response.status === 413) {
+      const tpm = body.match(/\bLimit\s+(\d+)\s*,?\s*Requested\s+(\d+)/i);
+      const limit = tpm ? Number(tpm[1]) : 0;
+      const requested = tpm ? Number(tpm[2]) : 0;
+      const excess = requested > limit ? requested - limit : 0;
+      if (limit > 0 && excess > 0 && safeMaxTokens > 256 && sizeRetries < 4) {
+        const previousMaxTokens = safeMaxTokens;
+        safeMaxTokens = Math.max(256, safeMaxTokens - excess - 64);
+        if (safeMaxTokens < previousMaxTokens) {
+          sizeRetries++;
+          const reason = `Solicitud 413 por límite TPM; se reduce la salida de ${previousMaxTokens} a ${safeMaxTokens} tokens (intento ${sizeRetries}/4)`;
+          await onRetry({ retry: sizeRetries, wait: 0, reason });
+          console.warn('[worker][provider_request_shrunk]', JSON.stringify({ model, limit, requested, previousMaxTokens, maxCompletionTokens: safeMaxTokens, retry: sizeRetries }));
+          continue;
+        }
+      }
+      const error = new Error(limit > 0
+        ? `El proveedor rechazó la solicitud por tamaño (HTTP 413; límite TPM ${limit}, solicitud ${requested}). Incluso reduciendo la salida no queda margen suficiente; dividí el trabajo o acortá el contexto.`
+        : 'El proveedor rechazó la solicitud por tamaño (HTTP 413). Dividí el trabajo en módulos más pequeños o acortá el contexto.');
+      error.code = 'PROVIDER_INPUT_TOO_LARGE'; error.providerModel = model; error.providerStatus = 413;
+      throw error;
+    }
     const incompleteJsonGeneration = response.status === 400 && /json_validate_failed/i.test(body) && /max completion tokens reached before generating a valid document/i.test(body);
     if (incompleteJsonGeneration && responseFormat && formatRetries < 2 && safeMaxTokens < maxSafeOutputTokens) {
       formatRetries++;
