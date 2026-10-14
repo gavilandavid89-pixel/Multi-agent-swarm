@@ -40,7 +40,7 @@ export async function withUserProviders(userId, operation) {
     };
     if (/generativelanguage\\.googleapis\\.com/i.test(provider.baseUrl)) {
       if (!gemini) gemini = { apiKey, models: provider.models, name: provider.name };
-    } else if (/^https:\\/\\//i.test(provider.baseUrl)) providers.push(provider);
+    } else if (/^https:\/\//i.test(provider.baseUrl)) providers.push(provider);
   }
   return context.run({ userId, providers, gemini }, operation);
 }
