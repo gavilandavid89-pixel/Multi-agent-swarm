@@ -59,6 +59,11 @@ app.post('/api/auth/login', async (req, res) => {
       user = created.rows[0];
       const imported = await importLegacyApiKeys(user.id);
       console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported }));
+      try {
+        const legacy = await workerRequest('/internal/jobs?limit=100');
+        const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
+        for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+      } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
     } else if (!verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
@@ -173,8 +178,14 @@ app.get('/api/jobs', async (req, res) => {
     if (value) params.set(key, value);
   }
   const suffix = params.size ? `?${params.toString()}` : '';
-  try { res.json(await workerRequest(`/internal/jobs${suffix}`)); }
-  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+  try {
+    const result = await workerRequest(`/internal/jobs${suffix}`);
+    const rows = Array.isArray(result) ? result : (Array.isArray(result?.jobs) ? result.jobs : []);
+    const ownership = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1', [req.user.id]);
+    const ids = new Set(ownership.rows.map(row => String(row.job_id)));
+    const filtered = rows.filter(job => ids.has(String(job.id)));
+    res.json(Array.isArray(result) ? filtered : { ...result, jobs: filtered, total: filtered.length });
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
