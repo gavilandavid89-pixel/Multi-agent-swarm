@@ -33,7 +33,10 @@ function isFailoverEligible(error) {
 }
 
 function providerModelForSlot(provider, requestedModel, maxTokens) {
-  const slot = Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(String(requestedModel)) ? 'validation' : 'reasoning');
+  const requested = String(requestedModel || '').trim();
+  const slots = ['reasoning', 'coding', 'validation'];
+  const exactSlot = slots.find(slot => String(provider.models?.[slot] || '').trim() === requested && requested);
+  const slot = exactSlot || (Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(requested) ? 'validation' : 'reasoning'));
   return String(provider.models?.[slot] || provider.model || provider.models?.reasoning || provider.models?.coding || provider.models?.validation || '').trim();
 }
 
