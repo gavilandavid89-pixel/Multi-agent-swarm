@@ -6,6 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
+import { withUserProviders } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -20,12 +21,17 @@ const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.e
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
 app.use('/internal', (req, res, next) => { if (!safeEqual(req.get('x-swarm-bridge-secret') || '', SHARED_SECRET)) return res.status(401).json({ error: 'No autorizado.' }); next(); });
 function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b)); if (aa.length !== bb.length || aa.length === 0) return false; return timingSafeEqual(aa, bb); }
+async function runJobWithAccountProviders(id) {
+  const record = await getPayload(id);
+  const userId = record?.payload?.userId || null;
+  return withUserProviders(userId, () => processJob(id));
+}
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
   if (shuttingDown) return;
   while (active.size < MAX_CONCURRENCY && queue.size > 0) {
     const id = queue.values().next().value; queue.delete(id); if (active.has(id)) continue; active.add(id);
-    void processJob(id).then(result => {
+    void runJobWithAccountProviders(id).then(result => {
       if (result?.deferred && !shuttingDown) {
         const delay = Math.max(1000, Math.min(604800000, Number(result.retryAfterMs) || 30000));
         const nextJobId = result.continuationJobId || id;
@@ -49,7 +55,7 @@ app.post('/internal/jobs', async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const job = await createJob(objective, tokenBudget); enqueue(job.id); res.status(202).json(job); }
+  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
