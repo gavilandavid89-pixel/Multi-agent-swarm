@@ -5,6 +5,7 @@ import { initStore, createJob, createContinuationJob, getJob, getPayload, histor
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask } from './services/tokenAccounting.js';
+import { voteOnImprovement } from './services/improvementVoting.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -77,6 +78,17 @@ app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
     res.status(202).json(result.job);
   } catch (error) { next(error); }
 });
+app.post('/internal/jobs/:id/vote-improvement', async (req, res) => {
+  const proposal = typeof req.body?.proposal === 'string' ? req.body.proposal.trim() : '';
+  if (!proposal) return res.status(400).json({ error: 'Escribí una mejora concreta para someterla a votación.' });
+  if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
+  try {
+    const result = await voteOnImprovement(req.params.id, proposal);
+    res.json(result);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: String(error.message || 'No se pudo completar la votación.').slice(0, 1200) });
+  }
+});
 app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
@@ -113,7 +125,7 @@ app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   const tokensUsed = Math.max(0, Number(tokenUsage.totalTokens) || 0);
   const tokenBatchHistory = Array.isArray(record.payload.tokenBatchHistory) ? record.payload.tokenBatchHistory : [];
   const priorTokensUsed = tokenBatchHistory.reduce((sum, batch) => sum + (Number(batch?.tokenUsage?.totalTokens) || 0), 0);
-  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: canContinueBudgetTask(record.publicJob, record.payload), continuedByJobId: record.payload.continuedByJobId || null, artifacts: await listArtifacts(req.params.id) });
+  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: canContinueBudgetTask(record.publicJob, record.payload), continuedByJobId: record.payload.continuedByJobId || null, improvementVotes: Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [], artifacts: await listArtifacts(req.params.id) });
 } catch (error) { next(error); } });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
 function maybeExit() { if (shuttingDown && active.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void closeStore().catch(error => console.error('[worker] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0)); } }

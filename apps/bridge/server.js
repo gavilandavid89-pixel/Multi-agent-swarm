@@ -135,6 +135,18 @@ app.post('/api/jobs/:id/continue-budget', async (req, res) => {
   try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' })); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+app.post('/api/jobs/:id/vote-improvement', async (req, res) => {
+  const proposal = typeof req.body?.proposal === 'string' ? req.body.proposal.trim() : '';
+  if (!proposal) return res.status(400).json({ error: 'Escribí una mejora concreta para someterla a votación.' });
+  if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
+  try {
+    res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/vote-improvement`, {
+      method: 'POST', body: JSON.stringify({ proposal })
+    }));
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message });
+  }
+});
 app.post('/api/jobs/:id/retry', async (req, res) => { try { res.status(202).json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/retry`, { method: 'POST', body: '{}' })); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs/:id/bundle', async (req, res) => {
   try {

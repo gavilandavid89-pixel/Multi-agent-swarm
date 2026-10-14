@@ -43,7 +43,7 @@ export function applyTokenUsage(currentValue, info = {}, { eventIds = [], status
   const model = key(info.model, 'desconocido');
   const agent = key(info.agent, 'Agente sin clasificar');
   const stage = key(info.stage, 'Etapa sin clasificar');
-  const interaction = info.interaction === 'direct-chat' ? 'direct-chat' : 'workflow';
+  const interaction = ['direct-chat', 'improvement-vote'].includes(info.interaction) ? info.interaction : 'workflow';
   const countedAsWaste = status === 'completed' && interaction === 'workflow';
 
   const byModel = { ...(current.byModel || {}) };
