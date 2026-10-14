@@ -1,4 +1,4 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createCipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -68,12 +68,6 @@ export function encryptSecret(value) {
   const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
   return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), encrypted.toString('hex')].join(':');
 }
-export function decryptSecret(value) {
-  const [ivHex, tagHex, encryptedHex] = String(value).split(':');
-  const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(encryptedHex, 'hex')), decipher.final()]).toString('utf8');
-}
 export async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
   await pool.query('INSERT INTO app_sessions(user_id, token_hash, expires_at) VALUES($1,$2,now()+interval \'7 days\')', [userId, digest(token)]);
@@ -111,7 +105,7 @@ export async function saveApiKeys(userId, entries) {
   };
   try {
     await client.query('BEGIN');
-    const existing = await client.query('SELECT slot,base_url,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
+    const existing = await client.query('SELECT slot,base_url FROM user_api_keys WHERE user_id=$1', [userId]);
     const bySlot = new Map(existing.rows.map(row => [Number(row.slot), row]));
     const seen = new Set();
     for (const item of entries) {
