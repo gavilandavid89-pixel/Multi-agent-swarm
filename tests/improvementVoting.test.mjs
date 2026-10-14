@@ -46,3 +46,16 @@ test('fallos del proveedor no se cuentan como votos válidos ni como apoyo', () 
   assert.equal(summary.outcome, 'SIN_VOTOS_VALIDOS');
   assert.equal(summary.answered, 0);
 });
+
+test('errores de proveedor se excluyen del recuento y no cuentan como abstenciones', () => {
+  const summary = summarizeImprovementVotes([
+    { vote: 'APOYAR', responseReceived: true },
+    { vote: 'ABSTENERSE', responseReceived: false, error: 'timeout' },
+    { vote: 'RECHAZAR', responseReceived: true },
+    { vote: 'ABSTENERSE', responseReceived: false, error: 'rate limit' }
+  ]);
+  assert.equal(summary.outcome, 'EMPATE');
+  assert.deepEqual(summary.tally, { APOYAR: 1, RECHAZAR: 1, ABSTENERSE: 0 });
+  assert.equal(summary.answered, 2);
+  assert.equal(summary.total, 4);
+});
