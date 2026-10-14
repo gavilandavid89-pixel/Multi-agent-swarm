@@ -16,6 +16,7 @@ export function parseImprovementVote(value) {
 export function summarizeImprovementVotes(votes = []) {
   const tally = { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 };
   for (const item of Array.isArray(votes) ? votes : []) {
+    if (item?.error != null || item?.responseReceived === false) continue;
     const vote = String(item?.vote || '').toUpperCase();
     if (Object.hasOwn(tally, vote)) tally[vote] += 1;
     else tally.ABSTENERSE += 1;
@@ -24,10 +25,10 @@ export function summarizeImprovementVotes(votes = []) {
   let summary = 'La votación quedó empatada. Revisá los argumentos y decidí manualmente.';
   if (tally.APOYAR > tally.RECHAZAR) {
     outcome = 'MAYORIA_A_FAVOR';
-    summary = 'La mayoría recomienda considerar la mejora. La votación no aplica cambios: requiere tu aprobación y una implementación verificada.';
+    summary = 'La mayoría de los votos válidos recomienda considerar la mejora. La votación no aplica cambios: requiere tu aprobación y una implementación verificada.';
   } else if (tally.RECHAZAR > tally.APOYAR) {
     outcome = 'MAYORIA_EN_CONTRA';
-    summary = 'La mayoría desaconseja aplicar la mejora tal como está planteada. Revisá los riesgos o reformulá la propuesta.';
+    summary = 'La mayoría de los votos válidos desaconseja aplicar la mejora tal como está planteada. Revisá los riesgos o reformulá la propuesta.';
   }
   const answered = (Array.isArray(votes) ? votes : []).filter(item => item?.error == null && item?.responseReceived === true).length;
   const total = Array.isArray(votes) ? votes.length : 0;
