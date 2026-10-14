@@ -89,7 +89,7 @@ export async function importLegacyProvidersForUser(userId) {
     if (parsed.protocol !== 'https:' || !supported.has(hostname) || (parsed.port && parsed.port !== '443') ||
         parsed.username || parsed.password || parsed.search || parsed.hash) continue;
     const provider = providerDetails[hostname];
-    if (seen.has(provider.label) || !candidate.key || candidate.key.length > 4096) continue;
+    if (seen.has(provider.label) || !candidate.key || candidate.key.length > 4096 || /[\u0000-\u001f\u007f]/.test(candidate.key)) continue;
     seen.add(provider.label);
     const rawModels = {
       reasoning: String(candidate.reasoning || '').trim(),
@@ -131,7 +131,7 @@ export async function importLegacyProvidersForUser(userId) {
       const result = await client.query(insertSql, [
         userId, slot, item.label, item.baseUrl, item.reasoning, item.coding, item.validation, encrypt(item.key)
       ]);
-      if (!result.rows.length) continue;
+      if (!result.rows.length) { occupied.add(slot); continue; }
       occupied.add(slot);
       existingProviders.add(item.baseUrl + '\u0000' + item.label);
       imported++;
