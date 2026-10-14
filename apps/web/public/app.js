@@ -41,6 +41,11 @@ function observeJobStatus(job) {
   else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
+async function monitorAllJobStatuses() {
+  // Keep completion notices working even when the user filters the visible activity list.
+  const data = await api('/api/jobs?limit=100&offset=0&status=all');
+  for (const job of (data.jobs || [])) observeJobStatus(job);
+}
 async function loadJobs({ append = false } = {}) {
   const pageSize = 25;
   const filter = state.jobsFilter === 'all' ? '' : `&status=${encodeURIComponent(state.jobsFilter)}`;
@@ -419,10 +424,12 @@ async function enterApp() {
   await api('/api/access-check');
   $('access-status').textContent = '';
   showApp();
-  try { await Promise.all([loadHistorySummary(), loadJobs()]); await refresh(); }
+  try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
   if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
-  if (!state.listPollHandle) state.listPollHandle = setInterval(async () => { try { await loadJobs(); await loadHistorySummary(); } catch {} }, 12000);
+  if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
+    try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
+  }, 12000);
 }
 $('access-form').addEventListener('submit', async event => {
   event.preventDefault(); state.accessKey = $('access-key').value.trim();
