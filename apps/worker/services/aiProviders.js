@@ -18,7 +18,18 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
-  if (process.env.GEMINI_API_KEY) return consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return await consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
+    } catch (error) {
+      if (error?.code !== 'PROVIDER_TEMPORARY' || !/HTTP 429/.test(String(error.message || '')) || !process.env.GROQ_API_KEY) throw error;
+      const groqModel = Number(maxTokens) >= 5000
+        ? (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
+        : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
+      console.warn('[worker][provider_fallback]', JSON.stringify({ from: 'Gemini', to: 'Groq', reason: 'HTTP 429 with long cooldown', model: groqModel }));
+      model = groqModel;
+    }
+  }
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
   let retry = 0; let emptyRetries = 0; let formatRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
