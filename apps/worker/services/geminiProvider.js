@@ -99,7 +99,7 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry);
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
-      onRetry({ retry, wait, reason });
+      await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);
       continue;
@@ -110,7 +110,7 @@ export async function consultarGemini({
       const candidate = data?.candidates?.[0];
       const content = extractText(candidate);
       const usage = data?.usageMetadata || {};
-      onRetry({
+      await onRetry({
         usage: true,
         model,
         promptTokens: Number(usage.promptTokenCount) || 0,
@@ -124,7 +124,7 @@ export async function consultarGemini({
         console.warn('[worker][gemini_empty_response]', JSON.stringify({ model, attempt: emptyRetries, reason }));
         if (emptyRetries <= 2) {
           const wait = retryDelay(emptyRetries);
-          onRetry({ retry: emptyRetries, wait, reason });
+          await onRetry({ retry: emptyRetries, wait, reason });
           await sleep(wait);
           continue;
         }
@@ -136,11 +136,11 @@ export async function consultarGemini({
       }
       accumulatedContent += content;
       const finishReason = candidate?.finishReason || null;
-      onPartialOutput({ content: accumulatedContent, finishReason, continuation: continuationCount });
+      await onPartialOutput({ content: accumulatedContent, finishReason, continuation: continuationCount });
 
       const truncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!canContinue()) {
+        if (!(await canContinue())) {
           const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
           error.code = 'TASK_TOKEN_BUDGET';
           throw error;
@@ -167,7 +167,7 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry, response.headers.get('retry-after'), bodyText);
       const reason = `HTTP ${response.status}`;
-      onRetry({ retry, wait, reason });
+      await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);
       continue;
