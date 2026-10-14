@@ -298,6 +298,35 @@ function renderTokenBudget(data) {
   if (unreportedCalls) accountingNotes.push(`${fmt(unreportedCalls)} llamadas sin tokens reportados; no se inventa consumo.`);
   $('token-budget-note').textContent = [baseNote, ...accountingNotes].join(' ');
 }
+function renderImprovementVote(data) {
+  const panel = $('improvement-vote-panel');
+  if (!panel) return;
+  const job = data.job || {};
+  const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
+  const eligible = job.status === 'completed' || (job.status === 'needs_review' && !budgetPaused);
+  panel.classList.toggle('hidden', !eligible);
+  if (!eligible) return;
+  const votes = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
+  const latest = votes[votes.length - 1];
+  const result = $('improvement-vote-result');
+  const status = $('improvement-vote-status');
+  if (!latest) {
+    result.classList.add('hidden');
+    result.innerHTML = '';
+    status.textContent = 'Votación opcional: usa hasta seis respuestas de agente y se registra por separado. La decisión final queda en tus manos.';
+    return;
+  }
+  result.classList.remove('hidden');
+  const title = latest.outcome === 'MAYORIA_A_FAVOR' ? 'Mayoría a favor' :
+    latest.outcome === 'MAYORIA_EN_CONTRA' ? 'Mayoría en contra' :
+    latest.outcome === 'SIN_VOTOS_VALIDOS' ? 'Sin votos válidos' : 'Votación empatada';
+  const badgeClass = latest.outcome === 'MAYORIA_A_FAVOR' ? 'vote-support' :
+    latest.outcome === 'MAYORIA_EN_CONTRA' ? 'vote-oppose' : 'vote-neutral';
+  const tally = latest.tally || {};
+  const ballots = Array.isArray(latest.votes) ? latest.votes : [];
+  result.innerHTML = `<div class="vote-result-head"><div><p class="panel-kicker">RESULTADO ${escapeHtml(latest.status === 'failed' ? 'INCOMPLETO' : 'REGISTRADO')}</p><h4>${escapeHtml(title)}</h4></div><span class="vote-outcome ${badgeClass}">${escapeHtml(latest.answered ?? 0)}/${escapeHtml(latest.total ?? ballots.length)} votos válidos</span></div><p class="vote-proposal">${escapeHtml(latest.proposal || '')}</p><p class="vote-summary">${escapeHtml(latest.summary || 'Sin resumen disponible.')}</p><div class="vote-tally"><span>A favor <strong>${Number(tally.APOYAR) || 0}</strong></span><span>En contra <strong>${Number(tally.RECHAZAR) || 0}</strong></span><span>Abstenciones <strong>${Number(tally.ABSTENERSE) || 0}</strong></span></div><div class="vote-ballots">${ballots.map(ballot => { const kind = ballot.vote === 'APOYAR' ? 'vote-support' : ballot.vote === 'RECHAZAR' ? 'vote-oppose' : 'vote-neutral'; return `<article class="vote-ballot"><div class="vote-ballot-head"><strong>${escapeHtml(ballot.agent || 'Agente')}</strong><span class="vote-choice ${kind}">${escapeHtml(ballot.vote || 'ABSTENERSE')}</span></div><p>${escapeHtml(ballot.rationale || 'Sin justificación.')}</p>${ballot.error ? `<p class="vote-error">No respondió el proveedor: ${escapeHtml(ballot.error)}</p>` : ''}</article>`; }).join('')}</div><p class="muted tiny">La votación es orientativa: no aplica ni confirma cambios. Tokens registrados en la etapa “Votación de mejora”.</p>`;
+  status.textContent = latest.status === 'failed' ? 'La última votación no obtuvo respuestas válidas; revisá los errores antes de volver a intentarlo.' : 'Última votación guardada. Podés someter otra propuesta; repetir la misma no consume tokens nuevamente.';
+}
 function updateDetailView(data) {
   const job = data.job || {};
   const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
@@ -319,6 +348,7 @@ function updateDetailView(data) {
   renderTokenBudget(data);
   renderConversation(data);
   renderArtifacts(data.artifacts, job.id, job.status, data.validation, data.syntax);
+  renderImprovementVote(data);
   const technicalEvents = (data.history || []).filter(entry => ['retry','error','check','usage'].includes(entry.type) || entry.agent === 'Validador').slice(-30).map(entry => ({ at: entry.at || null, agent: entry.agent || 'sistema', type: entry.type || 'message', detail: String(entry.content || '').slice(0, 1800) }));
   const diagnostic = {
     diagnosticVersion: 1, taskId: job.id || null, status: job.status || null, stage: job.stage || null,
@@ -481,6 +511,32 @@ $('copy-detail').addEventListener('click', async () => {
     else { const area = document.createElement('textarea'); area.value = content; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select(); const copied = document.execCommand('copy'); area.remove(); if (!copied) throw new Error('El navegador no permitió copiar.'); }
     $('copy-status').textContent = 'Diagnóstico copiado. No incluye claves secretas.'; button.textContent = 'Copiado ✓';
   } catch { $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.'; }
+});
+$('improvement-vote-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!state.currentDetailId) { $('improvement-vote-status').textContent = 'Primero abrí una tarea del historial.'; return; }
+  const proposal = $('improvement-vote-proposal').value.trim();
+  if (!proposal) return;
+  const button = $('improvement-vote-submit');
+  button.disabled = true;
+  button.textContent = 'Reuniendo votos…';
+  $('improvement-vote-status').textContent = 'Los seis agentes están evaluando la propuesta por turnos. Esto consume tokens adicionales; no cierres la tarea.';
+  try {
+    const response = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/vote-improvement`, {
+      method: 'POST', body: JSON.stringify({ proposal })
+    });
+    $('improvement-vote-status').textContent = response.reused
+      ? 'Ya existía una votación para esa propuesta; se recuperó sin consumir tokens.'
+      : 'Votación terminada. El resultado y las justificaciones están debajo.';
+    if (!response.reused) $('improvement-vote-proposal').value = '';
+    await updateSelectedDetail();
+    await loadJobs();
+  } catch (error) {
+    $('improvement-vote-status').textContent = `No se pudo completar la votación: ${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Convocar votación ↗';
+  }
 });
 $('agent-reply-form').addEventListener('submit', async event => {
   event.preventDefault();
