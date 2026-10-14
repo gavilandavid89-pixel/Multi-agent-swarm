@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage, prepareContinuationPayload } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
@@ -86,4 +86,54 @@ test('una nueva tanda de 100k conserva contexto y archivos pero reinicia el cont
   assert.equal(next.tokenBatchHistory[0].tokenUsage.totalTokens, 50000);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.wastedTokens, 100);
   assert.ok(next.transcript.some(item => /nueva tanda de 100.000/.test(item.content)));
+});
+
+
+test('la simulación de agotamiento pausa la tarea sin perder checkpoint ni entrega parcial', () => {
+  const current = {
+    publicJob: { id: 'simulated-job', status: 'running', stage: 'Validación', progress: 63 },
+    payload: {
+      objective: 'Terminar la app', lastCheckpoint: 'validation-1',
+      partialDelivery: '### Archivo: src/app.js\\n\\x60\\x60\\x60js\\nconst app = true;\\n\\x60\\x60\\x60',
+      artifacts: [{ path: 'src/app.js', content: 'const app = true;' }],
+      transcript: [{ at: 'before', agent: 'Arquitecto', type: 'message', content: 'plan guardado' }]
+    }
+  };
+  const patch = buildBudgetPausePatch(current, Object.assign(new Error('Límite simulado alcanzado'), {
+    usedTokens: 50000, tokenLimit: 50000, estimatedInputTokens: 900
+  }), '2026-10-14T02:00:00.000Z');
+  assert.equal(patch.status, 'needs_review');
+  assert.match(patch.stage, /presupuesto de tokens/i);
+  assert.equal(patch.progress, 63);
+  assert.equal(patch.payload.lastCheckpoint, 'validation-1');
+  assert.equal(patch.payload.partialDelivery, current.payload.partialDelivery);
+  assert.deepEqual(patch.payload.artifacts, current.payload.artifacts);
+  assert.deepEqual(patch.payload.providerBlock, { code: 'TASK_TOKEN_BUDGET', usedTokens: 50000, tokenLimit: 50000, estimatedInputTokens: 900 });
+  assert.ok(patch.payload.transcript.some(item => /Límite simulado/.test(item.content)));
+});
+
+test('solo ofrece continuación para tareas pausadas por presupuesto que aún no tengan hija', () => {
+  const paused = { status: 'needs_review', stage: 'Pausada por presupuesto de tokens' };
+  assert.equal(isBudgetPausedJob(paused), true);
+  assert.equal(canContinueBudgetTask(paused, {}), true);
+  assert.equal(canContinueBudgetTask(paused, { continuedByJobId: 'child-1' }), false);
+  assert.equal(canContinueBudgetTask({ status: 'needs_review', stage: 'Requiere revisión humana' }, {}), false);
+  assert.equal(canContinueBudgetTask({ status: 'failed', stage: 'Pausada por presupuesto de tokens' }, {}), false);
+});
+
+test('una segunda tanda conserva el historial de tandas y registra el consumo previo', () => {
+  const first = prepareContinuationPayload({
+    objective: 'Objetivo', tokenBudget: 4000,
+    tokenUsage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000, calls: 3 },
+    lastCheckpoint: 'development', artifacts: [{ path: 'index.js', content: 'ok' }]
+  }, { id: 'job-1', stage: 'Pausada por presupuesto de tokens' }, '2026-10-14T01:00:00Z');
+  first.tokenUsage = { ...first.tokenUsage, promptTokens: 70000, completionTokens: 30000, totalTokens: 100000, calls: 30 };
+  const second = prepareContinuationPayload(first, { id: 'job-2', stage: 'Pausada por presupuesto de tokens' }, '2026-10-14T02:00:00Z');
+  assert.equal(second.continuationNumber, 3);
+  assert.equal(second.tokenBatchHistory.length, 2);
+  assert.equal(second.tokenBatchHistory[0].tokenUsage.totalTokens, 4000);
+  assert.equal(second.tokenBatchHistory[1].tokenUsage.totalTokens, 100000);
+  assert.equal(second.tokenBatchHistory[1].jobId, 'job-2');
+  assert.equal(second.artifacts[0].content, 'ok');
+  assert.equal(second.tokenUsage.totalTokens, 0);
 });
