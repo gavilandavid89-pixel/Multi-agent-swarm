@@ -2,6 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
+import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
@@ -241,10 +242,9 @@ async function runJob(jobId) {
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
-      const reason = String(error.message || 'Presupuesto de tokens agotado').slice(0, 1200);
-      const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'budget', content: reason }]);
-      await updateJob(jobId, { status: 'needs_review', stage: 'Pausada por presupuesto de tokens', progress: current.publicJob.progress, error: reason, payload: { ...current.payload, transcript, providerBlock: { code: error.code, usedTokens: error.usedTokens, tokenLimit: error.tokenLimit }, activeStage: null, lastCheckpoint: current.payload.lastCheckpoint || 'token-budget' } });
-      return { blocked: true, reason };
+      const patch = buildBudgetPausePatch(current, error);
+      await updateJob(jobId, patch);
+      return { blocked: true, reason: patch.error };
     }
     if (error?.code === 'PROVIDER_TEMPORARY' && current) {
       const failureStreak = Math.min(20, (Number(current.payload.providerFailureStreak) || 0) + 1);
