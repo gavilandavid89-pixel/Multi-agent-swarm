@@ -2,7 +2,7 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import { applyTokenUsage } from './tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload } from './tokenAccounting.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -160,48 +160,8 @@ export async function createContinuationJob(sourceId) {
     }
 
     const closedAt = now();
-    const currentUsage = sourcePayload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
-    const previousBatches = Array.isArray(sourcePayload.tokenBatchHistory) ? sourcePayload.tokenBatchHistory : [];
-    const batchNumber = previousBatches.length + 2;
-    const batchSnapshot = {
-      jobId: source.id,
-      batchNumber: batchNumber - 1,
-      tokenBudget: Number(sourcePayload.tokenBudget) || 50000,
-      tokenUsage: {
-        promptTokens: Number(currentUsage.promptTokens) || 0,
-        completionTokens: Number(currentUsage.completionTokens) || 0,
-        totalTokens: Number(currentUsage.totalTokens) || 0,
-        calls: Number(currentUsage.calls) || 0,
-        wastedTokens: Number(currentUsage.wastedTokens) || 0
-      },
-      lastCheckpoint: sourcePayload.lastCheckpoint || null,
-      stage: source.stage,
-      closedAt
-    };
-    const transcript = [...(Array.isArray(sourcePayload.transcript) ? sourcePayload.transcript : [])];
-    transcript.push({
-      at: closedAt,
-      agent: 'sistema',
-      type: 'budget',
-      content: 'Se abrió una nueva tanda de 100.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
-    });
+    const payload = prepareContinuationPayload(sourcePayload, { id: source.id, stage: source.stage }, closedAt);
 
-    const payload = {
-      ...sourcePayload,
-      tokenBudget: 100000,
-      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
-      usageEventIds: [],
-      tokenBatchHistory: [...previousBatches, batchSnapshot].slice(-50),
-      continuationOf: source.id,
-      continuationNumber: batchNumber,
-      continuedByJobId: null,
-      retryAt: null,
-      providerBlock: null,
-      providerFailureStreak: 0,
-      result: null,
-      activeStage: null,
-      transcript: transcript.slice(-150)
-    };
     const timestamp = closedAt;
     const childId = randomUUID();
     const childRow = {
