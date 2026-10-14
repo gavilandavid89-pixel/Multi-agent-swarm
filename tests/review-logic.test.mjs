@@ -63,3 +63,27 @@ test('el cliente de Groq amplía el límite y reintenta cuando JSON mode se cort
   }
 });
 
+
+
+
+test('respeta el margen restante y no envía otra llamada si solo quedan unos pocos tokens', async () => {
+  const { consultarModelo } = await import('../apps/worker/services/aiProviders.js');
+  const previousKey = process.env.GROQ_API_KEY; const previousFetch = globalThis.fetch;
+  process.env.GROQ_API_KEY = 'test-key-not-real';
+  let request = null; let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++; request = JSON.parse(options.body);
+    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const onRetry = async () => {};
+  onRetry.getMaxOutputTokens = async () => 500;
+  try {
+    await consultarModelo({ model: 'test-model', messages: [{ role: 'user', content: 'x' }], maxTokens: 6000, onRetry });
+    assert.equal(request.max_completion_tokens, 500);
+    assert.equal(calls, 1);
+    const noHeadroom = async () => {};
+    noHeadroom.getMaxOutputTokens = async () => 100;
+    await assert.rejects(consultarModelo({ model: 'test-model', messages: [], maxTokens: 6000, onRetry: noHeadroom }), error => error.code === 'TASK_TOKEN_BUDGET');
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = previousFetch; if (previousKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = previousKey; }
+});
