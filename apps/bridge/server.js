@@ -55,8 +55,13 @@ app.post('/api/auth/login', async (req, res) => {
       if (count.rows[0].total !== 0 || username !== 'admin' || !APP_ACCESS_KEY || !safeEqual(password, APP_ACCESS_KEY)) {
         return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
       }
-      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role,created_at", [hashPassword(password)]);
+      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') ON CONFLICT(username) DO NOTHING RETURNING id,username,password_hash,role,created_at", [hashPassword(password)]);
       user = created.rows[0];
+      if (!user) {
+        const raced = await pool.query("SELECT id,username,password_hash,role,created_at FROM app_users WHERE username='admin' AND disabled_at IS NULL");
+        user = raced.rows[0];
+        if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+      }
 
     } else if (!verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
