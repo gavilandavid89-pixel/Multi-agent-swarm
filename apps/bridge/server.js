@@ -60,9 +60,15 @@ app.post('/api/auth/login', async (req, res) => {
       const imported = await importLegacyApiKeys(user.id);
       console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported }));
       try {
-        const legacy = await workerRequest('/internal/jobs?limit=100');
-        const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
-        for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+        let offset = 0; let total = 0;
+        do {
+          const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+          const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
+          total = Number(legacy?.total) || jobs.length;
+          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+          offset += jobs.length;
+          if (!jobs.length) break;
+        } while (offset < total);
       } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
     } else if (!verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
@@ -172,19 +178,17 @@ async function workerRequest(route, options = {}) {
 app.get('/api/access-check', (req, res) => res.json({ ok: true, user: req.user }));
 app.get('/api/history', async (req, res) => { if (req.user.role !== 'admin') return res.json({ history: [], isolated: true }); try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.get('/api/jobs', async (req, res) => {
-  const params = new URLSearchParams();
-  for (const key of ['limit', 'offset', 'status']) {
-    const value = String(req.query[key] ?? '');
-    if (value) params.set(key, value);
-  }
-  const suffix = params.size ? `?${params.toString()}` : '';
+  const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
+  const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
+  const requestedStatus = String(req.query.status || '');
+  if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
   try {
-    const result = await workerRequest(`/internal/jobs${suffix}`);
-    const rows = Array.isArray(result) ? result : (Array.isArray(result?.jobs) ? result.jobs : []);
-    const ownership = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1', [req.user.id]);
-    const ids = new Set(ownership.rows.map(row => String(row.job_id)));
-    const filtered = rows.filter(job => ids.has(String(job.id)));
-    res.json(Array.isArray(result) ? filtered : { ...result, jobs: filtered, total: filtered.length });
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
+    const jobs = (await Promise.all(owned.rows.map(async row => {
+      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
+    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
