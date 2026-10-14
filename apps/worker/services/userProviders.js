@@ -89,6 +89,16 @@ export async function copyJobOwnership(sourceJobId, childJobId, payloadUserId = 
   return rows.length > 0;
 }
 
+/** Best-effort bridge between the durable job insert and its owner mapping. */
+export async function ensureJobOwnership(jobId, userId) {
+  if (!pool || !jobId || !userId) return false;
+  const { rows } = await pool.query(
+    'INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING RETURNING user_id',
+    [String(jobId), String(userId)]
+  );
+  return rows.length > 0;
+}
+
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
   if (!pool) throw new Error('User API database is not configured.');
