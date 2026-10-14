@@ -202,6 +202,14 @@ export async function recoverableBudgetContinuations() {
   });
 }
 
+export async function getJobsByIds(ids) {
+  if (!Array.isArray(ids)) throw new TypeError('ids must be an array.');
+  const safeIds = [...new Set(ids.filter(id => typeof id === 'string' && id.length > 0 && id.length <= 100))].slice(0, 100);
+  if (!safeIds.length) return [];
+  const { rows } = await pool.query('SELECT * FROM jobs WHERE id = ANY($1::text[])', [safeIds]);
+  const byId = new Map(rows.map(row => [String(row.id), toPublic(row)]));
+  return safeIds.map(id => byId.get(id)).filter(Boolean);
+}
 export async function getJob(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? toPublic(rows[0]) : null;
