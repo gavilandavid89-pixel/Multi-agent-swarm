@@ -88,30 +88,6 @@ export async function findSession(token) {
 export async function revokeSession(token) {
   if (token) await pool.query('UPDATE app_sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL', [digest(token)]);
 }
-export async function importLegacyApiKeys(userId) {
-  const candidates = [];
-  if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', model: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
-  if (process.env.GROQ_API_KEY) candidates.push({ label: 'Groq', key: process.env.GROQ_API_KEY, baseUrl: 'https://api.groq.com/openai/v1', model: process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b', coding: process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b', validation: process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b' });
-  try {
-    const extra = JSON.parse(process.env.AI_FALLBACK_PROVIDERS || '[]');
-    if (Array.isArray(extra)) for (const item of extra) {
-      const keyName = String(item?.apiKeyEnv || '');
-      const key = /^[A-Z][A-Z0-9_]{1,79}$/.test(keyName) ? process.env[keyName] : '';
-      const baseUrl = String(item?.baseUrl || '').trim().replace(/\/+$/, '');
-      if (key && /^https:\/\//i.test(baseUrl) && !candidates.some(x => x.baseUrl === baseUrl)) candidates.push({ label: String(item.name || 'Proveedor externo').slice(0, 80), key, baseUrl, model: String(item.model || 'openai/gpt-oss-120b'), coding: String(item.model || 'openai/gpt-oss-120b'), validation: String(item.model || 'openai/gpt-oss-120b') });
-    }
-  } catch { /* Invalid legacy metadata is intentionally not logged. */ }
-  let imported = 0;
-  for (const item of candidates.slice(0, 10)) {
-    const { rows } = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 LIMIT 1', [userId, item.baseUrl]);
-    if (rows.length) continue;
-    await pool.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
-      VALUES($1, (SELECT COALESCE(MAX(slot),0)+1 FROM user_api_keys WHERE user_id=$1), $2,$3,$4,$5,$6,$7)`,
-      [userId, item.label, item.baseUrl, item.model, item.coding, item.validation, encryptSecret(item.key)]);
-    imported++;
-  }
-  return imported;
-}
 export async function listApiKeys(userId) {
   const { rows } = await pool.query('SELECT id,slot,label,base_url,model_reasoning,model_coding,model_validation,created_at,updated_at FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
   return rows;
@@ -121,9 +97,9 @@ export async function saveApiKeys(userId, entries) {
   const client = await pool.connect();
   const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.ai','api.cohere.com']);
   const defaults = {
-    'api.openai.com': ['OpenAI', 'gpt-5.6-terra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    'api.openai.com': ['OpenAI', 'gpt-6-sol', 'gpt-6-sol', 'gpt-6-luna'],
     'api.groq.com': ['Groq', 'openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
-    'openrouter.ai': ['OpenRouter', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna'],
+    'openrouter.ai': ['OpenRouter', 'openai/gpt-sol-latest', 'openai/gpt-sol-latest', 'openai/gpt-luna'],
     'generativelanguage.googleapis.com': ['Gemini', 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash'],
     'api.together.xyz': ['Together AI', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
     'api.deepseek.com': ['DeepSeek', 'deepseek-chat', 'deepseek-chat', 'deepseek-chat'],
