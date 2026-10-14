@@ -32,8 +32,8 @@ function mergeDelivery(previous, correction) {
   for (const [name, body] of patch.files) base.files.set(name, body);
   return [base.preamble || patch.preamble, ...base.files.values()].filter(Boolean).join('\n\n');
 }
-function retryNotice(jobId, info) {
-  const current = getPayload(jobId); if (!current) return;
+async function retryNotice(jobId, info) {
+  const current = await getPayload(jobId); if (!current) return;
   if (info.usage) {
     const prior = current.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
     const model = String(info.model || 'desconocido');
@@ -41,7 +41,7 @@ function retryNotice(jobId, info) {
     const modelPrior = next.byModel[model] || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
     next.byModel[model] = { promptTokens: modelPrior.promptTokens + (info.promptTokens || 0), completionTokens: modelPrior.completionTokens + (info.completionTokens || 0), totalTokens: modelPrior.totalTokens + (info.totalTokens || 0), calls: modelPrior.calls + 1 };
     const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }) }]);
-    updateJob(jobId, { payload: { transcript, tokenUsage: next, providerFailureStreak: 0 } });
+    await updateJob(jobId, { payload: { transcript, tokenUsage: next, providerFailureStreak: 0 } });
     console.info('[worker][provider_usage]', JSON.stringify({ jobId, model, promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0, totalTokens: info.totalTokens || 0 }));
     return;
   }
@@ -50,7 +50,7 @@ function retryNotice(jobId, info) {
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
   updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
 }
-function assertTaskTokenBudget(jobId) {
+async function assertTaskTokenBudget(jobId) {
   const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
   const defaultLimit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
   const current = getPayload(jobId);
@@ -62,12 +62,12 @@ function assertTaskTokenBudget(jobId) {
     throw error;
   }
 }
-function startAgent(jobId, stage, progress, agent, content) {
+async function await startAgent(jobId, stage, progress, agent, content) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
   const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent, type: 'thinking', content }]);
   return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, retryAt: null, providerBlock: null, activeStage: stage } });
 }
-function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
+async function await checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
   const current = getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
   const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
   for (let i = transcript.length - 1; i >= 0; i--) {
@@ -80,10 +80,10 @@ function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPa
   return updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra }, ...publicPatch });
 }
 export async function processJob(jobId) {
-  const initial = getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
+  const initial = await getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
   const objective = initial.payload.objective; const onRetry = info => retryNotice(jobId, info);
   const initialPartialDelivery = String(initial.payload.partialDelivery || '');
-  const savePartial = info => {
+  const savePartial = async info => {
     const current = getPayload(jobId);
     if (!current || typeof info?.content !== 'string') return;
     const fresh = info.content;
@@ -93,12 +93,12 @@ export async function processJob(jobId) {
       : fresh;
     updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
   };
-  const canContinue = () => { const record = getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
+  const canContinue = async () => { const record = await getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); return (Number(record?.payload?.tokenUsage?.totalTokens) || 0) < budget; };
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
       startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
-      assertTaskTokenBudget(jobId);
+      await assertTaskTokenBudget(jobId);
       proposal = await agenteArquitecto(objective, onRetry);
       checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
     }
@@ -131,11 +131,11 @@ export async function processJob(jobId) {
         delivery = await agenteDesarrollador(objective, strategy, '', onRetry, '', coherence, canContinue, savePartial);
       }
       checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
-      saveArtifacts(jobId, delivery);
+      await saveArtifacts(jobId, delivery);
     }
-    payload = getPayload(jobId)?.payload || {};
+    payload = (await getPayload(jobId))?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
-    let resumeState = getValidationResumeState(payload, getPayload(jobId)?.publicJob.attempt || 0);
+    let resumeState = getValidationResumeState(payload, (await getPayload(jobId))?.publicJob.attempt || 0);
     let round = resumeState.round;
     while (round <= MAX_ROUNDS) {
       const saved = resumeState.validationSaved;
@@ -179,7 +179,7 @@ export async function processJob(jobId) {
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
-        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: getPayload(jobId)?.payload?.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
+        updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: (await getPayload(jobId))?.payload?.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
