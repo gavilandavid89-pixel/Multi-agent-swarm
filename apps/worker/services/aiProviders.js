@@ -218,7 +218,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     }
     const usageId = randomUUID();
     let response;
-    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (providerHostname === 'api.openai.com' ? { max_completion_tokens: safeMaxTokens } { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (providerHostname === 'api.openai.com' ? { max_completion_tokens: safeMaxTokens } : { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
