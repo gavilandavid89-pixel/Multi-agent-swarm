@@ -31,27 +31,27 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
       retry++; const wait = retryDelay(retry); const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
-      onRetry({ retry, wait, reason });
+      await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait); continue;
     }
     if (response.ok) {
       const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
       const usage = data?.usage || {};
-      onRetry({ usage: true, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
+      await onRetry({ usage: true, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
         const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
         console.warn('[worker][provider_empty_response]', JSON.stringify({ model, attempt: emptyRetries, diagnostic }));
-        if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
+        if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); await onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
         throw deferredProviderError(model, emptyRetries, retryDelay(emptyRetries), `respuesta vacía del modelo (${diagnostic})`);
       }
       if (content.length + accumulatedContent.length > 1000000) throw new Error(`El modelo ${model} superó el límite acumulado de seguridad (1.000.000 caracteres).`);
       accumulatedContent += content;
-      onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
+      await onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!canContinue()) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        if (!(await canContinue())) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
         console.info('[worker][provider_continuation]', JSON.stringify({ model, continuation: continuationCount, maxContinuations }));
@@ -68,14 +68,14 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       safeMaxTokens = Math.min(maxSafeOutputTokens, Math.max(safeMaxTokens + 512, Math.ceil(safeMaxTokens * 1.75)));
       const wait = 250;
       const reason = `JSON incompleto por límite de salida; se amplía el límite de ${previousMaxTokens} a ${safeMaxTokens} tokens`;
-      onRetry({ retry: formatRetries, wait, reason });
+      await onRetry({ retry: formatRetries, wait, reason });
       console.warn('[worker][provider_json_budget_retry]', JSON.stringify({ model, retry: formatRetries, previousMaxTokens, maxCompletionTokens: safeMaxTokens }));
       await sleep(wait);
       continue;
     }
     if (retryableStatus(response.status)) {
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
-      onRetry({ retry, wait, reason });
+      await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait); continue;
     }
