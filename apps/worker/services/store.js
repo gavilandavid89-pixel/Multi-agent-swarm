@@ -23,11 +23,12 @@ const locks = new Map();
 async function serialized(id, operation) {
   const prior = locks.get(id) || Promise.resolve();
   let release;
-  const next = new Promise(resolve => { release = resolve; });
-  locks.set(id, prior.then(() => next));
+  const gate = new Promise(resolve => { release = resolve; });
+  const tail = prior.then(() => gate);
+  locks.set(id, tail);
   await prior;
   try { return await operation(); }
-  finally { release(); if (locks.get(id) === next) locks.delete(id); }
+  finally { release(); if (locks.get(id) === tail) locks.delete(id); }
 }
 function seal(value) {
   const compressed = deflateRawSync(Buffer.from(JSON.stringify(value), 'utf8'));
@@ -137,13 +138,22 @@ export async function getPayload(id) {
 }
 export async function updateJob(id, patch = {}) {
   return serialized(id, async () => {
-    const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
-    const row = rows[0]; if (!row) return null;
-    const current = toPublic(row); const payload = unseal(row.encrypted_payload);
-    if (patch.payload) Object.assign(payload, patch.payload);
-    const next = { status: patch.status ?? current.status, stage: patch.stage ?? current.stage, progress: patch.progress ?? current.progress, attempt: patch.attempt ?? current.attempt, updatedAt: now(), error: patch.error === undefined ? row.error : patch.error, encrypted: seal(payload) };
-    await pool.query('UPDATE jobs SET status=$2,stage=$3,progress=$4,attempt=$5,updated_at=$6,error=$7,encrypted_payload=$8 WHERE id=$1', [id,next.status,next.stage,next.progress,next.attempt,next.updatedAt,next.error,next.encrypted]);
-    return { id, status: next.status, stage: next.stage, progress: next.progress, attempt: next.attempt, createdAt: current.createdAt, updatedAt: next.updatedAt, error: next.error || null };
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
+      const row = rows[0];
+      if (!row) { await client.query('COMMIT'); return null; }
+      const current = toPublic(row); const payload = unseal(row.encrypted_payload);
+      if (patch.payload) Object.assign(payload, patch.payload);
+      const next = { status: patch.status ?? current.status, stage: patch.stage ?? current.stage, progress: patch.progress ?? current.progress, attempt: patch.attempt ?? current.attempt, updatedAt: now(), error: patch.error === undefined ? row.error : patch.error, encrypted: seal(payload) };
+      await client.query('UPDATE jobs SET status=$2,stage=$3,progress=$4,attempt=$5,updated_at=$6,error=$7,encrypted_payload=$8 WHERE id=$1', [id,next.status,next.stage,next.progress,next.attempt,next.updatedAt,next.error,next.encrypted]);
+      await client.query('COMMIT');
+      return { id, status: next.status, stage: next.stage, progress: next.progress, attempt: next.attempt, createdAt: current.createdAt, updatedAt: next.updatedAt, error: next.error || null };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally { client.release(); }
   });
 }
 const VALID_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'needs_review']);
