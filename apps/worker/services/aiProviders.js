@@ -2,15 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 // Feature branch: bounded continuation support.
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
 const configuredRetries = Number.parseInt(process.env.MAX_PROVIDER_RETRIES || '4', 10);
 const MAX_PROVIDER_RETRIES = Number.isFinite(configuredRetries) ? Math.min(8, Math.max(1, configuredRetries)) : 4;
-function deferredProviderError(model, retry, wait, reason) {
+function deferredProviderError(model, retry, wait, reason, providerName = null) {
   const error = new Error(`Proveedor temporalmente no disponible (${reason}); se reanudará en ${Math.ceil(wait / 1000)} s.`);
-  error.code = 'PROVIDER_TEMPORARY'; error.retryAfterMs = wait; error.providerModel = model; error.providerRetry = retry;
+  error.code = 'PROVIDER_TEMPORARY'; error.retryAfterMs = wait; error.providerModel = model; error.providerRetry = retry; error.providerName = providerName;
   return error;
 }
 export function retryDelay(retry, retryAfter, bodyText = '') {
@@ -24,13 +24,107 @@ export function estimateInputTokens(messages) {
   return Math.ceil(characters / 2.5) + (Array.isArray(messages) ? messages.length * 8 : 0);
 }
 
-export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
+
+function isFailoverEligible(error) {
+  if (error?.code === 'PROVIDER_TEMPORARY') return true;
+  const status = Number(error?.providerStatus || error?.status);
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function providerModelForSlot(provider, requestedModel, maxTokens) {
+  const slot = Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(String(requestedModel)) ? 'validation' : 'reasoning');
+  return String(provider.models?.[slot] || provider.model || provider.models?.reasoning || provider.models?.coding || provider.models?.validation || '').trim();
+}
+
+export function configuredOpenAIProviders(requestedModel, maxTokens, env = process.env) {
+  const providers = [];
+  if (env.GROQ_API_KEY) {
+    providers.push({
+      name: 'Groq', baseUrl: GROQ_BASE_URL, apiKey: env.GROQ_API_KEY,
+      model: Number(maxTokens) >= 5000
+        ? (env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
+        : (env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b')
+    });
+  }
+  let custom = [];
+  try {
+    const parsed = JSON.parse(env.AI_FALLBACK_PROVIDERS || '[]');
+    if (Array.isArray(parsed)) custom = parsed.slice(0, 10);
+    else console.warn('[worker][provider_config_invalid] AI_FALLBACK_PROVIDERS debe ser un array JSON.');
+  } catch {
+    if (env.AI_FALLBACK_PROVIDERS) console.warn('[worker][provider_config_invalid] AI_FALLBACK_PROVIDERS no contiene JSON válido.');
+  }
+  for (const entry of custom) {
+    if (!entry || typeof entry !== 'object') continue;
+    const name = String(entry.name || '').trim().slice(0, 80);
+    const baseUrl = String(entry.baseUrl || '').trim().replace(/\/+$/, '');
+    const apiKeyEnv = String(entry.apiKeyEnv || '').trim();
+    const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(apiKeyEnv) ? env[apiKeyEnv] : '';
+    const validUrl = /^https:\/\//i.test(baseUrl) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl);
+    if (!name || !validUrl || !apiKey || providers.some(provider => provider.baseUrl === baseUrl)) continue;
+    const model = providerModelForSlot(entry, requestedModel, maxTokens);
+    if (!model) {
+      console.warn('[worker][provider_config_invalid]', JSON.stringify({ name, reason: 'falta model o models.reasoning/coding/validation' }));
+      continue;
+    }
+    providers.push({ name, baseUrl, apiKey, model });
+  }
+  return providers;
+}
+
+/**
+ * Tries Gemini first when configured, then each configured OpenAI-compatible endpoint.
+ * AI_FALLBACK_PROVIDERS contains endpoint/key-env/model metadata only, never API secrets.
+ */
+export async function consultarModelo(options) {
+  const { model, maxTokens = 1200, messages } = options;
+  const providers = configuredOpenAIProviders(model, maxTokens, process.env);
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return await consultarGemini({ ...options, failoverOnRetryable: providers.length > 0 });
+    } catch (error) {
+      if (!isFailoverEligible(error) || !providers.length) throw error;
+      console.warn('[worker][provider_failover]', JSON.stringify({
+        from: 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
+        model: providers[0].model
+      }));
+    }
+  }
+  if (!providers.length) throw new Error('No hay proveedores de IA configurados. Configurá GEMINI_API_KEY, GROQ_API_KEY o AI_FALLBACK_PROVIDERS.');
+  const errors = [];
+  for (let index = 0; index < providers.length; index++) {
+    const provider = providers[index];
+    try {
+      return await consultarOpenAICompatible({
+        ...options, model: provider.model, apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl, providerName: provider.name,
+        failoverAvailable: index < providers.length - 1
+      });
+    } catch (error) {
+      errors.push({ provider: provider.name, reason: String(error?.message || error).slice(0, 220) });
+      if (!isFailoverEligible(error) || index === providers.length - 1) throw error;
+      console.warn('[worker][provider_failover]', JSON.stringify({
+        from: provider.name, to: providers[index + 1].name,
+        reason: error.code || 'provider unavailable', model: providers[index + 1].model
+      }));
+    }
+  }
+  const error = new Error('Todos los proveedores configurados están temporalmente limitados; la tarea se reanudará con el checkpoint guardado.');
+  error.code = 'PROVIDER_TEMPORARY';
+  error.retryAfterMs = 30000;
+  error.providerModel = model;
+  error.providerRetry = MAX_PROVIDER_RETRIES;
+  error.providerErrors = errors;
+  throw error;
+}
+
+async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', failoverAvailable = false }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
     const allowance = Number(await onRetry.getMaxOutputTokens(requestedOutputTokens, estimatedInputTokens));
     if (!Number.isFinite(allowance) || allowance < 256) {
-      const error = new Error('Presupuesto de tokens insuficiente para iniciar otra llamada. El checkpoint se conserva para reanudar cuando se amplíe el límite.');
+      const error = new Error('Presupuesto de tokens insuficiente para iniciar otra llamada. El checkpoint se conserva; el motor ampliará el presupuesto automáticamente o abrirá otra tanda.');
       error.code = 'TASK_TOKEN_BUDGET';
       throw error;
     }
@@ -38,20 +132,8 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   } else {
     maxTokens = requestedOutputTokens;
   }
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      return await consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
-    } catch (error) {
-      if (error?.code !== 'PROVIDER_TEMPORARY' || !/HTTP 429/.test(String(error.message || '')) || !process.env.GROQ_API_KEY) throw error;
-      const groqModel = Number(maxTokens) >= 5000
-        ? (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
-        : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
-      console.warn('[worker][provider_fallback]', JSON.stringify({ from: 'Gemini', to: 'Groq', reason: 'HTTP 429 with long cooldown', model: groqModel }));
-      model = groqModel;
-    }
-  }
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) throw new Error('Falta configurar GROQ_API_KEY en el motor externo.');
+  const apiKey = suppliedApiKey;
+  if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
   let retry = 0; let emptyRetries = 0; let formatRetries = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
@@ -66,10 +148,11 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
     }
     const usageId = randomUUID();
     let response;
-    try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
-      retry++; const wait = retryDelay(retry); const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
-      await onRetry({ retry, wait, reason });
+      const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
+      retry++; const wait = retryDelay(retry); await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait); continue;
     }
@@ -80,7 +163,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
         const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
-        console.warn('[worker][provider_empty_response]', JSON.stringify({ model, attempt: emptyRetries, diagnostic }));
+        console.warn('[worker][provider_empty_response]', JSON.stringify({ provider: providerName, model, attempt: emptyRetries, diagnostic }));
         if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); await onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
         throw deferredProviderError(model, emptyRetries, retryDelay(emptyRetries), `respuesta vacía del modelo (${diagnostic})`);
       }
@@ -90,11 +173,11 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
         const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
-        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
         if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
-        console.info('[worker][provider_continuation]', JSON.stringify({ model, continuation: continuationCount, maxContinuations }));
+        console.info('[worker][provider_continuation]', JSON.stringify({ provider: providerName, model, continuation: continuationCount, maxContinuations }));
         continue;
       }
       if (truncated && continueOnLength) { const error = new Error(`La respuesta de ${model} sigue truncada tras ${continuationCount} continuaciones; no se considera una entrega completa. Reducí el tamaño por módulo o aumentá MAX_CONTINUATION_CALLS.`); error.code = 'OUTPUT_TRUNCATED'; throw error; }
@@ -115,7 +198,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
           sizeRetries++;
           const reason = `Solicitud 413 por límite TPM; se reduce la salida de ${previousMaxTokens} a ${safeMaxTokens} tokens (intento ${sizeRetries}/4)`;
           await onRetry({ retry: sizeRetries, wait: 0, reason });
-          console.warn('[worker][provider_request_shrunk]', JSON.stringify({ model, limit, requested, previousMaxTokens, maxCompletionTokens: safeMaxTokens, retry: sizeRetries }));
+          console.warn('[worker][provider_request_shrunk]', JSON.stringify({ provider: providerName, model, limit, requested, previousMaxTokens, maxCompletionTokens: safeMaxTokens, retry: sizeRetries }));
           continue;
         }
       }
@@ -133,17 +216,20 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       const wait = 250;
       const reason = `JSON incompleto por límite de salida; se amplía el límite de ${previousMaxTokens} a ${safeMaxTokens} tokens`;
       await onRetry({ retry: formatRetries, wait, reason });
-      console.warn('[worker][provider_json_budget_retry]', JSON.stringify({ model, retry: formatRetries, previousMaxTokens, maxCompletionTokens: safeMaxTokens }));
+      console.warn('[worker][provider_json_budget_retry]', JSON.stringify({ provider: providerName, model, retry: formatRetries, previousMaxTokens, maxCompletionTokens: safeMaxTokens }));
       await sleep(wait);
       continue;
     }
     if (retryableStatus(response.status)) {
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
+      if (failoverAvailable || wait > 5000) throw deferredProviderError(model, retry, wait, reason, providerName);
       await onRetry({ retry, wait, reason });
-      if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
+      if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason, providerName);
+      // Brief transient limits can be retried in place; longer cooldowns are persisted
+      // by the worker scheduler so one blocked provider cannot occupy a worker slot.
       await sleep(wait); continue;
     }
-    throw new Error(`Error permanente de Groq (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
+    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });

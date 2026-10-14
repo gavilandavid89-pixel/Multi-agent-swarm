@@ -66,7 +66,8 @@ export async function consultarGemini({
   continueOnLength = false,
   maxContinuations = 4,
   canContinue = () => true,
-  onPartialOutput = () => {}
+  onPartialOutput = () => {},
+  failoverOnRetryable = false
 }) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GEMINI_API_KEY en el servicio swarm-worker.');
@@ -106,6 +107,7 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry);
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      if (failoverOnRetryable) throw deferredProviderError(model, retry, wait, reason);
       await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);
@@ -150,7 +152,7 @@ export async function consultarGemini({
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
         const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
         if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
-          const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
+          const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.');
           error.code = 'TASK_TOKEN_BUDGET';
           throw error;
         }
@@ -177,11 +179,9 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry, response.headers.get('retry-after'), bodyText);
       const reason = `HTTP ${response.status}`;
-      // A very long Gemini 429 cooldown usually indicates exhausted quota, not a short transient.
-      // If Groq is configured, fail over immediately instead of sleeping for many hours.
-      if (response.status === 429 && wait >= 5 * 60 * 1000 && process.env.GROQ_API_KEY) {
-        throw deferredProviderError(model, retry, wait, reason);
-      }
+      // When another provider is configured, try it immediately instead of sleeping
+      // through a quota/rate-limit window on this provider.
+      if (failoverOnRetryable) throw deferredProviderError(model, retry, wait, reason);
       await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);

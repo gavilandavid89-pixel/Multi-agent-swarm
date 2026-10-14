@@ -188,6 +188,20 @@ export async function createContinuationJob(sourceId) {
   }
 }
 
+/** Return budget-paused jobs that still need an automatic continuation. */
+export async function recoverableBudgetContinuations() {
+  const { rows } = await pool.query("SELECT * FROM jobs WHERE status='needs_review' AND stage ILIKE '%presupuesto%' ORDER BY updated_at ASC");
+  return rows.flatMap(row => {
+    try {
+      const payload = unseal(row.encrypted_payload);
+      return payload.continuedByJobId ? [] : [{ id: row.id, checkpoint: payload.lastCheckpoint || null }];
+    } catch (error) {
+      console.error('[worker][budget_continuation_recovery_read_failed]', JSON.stringify({ jobId: row.id, message: String(error?.message || error).slice(0, 200) }));
+      return [];
+    }
+  });
+}
+
 export async function getJob(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? toPublic(rows[0]) : null;

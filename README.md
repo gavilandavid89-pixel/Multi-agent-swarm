@@ -19,7 +19,7 @@ Requiere Node.js 20 o posterior.
 1. Copiá `apps/bridge/.env.example` a `apps/bridge/.env` y `apps/worker/.env.example` a `apps/worker/.env`.
 2. Generá secretos únicos. Para el cifrado: `openssl rand -hex 32`. `HISTORY_ENCRYPTION_KEY` debe ser exactamente 64 caracteres hexadecimales.
 3. Configurá el mismo `WORKER_SHARED_SECRET` en ambos servicios. Configurá una clave distinta para `APP_ACCESS_KEY`.
-4. En el worker, configurá `GROQ_API_KEY` y, opcionalmente, `GEMINI_API_KEY`. Si Gemini responde con un 429 de espera excesiva y Groq está configurado, el motor intenta cambiar de proveedor.
+4. En el worker, configurá uno o más proveedores: `GEMINI_API_KEY`, `GROQ_API_KEY` y, opcionalmente, proveedores adicionales compatibles con OpenAI Chat Completions mediante `AI_FALLBACK_PROVIDERS`. Si un proveedor devuelve 429, un error de red o un 5xx y hay una alternativa configurada, el motor cambia a ella antes de esperar el cooldown.
 5. Instalá dependencias desde la raíz con `npm --prefix apps/bridge install` y `npm --prefix apps/worker install`.
 6. Iniciá el worker y el puente en terminales separadas con `npm --prefix apps/worker start` y `npm --prefix apps/bridge start`.
 
@@ -34,7 +34,9 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 
 ### Worker
 - `WORKER_SHARED_SECRET`: debe coincidir con el puente.
-- `GROQ_API_KEY`: clave del proveedor.
+- `GROQ_API_KEY`: clave del proveedor Groq (opcional si hay otro proveedor configurado).
+- `GEMINI_API_KEY`: clave de Gemini; si está configurada, se prueba primero.
+- `AI_FALLBACK_PROVIDERS`: array JSON de proveedores adicionales compatibles con OpenAI Chat Completions. Cada elemento admite `name`, `baseUrl`, `apiKeyEnv` y `model` o `models` con `reasoning`, `coding` y `validation`. Las credenciales van en variables de entorno separadas; nunca dentro del JSON. Se permiten URLs HTTPS y localhost HTTP para desarrollo. Se prueban en orden tras Gemini/Groq.
 - `HISTORY_ENCRYPTION_KEY`: clave hexadecimal de 32 bytes para cifrar el historial.
 - `DATABASE_URL`: URL de PostgreSQL persistente.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
@@ -59,8 +61,15 @@ Cada tarea se protege con un bloqueo asesor de PostgreSQL entre procesos: si un 
 
 El worker registra el uso reportado por el proveedor con identificador único por llamada. La escritura ocurre dentro de una transacción PostgreSQL para que el chat directo y la tarea automática no se pisen entre sí. El historial incluye totales por modelo, agente, etapa e interacción; el chat directo se separa del trabajo automático. Una respuesta automática registrada después de que la tarea ya figure como completada se marca como consumo tardío/desperdiciado, sin ocultarlo dentro del total. Las respuestas con usage ausente se cuentan como llamadas, pero no se inventan tokens. El presupuesto se basa en tokens reportados por el proveedor, no en estimaciones de caracteres.
 
-Cuando una tarea queda pausada por alcanzar su presupuesto, el panel permite abrir una nueva tanda independiente de 100.000 tokens. La nueva tarea conserva el objetivo, la propuesta, la auditoría, la estrategia, el mapa de coherencia, los checkpoints, los archivos y la entrega parcial/completa; retoma desde la etapa pendiente en lugar de repetir las fases ya guardadas. Cada tanda reinicia su contador y conserva el consumo de las anteriores para mostrar el total acumulado. La creación es idempotente: varios clics sobre la misma tarea devuelven la misma continuación, no crean tareas duplicadas.
+El presupuesto de cada tanda escala automáticamente en pasos de 25.000 tokens: 50.000 → 75.000 → 100.000. Si se agota la tanda de 100.000, el worker crea una nueva tanda de forma automática e idempotente. La nueva tarea conserva el objetivo, la propuesta, la auditoría, la estrategia, el mapa de coherencia, los checkpoints, los archivos y la entrega parcial/completa; retoma desde la etapa pendiente en lugar de repetir las fases ya guardadas. Cada tanda reinicia su contador y conserva el consumo de las anteriores para mostrar el total acumulado. Al arrancar, el worker también recupera pausas presupuestarias que hubieran quedado pendientes si el proceso se reinició justo antes de crear la continuación.
 
 Antes de cada llamada se estima de forma conservadora el tamaño de entrada y se reserva ese margen dentro del presupuesto disponible para limitar la salida solicitada. Los tokens reales reportados por el proveedor siguen siendo la fuente de verdad; la estimación solo sirve como guardia previa. Las revisiones siguen procesando archivos en lotes delimitados y las correcciones seleccionan los archivos citados por los hallazgos.
 
 Los agentes cumplen roles distintos: Arquitecto propone; Escéptico intenta refutar; Árbitro decide; Coordinador define y audita contratos entre archivos; Desarrollador entrega y corrige solo lo necesario; Validador revisa de forma independiente. Los checkpoints evitan repetir las etapas que ya quedaron guardadas cuando una tarea se reanuda. Las pruebas unitarias verifican deduplicación de eventos, separación del chat y detección de respuestas tardías.
+
+
+### Failover y límites de proveedores
+
+Gemini se prueba primero cuando está configurado; luego se prueban Groq y los proveedores adicionales de `AI_FALLBACK_PROVIDERS` en el orden declarado. Los proveedores alternativos deben implementar la API compatible con OpenAI Chat Completions (`POST /chat/completions`). Para cada uno, configurá la URL base HTTPS, el nombre de la variable de entorno que contiene su clave y un modelo válido para ese proveedor. Se puede definir un modelo único o modelos separados para razonamiento, programación y validación.
+
+Ante HTTP 408, 425, 429, 5xx o errores de red, el motor intenta la siguiente alternativa disponible en lugar de esperar primero todo el cooldown. Si todos fallan, persiste el checkpoint y programa una reanudación con backoff. No se puede cambiar automáticamente a proveedores cuyas credenciales no estén configuradas, ni evitar cuotas o límites del proveedor.
