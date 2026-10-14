@@ -22,11 +22,13 @@ export async function initAccountStore() {
     expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS app_sessions_user_expiry_idx ON app_sessions(user_id, expires_at)');
+  await pool.query('CREATE INDEX IF NOT EXISTS app_sessions_expiry_idx ON app_sessions(expires_at)');
   await pool.query(`CREATE TABLE IF NOT EXISTS app_invites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code_hash TEXT NOT NULL UNIQUE,
     created_by UUID REFERENCES app_users(id) ON DELETE SET NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ, used_by UUID REFERENCES app_users(id) ON DELETE SET NULL
   )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS app_invites_expiry_idx ON app_invites(expires_at)');
   await pool.query(`CREATE TABLE IF NOT EXISTS user_api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
     slot SMALLINT NOT NULL CHECK (slot BETWEEN 1 AND 10), label TEXT NOT NULL, base_url TEXT NOT NULL,
@@ -69,6 +71,8 @@ export function encryptSecret(value) {
   return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), encrypted.toString('hex')].join(':');
 }
 export async function createSession(userId) {
+  // Bound storage growth without affecting any still-valid session.
+  await pool.query('DELETE FROM app_sessions WHERE expires_at <= now()');
   const token = randomBytes(32).toString('base64url');
   await pool.query('INSERT INTO app_sessions(user_id, token_hash, expires_at) VALUES($1,$2,now()+interval \'7 days\')', [userId, digest(token)]);
   return token;
@@ -113,13 +117,21 @@ export async function saveApiKeys(userId, entries) {
       if (!Number.isInteger(slot) || slot < 1 || slot > 10 || seen.has(slot)) throw new Error('Campo de API inválido o repetido.');
       seen.add(slot);
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
+      if (apiKey.length > 4096) throw new Error('La clave API supera el tamaño máximo permitido.');
       const previous = bySlot.get(slot);
       let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
-      const legacyModel = String(item.model || '').trim().slice(0,120);
       const suppliedModels = item.models && typeof item.models === 'object' ? item.models : {};
-      let modelReasoning = String(suppliedModels.reasoning || legacyModel).trim().slice(0,120);
-      let modelCoding = String(suppliedModels.coding || legacyModel).trim().slice(0,120);
-      let modelValidation = String(suppliedModels.validation || legacyModel).trim().slice(0,120);
+      const rawModels = {
+        reasoning: String(suppliedModels.reasoning || item.model || '').trim(),
+        coding: String(suppliedModels.coding || item.model || '').trim(),
+        validation: String(suppliedModels.validation || item.model || '').trim()
+      };
+      if (Object.values(rawModels).some(value => value.length > 120)) throw new Error('Cada nombre de modelo debe tener 120 caracteres o menos.');
+      const containsCredential = value => /(?:sk-[A-Za-z0-9_-]{8,}|sk-or-v1-[A-Za-z0-9_-]{8,}|gsk_[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,})/i.test(value);
+      if (Object.values(rawModels).some(containsCredential)) throw new Error('El campo modelo no puede contener una clave API.');
+      let modelReasoning = rawModels.reasoning;
+      let modelCoding = rawModels.coding;
+      let modelValidation = rawModels.validation;
       if (!baseUrl && apiKey) {
         if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) baseUrl = 'https://generativelanguage.googleapis.com';
         else if (/^gsk_[0-9A-Za-z]{20,}$/.test(apiKey)) baseUrl = 'https://api.groq.com/openai/v1';
@@ -143,9 +155,6 @@ export async function saveApiKeys(userId, entries) {
       }
       const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
       const label = defaultLabel;
-      if (/^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelReasoning) || /^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelCoding) || /^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelValidation)) {
-        throw new Error('El campo modelo no puede contener una clave API.');
-      }
       modelReasoning = modelReasoning || defaultReasoning;
       modelCoding = modelCoding || defaultCoding;
       modelValidation = modelValidation || defaultValidation;
@@ -168,6 +177,7 @@ export async function deleteApiKey(userId, slot) {
   await pool.query('DELETE FROM user_api_keys WHERE user_id=$1 AND slot=$2', [userId, slot]);
 }
 export async function createInvite(userId, hours = 72) {
+  await pool.query('DELETE FROM app_invites WHERE expires_at <= now()');
   const code = randomBytes(24).toString('base64url');
   const codeHash = digest(code);
   const expiresHours = Math.max(1, Math.min(720, Number(hours) || 72));
