@@ -222,7 +222,12 @@ async function runJob(jobId) {
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
-        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: (await getPayload(jobId))?.payload?.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
+        const latestPayload = (await getPayload(jobId))?.payload || {};
+        const transcript = appendEntries(latestPayload.transcript, [{
+          at: new Date().toISOString(), agent: 'sistema', type: 'check',
+          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA'}). El resultado está listo para revisar.`
+        }]);
+        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
@@ -238,7 +243,11 @@ async function runJob(jobId) {
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
     const finalPayload = (await getPayload(jobId))?.payload || {};
-    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
+    const reviewTranscript = appendEntries(finalPayload.transcript, [{
+      at: new Date().toISOString(), agent: 'sistema', type: 'check',
+      content: 'El comité terminó sus intentos automáticos, pero la validación no aprobó todos los criterios. La entrega queda pendiente de revisión humana; no se considera aprobada.'
+    }]);
+    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
