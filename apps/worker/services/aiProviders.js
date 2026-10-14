@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { sanitizeProviderErrorBody } from './sanitizeProviderError.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 // Feature branch: bounded continuation support.
@@ -32,22 +33,30 @@ function isFailoverEligible(error) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-function providerModelForSlot(provider, requestedModel, maxTokens) {
+function providerModelForSlot(provider, requestedModel, maxTokens, preferredSlot = null) {
   const requested = String(requestedModel || '').trim();
   const slots = ['reasoning', 'coding', 'validation'];
-  const exactSlot = slots.find(slot => String(provider.models?.[slot] || '').trim() === requested && requested);
-  const slot = exactSlot || (Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(requested) ? 'validation' : 'reasoning'));
+  const slot = slots.includes(preferredSlot)
+    ? preferredSlot
+    : slots.find(candidate => String(provider.models?.[candidate] || '').trim() === requested && requested)
+      || (Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(requested) ? 'validation' : 'reasoning'));
   return String(provider.models?.[slot] || provider.model || provider.models?.reasoning || provider.models?.coding || provider.models?.validation || '').trim();
 }
 
-export function configuredOpenAIProviders(requestedModel, maxTokens, env = process.env) {
+export function configuredOpenAIProviders(requestedModel, maxTokens, env = process.env, preferredSlot = null) {
   const providers = [];
   if (env.GROQ_API_KEY) {
     providers.push({
       name: 'Groq', baseUrl: GROQ_BASE_URL, apiKey: env.GROQ_API_KEY,
-      model: Number(maxTokens) >= 5000
-        ? (env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
-        : (env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b')
+      model: (() => {
+        const slot = ['reasoning', 'coding', 'validation'].includes(preferredSlot)
+          ? preferredSlot
+          : (Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(String(requestedModel)) ? 'validation' : 'reasoning'));
+        const configured = env['GROQ_MODEL_' + slot.toUpperCase()];
+        if (configured) return configured;
+        if (slot === 'validation') return 'openai/gpt-oss-20b';
+        return 'openai/gpt-oss-120b';
+      })()
     });
   }
   let custom = [];
@@ -66,7 +75,7 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
     const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(apiKeyEnv) ? env[apiKeyEnv] : '';
     const validUrl = /^https:\/\//i.test(baseUrl) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl);
     if (!name || !validUrl || !apiKey || providers.some(provider => provider.baseUrl === baseUrl)) continue;
-    const model = providerModelForSlot(entry, requestedModel, maxTokens);
+    const model = providerModelForSlot(entry, requestedModel, maxTokens, preferredSlot);
     if (!model) {
       console.warn('[worker][provider_config_invalid]', JSON.stringify({ name, reason: 'falta model o models.reasoning/coding/validation' }));
       continue;
@@ -81,24 +90,76 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
  * AI_FALLBACK_PROVIDERS contains endpoint/key-env/model metadata only, never API secrets.
  */
 export async function consultarModelo(options) {
-  const { model, maxTokens = 1200, messages } = options;
+  const { model, maxTokens = 1200, providerSlot = null } = options;
   const userContext = currentUserProviders();
-  const providers = userContext
-    ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
-    : configuredOpenAIProviders(model, maxTokens, process.env);
-  const gemini = userContext ? userContext.gemini : (process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : null);
+
+  if (userContext) {
+    const ordered = Array.isArray(userContext.providerOrder) ? userContext.providerOrder : [
+      ...(userContext.gemini ? [userContext.gemini] : []),
+      ...(userContext.providers || [])
+    ];
+    if (!ordered.length) {
+      throw new Error('Esta cuenta no tiene proveedores de IA configurados. Abrí API 🔐 y agregá una clave.');
+    }
+    const errors = [];
+    for (let index = 0; index < ordered.length; index++) {
+      const provider = ordered[index];
+      const providerModel = providerModelForSlot(provider, model, maxTokens, providerSlot);
+      try {
+        if (provider.type === 'gemini' || /generativelanguage\.googleapis\.com/i.test(provider.baseUrl || '')) {
+          return await consultarGemini({
+            ...options,
+            model: providerModel,
+            apiKey: provider.apiKey,
+            failoverOnRetryable: index < ordered.length - 1
+          });
+        }
+        return await consultarOpenAICompatible({
+          ...options,
+          model: providerModel,
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl,
+          providerName: provider.name,
+          failoverAvailable: index < ordered.length - 1
+        });
+      } catch (error) {
+        errors.push({ provider: provider.name || 'Proveedor del usuario', reason: String(error?.message || error).slice(0, 220) });
+        if (!isFailoverEligible(error) || index === ordered.length - 1) throw error;
+        console.warn('[worker][provider_failover]', JSON.stringify({
+          from: provider.name || 'Proveedor del usuario',
+          to: ordered[index + 1].name || 'Siguiente proveedor',
+          reason: error.code || 'provider unavailable',
+          model: providerModelForSlot(ordered[index + 1], model, maxTokens, providerSlot)
+        }));
+      }
+    }
+    const error = new Error('Todos los proveedores configurados están temporalmente limitados; la tarea se reanudará con el checkpoint guardado.');
+    error.code = 'PROVIDER_TEMPORARY';
+    error.retryAfterMs = 30000;
+    error.providerModel = model;
+    error.providerRetry = MAX_PROVIDER_RETRIES;
+    error.providerErrors = errors;
+    throw error;
+  }
+
+  const providers = configuredOpenAIProviders(model, maxTokens, process.env, providerSlot);
+  const gemini = process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : null;
   if (gemini?.apiKey) {
     try {
-      return await consultarGemini({ ...options, ...(gemini.models?.reasoning ? { model: providerModelForSlot(gemini, model, maxTokens) } : {}), apiKey: gemini.apiKey, failoverOnRetryable: providers.length > 0 });
+      const geminiModel = providerModelForSlot(
+        { models: { reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' } },
+        model, maxTokens, providerSlot
+      );
+      return await consultarGemini({ ...options, model: geminiModel, apiKey: gemini.apiKey, failoverOnRetryable: providers.length > 0 });
     } catch (error) {
       if (!isFailoverEligible(error) || !providers.length) throw error;
       console.warn('[worker][provider_failover]', JSON.stringify({
-        from: gemini.name || 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
+        from: 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
         model: providers[0].model
       }));
     }
   }
-  if (!providers.length) throw new Error(userContext ? 'Esta cuenta no tiene proveedores de IA configurados. Abrí API 🔐 y agregá una clave.' : 'No hay proveedores de IA configurados. Configurá GEMINI_API_KEY, GROQ_API_KEY o AI_FALLBACK_PROVIDERS.');
+  if (!providers.length) throw new Error('No hay proveedores de IA configurados. Configurá GEMINI_API_KEY, GROQ_API_KEY o AI_FALLBACK_PROVIDERS.');
   const errors = [];
   for (let index = 0; index < providers.length; index++) {
     const provider = providers[index];
@@ -127,6 +188,8 @@ export async function consultarModelo(options) {
 }
 
 async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', failoverAvailable = false }) {
+  let providerHostname = '';
+  try { providerHostname = new URL(String(baseUrl)).hostname.toLowerCase(); } catch {}
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -156,9 +219,9 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     }
     const usageId = randomUUID();
     let response;
-    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (providerHostname === 'api.openai.com' ? { max_completion_tokens: safeMaxTokens } : { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
-      const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      const reason = `error de red: ${sanitizeProviderErrorBody(String(error?.message || error), apiKey, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
       retry++; const wait = retryDelay(retry); await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
@@ -237,16 +300,15 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       // by the worker scheduler so one blocked provider cannot occupy a worker slot.
       await sleep(wait); continue;
     }
-    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
+    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${sanitizeProviderErrorBody(body, apiKey)}`);
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
 function userModel(slot) {
   const context = currentUserProviders();
   if (!context) return null;
-  if (context.gemini?.models?.[slot]) return context.gemini.models[slot];
-  const provider = context.providers[0];
-  return provider?.models?.[slot] || provider?.models?.reasoning || 'gpt-4o-mini';
+  const primary = context.providerOrder?.[0] || context.gemini || context.providers?.[0];
+  return primary?.models?.[slot] || primary?.models?.reasoning || 'gpt-6-sol';
 }
 const reasoningModel = () => userModel('reasoning') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b'));
 const codingModel = () => userModel('coding') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'));
@@ -260,7 +322,7 @@ function boundContext(value, maxChars, label) {
 }
 export async function agenteCoordinador(objetivo, estrategia, propuesta, critica, onRetry) {
   return consultarModelo({
-    model: reasoningModel(), temperature: 0.1, maxTokens: 1800, onRetry,
+    model: reasoningModel(), providerSlot: 'reasoning', temperature: 0.1, maxTokens: 1800, onRetry,
     messages: [
       sys('Coordinador de coherencia', 'Fijá un contrato de equipo conciso: alcance y decisiones invariables; inventario de módulos con responsable lógico; dependencias en orden; exportaciones/importaciones, rutas, esquemas y eventos compartidos; límites de seguridad; compatibilidad y criterios de coherencia. Distinguí archivos confirmados de propuestos. Evitá definir dos veces la misma responsabilidad. Indicá qué otros módulos hay que revisar si cambia un contrato. No inventes archivos ni presentes supuestos como hechos; cada agente debe avisar antes de romper un contrato.'),
       { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 2200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2600, 'estrategia') + '\n\nPROPUESTA:\n' + boundContext(propuesta, 1400, 'propuesta') + '\n\nAUDITORÍA ESCÉPTICA:\n' + boundContext(critica, 1400, 'auditoría') }
@@ -289,7 +351,7 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
   const results = [];
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
-      model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
+      model: validationModel(), providerSlot: 'validation', temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
         sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Usá internamente tres alter egos y combiná sus hallazgos sin repetirlos: (1) Detective de contratos: nombres de funciones/clases, importaciones/exportaciones, rutas, formatos, configuración y dependencias; (2) Abogado del diablo: supuestos falsos, casos límite, errores lógicos, seguridad y comportamiento ante interrupciones; (3) Guardián de entrega: archivos completos, objetivo/criterios de aceptación y ausencia de contradicciones. Cada hallazgo debe incluir ruta concreta, evidencia textual verificable, impacto y corrección mínima; separá bloqueos reales de mejoras opcionales. Usá el mapa para comprobar contratos con otros lotes. El mensaje incluye el INVENTARIO COMPLETO de archivos: uno fuera de este lote puede existir en otro. PROHIBIDO afirmar que falta un archivo si figura en el inventario. No inventes incompatibilidades, no supongas pruebas ejecutadas y no marques como error algo no verificable. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
@@ -309,18 +371,18 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
   };
 }
 export async function agenteArquitecto(objetivo, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Entregá una propuesta compacta con OBJETIVO/ALCANCE, decisiones e invariantes, módulos afectados, orden de etapas, criterios de aceptación observables, pruebas y riesgos/supuestos. Favorecé la solución mínima que satisfaga el objetivo; distinguí requisitos obligatorios de mejoras opcionales. No inventes infraestructura disponible ni prometas pruebas ejecutadas.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
+  return consultarModelo({ model: reasoningModel(), providerSlot: 'reasoning', maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Entregá una propuesta compacta con OBJETIVO/ALCANCE, decisiones e invariantes, módulos afectados, orden de etapas, criterios de aceptación observables, pruebas y riesgos/supuestos. Favorecé la solución mínima que satisfaga el objetivo; distinguí requisitos obligatorios de mejoras opcionales. No inventes infraestructura disponible ni prometas pruebas ejecutadas.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
 }
 export async function agenteEsceptico(objetivo, propuesta, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1000, onRetry, messages: [sys('Escéptico/Auditor', 'Intentá refutar la propuesta con escenarios concretos de fallo, no con opiniones de estilo. Priorizá como BLOQUEANTE/ALTO/MEDIO; por cada hallazgo incluye condición que lo dispara, impacto y cómo comprobarlo. Máximo cinco riesgos distintos, eliminá duplicados y reconocé explícitamente los supuestos que no podés verificar.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
+  return consultarModelo({ model: reasoningModel(), providerSlot: 'reasoning', maxTokens: 1000, onRetry, messages: [sys('Escéptico/Auditor', 'Intentá refutar la propuesta con escenarios concretos de fallo, no con opiniones de estilo. Priorizá como BLOQUEANTE/ALTO/MEDIO; por cada hallazgo incluye condición que lo dispara, impacto y cómo comprobarlo. Máximo cinco riesgos distintos, eliminá duplicados y reconocé explícitamente los supuestos que no podés verificar.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
 }
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Resolvé cada hallazgo del Escéptico con decisión ACEPTAR/RECHAZAR/APLAZAR y una razón breve; no copies la crítica entera. Convertí los riesgos aceptados en controles verificables y producí un plan mínimo ordenado, criterios de aceptación y dudas que requieren decisión humana. No escondas desacuerdos sin resolver.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
+  return consultarModelo({ model: reasoningModel(), providerSlot: 'reasoning', maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Resolvé cada hallazgo del Escéptico con decisión ACEPTAR/RECHAZAR/APLAZAR y una razón breve; no copies la crítica entera. Convertí los riesgos aceptados en controles verificables y producí un plan mínimo ordenado, criterios de aceptación y dudas que requieren decisión humana. No escondas desacuerdos sin resolver.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
 export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}) {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: (currentUserProviders() ? Boolean(currentUserProviders().gemini) : Boolean(process.env.GEMINI_API_KEY)) ? (repairing ? 50000 : 60000) : (repairing ? 5000 : 6000), onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
+    model: codingModel(), providerSlot: 'coding', temperature: 0.15, maxTokens: (currentUserProviders() ? Boolean(currentUserProviders().gemini) : Boolean(process.env.GEMINI_API_KEY)) ? (repairing ? 50000 : 60000) : (repairing ? 5000 : 6000), onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
     messages: [
       sys('Desarrollador sénior', repairing
         ? 'Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
@@ -374,7 +436,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const results = [];
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
-      model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
+      model: validationModel(), providerSlot: 'validation', temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
         sys('Validador independiente', 'Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),

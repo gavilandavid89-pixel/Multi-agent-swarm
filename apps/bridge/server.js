@@ -14,7 +14,12 @@ const WORKER_SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
 const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const failedAuth = new Map();
+const registrationWindows = new Map();
+const adminInviteWindows = new Map();
 const jobCreateWindows = new Map();
+const jobCreateIpWindows = new Map();
+const previewUploadWindows = new Map();
+const previewUploadIpWindows = new Map();
 const previewSessions = new Map();
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,8 +30,31 @@ if (IS_PROD && (!WORKER_BASE_URL || WORKER_SHARED_SECRET.length < 32 || APP_ACCE
 }
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (IS_PROD && req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+  if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
+  // HTML previews have their own stricter, sandboxed CSP below. Do not override it
+  // here: the app must be able to display its isolated preview iframe.
+  if (!req.path.startsWith('/preview/')) {
+    res.set('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' about:; form-action 'self'; frame-ancestors 'none'");
+  }
+  next();
+});
 app.use(express.json({ limit: '64kb' }));
-app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
+app.use(express.static(webDir, {
+  etag: true,
+  maxAge: IS_PROD ? '1h' : 0,
+  setHeaders(res, filePath) {
+    // Revalidate the HTML shell on every navigation so its versioned asset URLs
+    // cannot stay stale for an hour after a deploy. Versioned JS/CSS may be cached.
+    if (path.resolve(filePath) === path.join(webDir, 'index.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
@@ -48,15 +76,20 @@ app.post('/api/auth/login', async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512) return res.status(400).json({ error: 'Ingresá usuario y contraseña válidos.' });
   try {
-    let { rows } = await pool.query('SELECT id,username,password_hash,role FROM app_users WHERE username=$1 AND disabled_at IS NULL', [username]);
+    let { rows } = await pool.query('SELECT id,username,password_hash,role,created_at FROM app_users WHERE username=$1 AND disabled_at IS NULL', [username]);
     let user = rows[0];
     if (!user) {
       const count = await pool.query('SELECT count(*)::int AS total FROM app_users');
       if (count.rows[0].total !== 0 || username !== 'admin' || !APP_ACCESS_KEY || !safeEqual(password, APP_ACCESS_KEY)) {
         return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
       }
-      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role", [hashPassword(password)]);
+      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') ON CONFLICT(username) DO NOTHING RETURNING id,username,password_hash,role,created_at", [hashPassword(password)]);
       user = created.rows[0];
+      if (!user) {
+        const raced = await pool.query("SELECT id,username,password_hash,role,created_at FROM app_users WHERE username='admin' AND disabled_at IS NULL");
+        user = raced.rows[0];
+        if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+      }
 
     } else if (!verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
@@ -66,17 +99,49 @@ app.post('/api/auth/login', async (req, res) => {
         const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
         console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
       } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
-      try {
-        let offset = 0; let total = 0;
-        do {
-          const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
-          const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
-          total = Number(legacy?.total) || jobs.length;
-          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
-          offset += jobs.length;
-          if (!jobs.length) break;
-        } while (offset < total);
-      } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+      const completedJobMigration = await pool.query('SELECT 1 FROM user_job_migrations WHERE user_id=$1', [user.id]);
+      if (!completedJobMigration.rows.length) {
+        try {
+          // Only jobs that predate the first administrator are legacy. Later jobs
+          // belong to the userId stored in their encrypted payload, or inherit the
+          // owner of their continuation parent. Never claim an unlinked new job as admin.
+          const cutoffMs = new Date(user.created_at).getTime();
+          const legacyJobs = [];
+          let offset = 0; let total = 0;
+          do {
+            const page = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+            const jobs = Array.isArray(page) ? page : (Array.isArray(page?.jobs) ? page.jobs : []);
+            total = Number(page?.total) || jobs.length;
+            legacyJobs.push(...jobs);
+            offset += jobs.length;
+            if (!jobs.length) break;
+          } while (offset < total);
+          legacyJobs.sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+          const ids = legacyJobs.filter(job => job?.id).map(job => String(job.id));
+          const existing = ids.length
+            ? await pool.query('SELECT job_id,user_id FROM user_job_ownership WHERE job_id = ANY($1::text[])', [ids])
+            : { rows: [] };
+          const owners = new Map(existing.rows.map(row => [String(row.job_id), String(row.user_id)]));
+          const knownUsers = await pool.query('SELECT id FROM app_users WHERE disabled_at IS NULL');
+          const knownUserIds = new Set(knownUsers.rows.map(row => String(row.id)));
+          let assigned = 0;
+          for (const job of legacyJobs) {
+            if (!job?.id) continue;
+            const jobId = String(job.id);
+            if (owners.has(jobId)) continue;
+            let ownerId = job.userId && knownUserIds.has(String(job.userId)) ? String(job.userId) : null;
+            if (!ownerId && job.continuationOf) ownerId = owners.get(String(job.continuationOf)) || null;
+            const createdMs = Date.parse(job.createdAt || '');
+            if (!ownerId && Number.isFinite(cutoffMs) && Number.isFinite(createdMs) && createdMs < cutoffMs) ownerId = user.id;
+            if (!ownerId) continue;
+            await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, ownerId]);
+            owners.set(jobId, ownerId);
+            assigned++;
+          }
+          console.info('[bridge][legacy_job_migration]', JSON.stringify({ scanned: legacyJobs.length, assigned }));
+          await pool.query('INSERT INTO user_job_migrations(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [user.id]);
+        } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+      }
     }
     failedAuth.delete(ip);
     const token = await createSession(user.id);
@@ -84,6 +149,12 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
 });
 app.post('/api/auth/register', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const rate = windowLimit(registrationWindows, ip, 10, 60 * 60 * 1000);
+  if (!rate.allowed) {
+    res.set('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ error: 'Demasiados intentos de registro. Probá más tarde.' });
+  }
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const invite = typeof req.body?.invite === 'string' ? req.body.invite.trim() : '';
@@ -124,8 +195,18 @@ app.delete('/api/account/apis/:slot', async (req, res) => {
 });
 app.post('/api/admin/invites', async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede crear invitaciones.' });
-  try { const invite = await createInvite(req.user.id, req.body?.hours); res.status(201).json(invite); }
-  catch { res.status(503).json({ error: 'No se pudo crear la invitación.' }); }
+  const rate = windowLimit(adminInviteWindows, req.user.id, 20, 60 * 60 * 1000);
+  if (!rate.allowed) {
+    res.set('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ error: 'Límite de creación de invitaciones alcanzado. Probá más tarde.' });
+  }
+  try {
+    const invite = await createInvite(req.user.id, req.body?.hours);
+    res.status(201).json(invite);
+  } catch (error) {
+    if (error?.code === 'INVITE_ACTIVE_LIMIT') return res.status(429).json({ error: error.message });
+    res.status(503).json({ error: 'No se pudo crear la invitación.' });
+  }
 });
 app.param('id', async (req, res, next, id) => {
   try {
@@ -136,10 +217,35 @@ app.param('id', async (req, res, next, id) => {
 });
 function limitJobCreation(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(jobCreateWindows, ip, 5, 10 * 60 * 1000);
-  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Alcanzaste el límite temporal de creación de tareas. Probá más tarde.' }); }
+  // Isolate normal usage by account; retain a looser IP ceiling for abuse from
+  // many throwaway accounts on the same source address.
+  const userLimit = windowLimit(jobCreateWindows, String(req.user?.id || ip), 5, 10 * 60 * 1000);
+  if (!userLimit.allowed) {
+    res.set('Retry-After', String(userLimit.retryAfter));
+    return res.status(429).json({ error: 'Alcanzaste tu límite temporal de creación de tareas. Probá más tarde.' });
+  }
+  const ipLimit = windowLimit(jobCreateIpWindows, ip, 25, 10 * 60 * 1000);
+  if (!ipLimit.allowed) {
+    res.set('Retry-After', String(ipLimit.retryAfter));
+    return res.status(429).json({ error: 'Se alcanzó el límite temporal de tareas desde esta conexión. Probá más tarde.' });
+  }
   next();
 }
+function limitPreviewUpload(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const userLimit = windowLimit(previewUploadWindows, String(req.user?.id || ip), 10, 10 * 60 * 1000);
+  if (!userLimit.allowed) {
+    res.set('Retry-After', String(userLimit.retryAfter));
+    return res.status(429).json({ error: 'Alcanzaste el límite temporal de vistas previas ZIP. Probá más tarde.' });
+  }
+  const ipLimit = windowLimit(previewUploadIpWindows, ip, 30, 10 * 60 * 1000);
+  if (!ipLimit.allowed) {
+    res.set('Retry-After', String(ipLimit.retryAfter));
+    return res.status(429).json({ error: 'Se alcanzó el límite temporal de cargas ZIP desde esta conexión. Probá más tarde.' });
+  }
+  next();
+}
+
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b));
   return aa.length === bb.length && aa.length > 0 && timingSafeEqual(aa, bb);
@@ -180,8 +286,29 @@ async function workerRequest(route, options = {}) {
   console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
   return data;
 }
+async function workerJobsByIds(ids) {
+  const jobs = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    const data = await workerRequest('/internal/jobs/batch', {
+      method: 'POST',
+      body: JSON.stringify({ ids: batch })
+    });
+    if (Array.isArray(data?.jobs)) jobs.push(...data.jobs);
+  }
+  return jobs;
+}
 app.get('/api/access-check', (req, res) => res.json({ ok: true, user: req.user }));
-app.get('/api/history', async (req, res) => { if (req.user.role !== 'admin') return res.json({ history: [], isolated: true }); try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/history', async (req, res) => {
+  try {
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1', [req.user.id]);
+    const jobs = await workerJobsByIds(owned.rows.map(row => String(row.job_id)));
+    const byStatus = { queued: 0, running: 0, completed: 0, failed: 0, needs_review: 0 };
+    for (const job of jobs) if (Object.hasOwn(byStatus, job.status)) byStatus[job.status]++;
+    const count = jobs.length;
+    res.json({ hasHistory: count > 0, count, byStatus, isolated: true });
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.get('/api/jobs', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
   const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
@@ -189,9 +316,8 @@ app.get('/api/jobs', async (req, res) => {
   if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
   try {
     const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
-    const jobs = (await Promise.all(owned.rows.map(async row => {
-      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
-    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    const jobs = (await workerJobsByIds(owned.rows.map(row => String(row.job_id))))
+      .filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
     jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
@@ -339,7 +465,7 @@ async function previewFile(session, index) {
   if (!result.file || (typeof result.file.content !== 'string' && !Buffer.isBuffer(result.file.content))) { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
   return { item, file: result.file, files };
 }
-app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
+app.post('/api/preview-zip', limitPreviewUpload, express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
   try {
     const parsed = parsePreviewZip(req.body);
@@ -377,6 +503,24 @@ app.post('/api/jobs/:id/preview-session', async (req, res) => {
     res.json({ url: `/preview/${token}/${index}`, expiresInSeconds: Math.floor(PREVIEW_TTL_MS / 1000) });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+function setPreviewAssetHeaders(res, item) {
+  const pathLower = String(item?.path || '').toLowerCase();
+  // Asset URLs share the bridge origin. Prevent untrusted HTML/SVG opened directly
+  // from becoming an unsandboxed document; HTML assets remain readable as text/fetch.
+  const contentType = pathLower.endsWith('.html') || pathLower.endsWith('.htm')
+    ? 'text/plain; charset=utf-8'
+    : (item?.contentType || previewMimeType(item?.path || ''));
+  res.set({
+    'Content-Type': contentType,
+    'Content-Disposition': 'inline',
+    'X-Content-Type-Options': 'nosniff',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': "sandbox; default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  });
+}
+
 app.get('/preview/:token/assets/*', async (req, res) => {
   const session = validPreviewSession(req.params.token);
   if (!session) return res.status(404).type('text/plain').send('La vista previa expiró. Volvé a abrirla desde Swarm.');
@@ -386,7 +530,7 @@ app.get('/preview/:token/assets/*', async (req, res) => {
     if (Array.isArray(session.files)) {
       const item = session.files.find(file => file.path === assetPath);
       if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
-      res.set({ 'Content-Type': item.contentType || previewMimeType(item.path), 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      setPreviewAssetHeaders(res, item);
       return res.send(item.content);
     }
     const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
@@ -394,7 +538,7 @@ app.get('/preview/:token/assets/*', async (req, res) => {
     if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
     const result = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files/${encodeURIComponent(item.index)}`);
     if (!result.file || typeof result.file.content !== 'string') return res.status(404).type('text/plain').send('Recurso no disponible.');
-    res.set({ 'Content-Type': item.contentType || 'text/plain; charset=utf-8', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+    setPreviewAssetHeaders(res, item);
     res.send(result.file.content);
   } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo cargar el recurso local.'); }
 });

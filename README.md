@@ -7,9 +7,10 @@
 ## Componentes
 
 - `apps/web/public`: interfaz adaptable, historial bajo demanda y panel de actividad.
-- `apps/bridge`: API pública protegida por `APP_ACCESS_KEY`; reenvía las tareas al worker usando `WORKER_SHARED_SECRET`.
+- `apps/bridge`: inicio de sesión por usuario, alta mediante invitación de un solo uso, sesiones revocables y autorización por dueño de tarea. `APP_ACCESS_KEY` solo habilita el primer inicio de sesión del administrador cuando todavía no hay usuarios; no es un token para las solicitudes normales.
 - `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, coordinación de coherencia entre archivos, desarrollo y validación.
-- `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente.
+- `apps/worker/services/store.js`: tareas, checkpoints, historial y artefactos cifrados con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente.
+- `apps/bridge/services/accountStore.js` y `apps/worker/services/userProviders.js`: cuentas aisladas, credenciales de proveedor cifradas y ejecución con las APIs de la cuenta propietaria.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
 ## Desarrollo local
@@ -17,20 +18,22 @@
 Requiere Node.js 20 o posterior.
 
 1. Copiá `apps/bridge/.env.example` a `apps/bridge/.env` y `apps/worker/.env.example` a `apps/worker/.env`.
-2. Generá secretos únicos. Para el cifrado: `openssl rand -hex 32`. `HISTORY_ENCRYPTION_KEY` debe ser exactamente 64 caracteres hexadecimales.
-3. Configurá el mismo `WORKER_SHARED_SECRET` en ambos servicios. Configurá una clave distinta para `APP_ACCESS_KEY`.
-4. En el worker, configurá uno o más proveedores: `GEMINI_API_KEY`, `GROQ_API_KEY` y, opcionalmente, proveedores adicionales compatibles con OpenAI Chat Completions mediante `AI_FALLBACK_PROVIDERS`. Si un proveedor devuelve 429, un error de red o un 5xx y hay una alternativa configurada, el motor cambia a ella antes de esperar el cooldown.
+2. Generá secretos únicos: `openssl rand -hex 32`. `HISTORY_ENCRYPTION_KEY` y `SWARM_API_ENCRYPTION_KEY` deben ser valores hexadecimales distintos de 64 caracteres. Usá la misma `SWARM_API_ENCRYPTION_KEY` en puente y worker, porque ambos cifran/descifran las claves privadas de usuario.
+3. Configurá el mismo `WORKER_SHARED_SECRET` en ambos servicios. Usá una clave diferente para `APP_ACCESS_KEY`, `HISTORY_ENCRYPTION_KEY` y `SWARM_API_ENCRYPTION_KEY`.
+4. Para el uso normal, iniciá sesión como `admin` y agregá en `API 🔐` las claves propias de la cuenta. Elegí proveedor y modelos de razonamiento, desarrollo y validación; las claves se cifran y no vuelven a mostrarse. Las variables antiguas `GEMINI_API_KEY`, `GROQ_API_KEY` y `AI_FALLBACK_PROVIDERS` se conservan para importar proveedores heredados al administrador durante su primer inicio de sesión con el nuevo sistema.
 5. Instalá dependencias desde la raíz con `npm --prefix apps/bridge install` y `npm --prefix apps/worker install`.
 6. Iniciá el worker y el puente en terminales separadas con `npm --prefix apps/worker start` y `npm --prefix apps/bridge start`.
 
-Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
+Para comprobar sintaxis y ejecutar las pruebas unitarias: `npm run check`. La prueba en vivo de punta a punta es independiente y se activa manualmente desde GitHub Actions; necesita el secreto `SWARM_APP_ACCESS_KEY`, la URL de la web activa y disponibilidad de un proveedor para generar una tarea real.
 
 ## Variables esenciales
 
 ### Puente
 - `WORKER_BASE_URL`: URL del worker.
 - `WORKER_SHARED_SECRET`: secreto compartido con el worker.
-- `APP_ACCESS_KEY`: clave de acceso al panel.
+- `APP_ACCESS_KEY`: contraseña inicial del administrador, solo cuando `SWARM_DATABASE_URL` todavía no contiene ninguna cuenta. Tras el bootstrap, las rutas privadas requieren una sesión Bearer; la clave compartida no sustituye esa sesión.
+- `SWARM_DATABASE_URL`: PostgreSQL independiente para usuarios, sesiones, invitaciones, APIs cifradas y propiedad de tareas.
+- `SWARM_API_ENCRYPTION_KEY`: clave AES-256 de 32 bytes en hex; debe coincidir entre puente y worker.
 
 ### Worker
 - `WORKER_SHARED_SECRET`: debe coincidir con el puente.
@@ -38,13 +41,15 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `GEMINI_API_KEY`: clave de Gemini; si está configurada, se prueba primero.
 - `AI_FALLBACK_PROVIDERS`: array JSON de proveedores adicionales compatibles con OpenAI Chat Completions. Cada elemento admite `name`, `baseUrl`, `apiKeyEnv` y `model` o `models` con `reasoning`, `coding` y `validation`. Las credenciales van en variables de entorno separadas; nunca dentro del JSON. Se permiten URLs HTTPS y localhost HTTP para desarrollo. Se prueban en orden tras Gemini/Groq.
 - `HISTORY_ENCRYPTION_KEY`: clave hexadecimal de 32 bytes para cifrar el historial.
-- `DATABASE_URL`: URL de PostgreSQL persistente.
+- `DATABASE_URL`: URL de PostgreSQL persistente para las tareas, checkpoints, historial y artefactos cifrados.
+- `SWARM_DATABASE_URL`: conexión a la base de cuentas separada que también se configura en el puente.
+- `SWARM_API_ENCRYPTION_KEY`: misma clave hex de 64 caracteres configurada en el puente; cifra las APIs que pertenecen a cada cuenta.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
-- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 1; ajustá con cuidado según los límites del plan y los proveedores).
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 50.000; ajustable entre 4.000 y 100.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
-**Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, el historial cifrado no podrá recuperarse. Guardá la clave de forma segura. El historial activo se almacena en PostgreSQL; el código conserva una importación de SQLite heredada si encuentra un archivo anterior.
+**Importante:** si se pierde `HISTORY_ENCRYPTION_KEY`, las tareas, los checkpoints y el historial cifrado no podrán recuperarse. Si se pierde `SWARM_API_ENCRYPTION_KEY`, las claves de proveedor guardadas tampoco podrán descifrarse. Guardá ambas claves en un gestor de secretos o copia segura; la clave `SWARM_API_ENCRYPTION_KEY` debe ser la misma en bridge y worker. El historial activo se almacena en PostgreSQL; el código conserva una importación de SQLite heredada si encuentra un archivo anterior.
 
 ## Alcance de validación
 
@@ -70,6 +75,6 @@ Los agentes cumplen roles distintos: Arquitecto propone; Escéptico intenta refu
 
 ### Failover y límites de proveedores
 
-Gemini se prueba primero cuando está configurado; luego se prueban Groq y los proveedores adicionales de `AI_FALLBACK_PROVIDERS` en el orden declarado. Los proveedores alternativos deben implementar la API compatible con OpenAI Chat Completions (`POST /chat/completions`). Para cada uno, configurá la URL base HTTPS, el nombre de la variable de entorno que contiene su clave y un modelo válido para ese proveedor. Se puede definir un modelo único o modelos separados para razonamiento, programación y validación.
+Para tareas de usuarios, el orden de failover sigue el orden de sus APIs guardadas en `API 🔐`, incluyendo Gemini y proveedores compatibles con OpenAI Chat Completions. Para la configuración heredada de entorno, Gemini se prueba primero cuando está configurado; luego se prueban Groq y los proveedores adicionales de `AI_FALLBACK_PROVIDERS` en el orden declarado. Los proveedores alternativos deben implementar la API compatible con OpenAI Chat Completions (`POST /chat/completions`). Para cada uno, configurá la URL base HTTPS, el nombre de la variable de entorno que contiene su clave y un modelo válido para ese proveedor. Se puede definir un modelo único o modelos separados para razonamiento, programación y validación.
 
 Ante HTTP 408, 425, 429, 5xx o errores de red, el motor intenta la siguiente alternativa disponible en lugar de esperar primero todo el cooldown. Si todos fallan, persiste el checkpoint y programa una reanudación con backoff. No se puede cambiar automáticamente a proveedores cuyas credenciales no estén configuradas, ni evitar cuotas o límites del proveedor.

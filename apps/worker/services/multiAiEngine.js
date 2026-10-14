@@ -4,6 +4,7 @@ import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
+import { copyJobOwnership } from './userProviders.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -276,6 +277,14 @@ async function runJob(jobId) {
       if (continuation?.error) {
         console.error('[worker][token_batch_continuation_failed]', JSON.stringify({ jobId, status: continuation.status || null, error: continuation.error }));
         return { blocked: true, reason: patch.error };
+      }
+      try {
+        await copyJobOwnership(jobId, continuation.job.id, current?.payload?.userId || null);
+      } catch (ownershipError) {
+        console.error('[worker][continuation_ownership_copy_failed]', JSON.stringify({
+          sourceJobId: jobId, continuationJobId: continuation.job.id,
+          code: ownershipError?.code || 'internal'
+        }));
       }
       console.warn('[worker][token_batch_continuation]', JSON.stringify({
         sourceJobId: jobId, continuationJobId: continuation.job.id,

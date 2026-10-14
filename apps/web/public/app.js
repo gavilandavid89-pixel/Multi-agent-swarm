@@ -452,20 +452,25 @@ $('access-form').addEventListener('submit', async event => {
 
 // Account menu and compact, dynamically-added API fields.
 const API_PROVIDERS = [
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', reasoning: 'gpt-4o-mini', coding: 'gpt-4o-mini', validation: 'gpt-4o-mini' },
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', reasoning: 'gpt-6-sol', coding: 'gpt-6-sol', validation: 'gpt-6-luna' },
   { label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com', reasoning: 'gemini-3.8-flash', coding: 'gemini-3.8-flash', validation: 'gemini-3.8-flash' },
   { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', reasoning: 'openai/gpt-oss-120b', coding: 'openai/gpt-oss-120b', validation: 'openai/gpt-oss-20b' },
-  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: 'openai/gpt-4o-mini', coding: 'openai/gpt-4o-mini', validation: 'openai/gpt-4o-mini' },
+  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', reasoning: 'openai/gpt-6-sol', coding: 'openai/gpt-6-sol', validation: 'openai/gpt-6-luna' },
   { label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', reasoning: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', coding: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', validation: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
   { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', reasoning: 'deepseek-chat', coding: 'deepseek-chat', validation: 'deepseek-chat' },
   { label: 'Mistral AI', baseUrl: 'https://api.mistral.ai/v1', reasoning: 'mistral-small-latest', coding: 'mistral-small-latest', validation: 'mistral-small-latest' },
   { label: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', reasoning: 'accounts/fireworks/models/llama-v3p3-70b-instruct', coding: 'accounts/fireworks/models/llama-v3p3-70b-instruct', validation: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
   { label: 'Perplexity', baseUrl: 'https://api.perplexity.ai', reasoning: 'sonar', coding: 'sonar', validation: 'sonar' },
-  { label: 'Cohere', baseUrl: 'https://api.cohere.com/compatibility/v1', reasoning: 'command-a-03-2025', coding: 'command-a-03-2025', validation: 'command-a-03-2025' }
+  { label: 'Cohere', baseUrl: 'https://api.cohere.ai/compatibility/v1', legacyBaseUrls: ['https://api.cohere.com/compatibility/v1'], reasoning: 'command-a-plus-05-2026', coding: 'command-a-plus-05-2026', validation: 'command-a-plus-05-2026' }
 ];
 function providerForUrl(url) {
   const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  return API_PROVIDERS.find(provider => { try { return new URL(provider.baseUrl).hostname.toLowerCase() === host; } catch { return false; } }) || API_PROVIDERS[0];
+  return API_PROVIDERS.find(provider => {
+    try {
+      return new URL(provider.baseUrl).hostname.toLowerCase() === host ||
+        (provider.legacyBaseUrls || []).some(legacy => { try { return new URL(legacy).hostname.toLowerCase() === host; } catch { return false; } });
+    } catch { return false; }
+  }) || API_PROVIDERS[0];
 }
 function apiFieldRow(api = {}) {
   const row = document.createElement('div');
@@ -483,7 +488,15 @@ function apiFieldRow(api = {}) {
   const provider = document.createElement('select'); provider.className = 'api-provider-select';
   provider.setAttribute('aria-label', `Proveedor API ${row.dataset.slot}`);
   API_PROVIDERS.forEach(item => { const option = document.createElement('option'); option.value = item.baseUrl; option.textContent = item.label; provider.append(option); });
-  provider.value = initialProvider.baseUrl;
+  if (api.saved && (initialProvider.legacyBaseUrls || []).includes(api.base_url)) {
+    const legacyOption = document.createElement('option');
+    legacyOption.value = api.base_url;
+    legacyOption.textContent = `${initialProvider.label} · URL guardada`;
+    provider.append(legacyOption);
+    provider.value = api.base_url;
+  } else {
+    provider.value = initialProvider.baseUrl;
+  }
   const keyLabel = document.createElement('label'); keyLabel.textContent = 'Clave API privada';
   const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
   input.placeholder = api.saved ? 'Clave guardada (oculta; dejá vacío para conservarla)' : 'Pegá tu clave del proveedor elegido';
@@ -515,7 +528,7 @@ function apiFieldRow(api = {}) {
       ? 'La clave guardada se conserva. Para cambiar de proveedor, pegá una clave nueva del proveedor elegido.'
       : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
   });
-  row.dataset.baseUrl = initialProvider.baseUrl;
+  row.dataset.baseUrl = api.saved && (initialProvider.legacyBaseUrls || []).includes(api.base_url) ? api.base_url : initialProvider.baseUrl;
   row.dataset.label = initialProvider.label;
   providerLabel.append(provider); keyLabel.append(input);
   main.append(providerLabel, keyLabel, modelLabels.reasoning, modelLabels.coding, modelLabels.validation, meta);

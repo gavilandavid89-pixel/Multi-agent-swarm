@@ -1,12 +1,12 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getJobsByIds, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders, importLegacyProvidersForUser } from './services/userProviders.js';
+import { withJobProviders, copyJobOwnership, ensureJobOwnership, importLegacyProvidersForUser } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -24,7 +24,21 @@ function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.
 async function runJobWithAccountProviders(id) {
   const record = await getPayload(id);
   const userId = record?.payload?.userId || null;
-  return withUserProviders(userId, () => processJob(id));
+  if (userId) {
+    try {
+      if (record?.payload?.continuationOf) {
+        await copyJobOwnership(record.payload.continuationOf, id, userId);
+      } else {
+        await ensureJobOwnership(id, userId);
+      }
+    } catch (error) {
+      // Keep the task's encrypted userId as execution authority; the bridge-side
+      // mapping is retried on later recovery, but credentials never fall back to
+      // another account's provider when the mapping write is temporarily unavailable.
+      console.warn('[worker][job_ownership_mapping_deferred]', JSON.stringify({ jobId: id, code: error?.code || 'internal' }));
+    }
+  }
+  return withJobProviders(id, userId, () => processJob(id));
 }
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
@@ -55,13 +69,29 @@ app.get('/internal/jobs', async (req, res, next) => {
   const offset = Math.max(0, Number.parseInt(req.query.offset || '0', 10) || 0);
   try { res.json(await listJobs({ limit, offset, status: requestedStatus === 'all' ? '' : requestedStatus })); } catch (error) { next(error); }
 });
+app.post('/internal/jobs/batch', async (req, res, next) => {
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== 'string' || !id.trim() || id.length > 100)) {
+    return res.status(400).json({ error: 'La lista de tareas debe contener hasta 100 identificadores válidos.' });
+  }
+  try { res.json({ jobs: await getJobsByIds(ids) }); } catch (error) { next(error); }
+});
 app.post('/internal/jobs', async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
+  try {
+    const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null;
+    const job = await createJob(objective, tokenBudget, userId);
+    if (userId) {
+      try { await ensureJobOwnership(job.id, userId); }
+      catch (error) { console.warn('[worker][job_ownership_mapping_deferred]', JSON.stringify({ jobId: job.id, code: error?.code || 'internal' })); }
+    }
+    enqueue(job.id);
+    res.status(202).json(job);
+  }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
@@ -94,6 +124,8 @@ app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
   try {
     const result = await createContinuationJob(req.params.id);
     if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    const source = await getPayload(req.params.id);
+    await copyJobOwnership(req.params.id, result.job.id, source?.payload?.userId || null);
     enqueue(result.job.id);
     console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 100000 }));
     res.status(202).json(result.job);
@@ -105,7 +137,7 @@ app.post('/internal/jobs/:id/vote-improvement', async (req, res) => {
   if (proposal.length > 1800) return res.status(413).json({ error: 'La propuesta supera los 1.800 caracteres.' });
   try {
     const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-    const result = await withUserProviders(record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
+    const result = await withJobProviders(req.params.id, record.payload.userId || null, () => voteOnImprovement(req.params.id, proposal));
     res.json(result);
   } catch (error) {
     res.status(error.status || 500).json({ error: String(error.message || 'No se pudo completar la votación.').slice(0, 1200) });
@@ -133,7 +165,7 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
     const agent = typeof req.body?.agent === 'string' ? req.body.agent : '';
     const message = typeof req.body?.message === 'string' ? req.body.message : '';
     const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-    const result = await withUserProviders(record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
+    const result = await withJobProviders(req.params.id, record.payload.userId || null, () => replyToAgent(req.params.id, agent, message));
     res.json(result);
   } catch (error) {
     res.status(error.status || (error.code === 'PROVIDER_TEMPORARY' ? 503 : 500)).json({ error: String(error.message || 'No se pudo responder al agente.').slice(0, 1200) });
@@ -178,6 +210,7 @@ async function start() {
       for (const paused of await recoverableBudgetContinuations()) {
         const continuation = await createContinuationJob(paused.id);
         if (continuation?.job) {
+          await copyJobOwnership(paused.id, continuation.job.id, paused.userId || null);
           enqueue(continuation.job.id);
           console.info('[worker][token_batch_continuation_recovered]', JSON.stringify({
             sourceJobId: paused.id, continuationJobId: continuation.job.id,

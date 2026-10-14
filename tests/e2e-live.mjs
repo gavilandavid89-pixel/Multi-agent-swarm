@@ -3,6 +3,7 @@ import { createZip } from '../apps/bridge/services/zipBundle.js';
 
 const base = (process.env.SWARM_BRIDGE_URL || 'https://swarm-bridge.onrender.com').replace(/\/$/, '');
 const key = process.env.SWARM_APP_ACCESS_KEY || '';
+let sessionToken = '';
 const timeoutMs = Math.max(60000, Number(process.env.SWARM_E2E_TIMEOUT_MS) || 1500000);
 const startedAt = new Date().toISOString();
 const report = { startedAt, base, checks: [], taskId: null, finalStatus: null, errors: [] };
@@ -17,7 +18,7 @@ async function request(route, options = {}) {
     ...options,
     signal: AbortSignal.timeout(30000),
     headers: {
-      ...(options.auth ? { authorization: 'Bearer ' + key } : {}),
+      ...(options.auth && sessionToken ? { authorization: 'Bearer ' + sessionToken } : {}),
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...(options.headers || {})
     }
@@ -40,9 +41,37 @@ try {
   check('bridge-health', 'El puente responde /healthz.');
   if (!healthData.workerConfigured) fail('El puente no confirma la configuración del worker.');
 
-  const access = await json(await request('/api/access-check', { auth: true }), 'Validación de acceso');
-  if (access.ok !== true) fail('La validación de acceso no devolvió ok=true.');
-  check('auth', 'La clave de acceso fue aceptada; no se registra ni se muestra.');
+  const landing = await fetch(base + '/', { signal: AbortSignal.timeout(20000) });
+  const landingHtml = await landing.text();
+  const csp = landing.headers.get('content-security-policy') || '';
+  if (!landing.ok || !/text\/html/i.test(landing.headers.get('content-type') || '')) fail('La página principal no devuelve HTML correctamente.');
+  if (!csp.includes("script-src 'self'") || !csp.includes("object-src 'none'") || !csp.includes("frame-ancestors 'none'")) {
+    fail('La página principal no aplica la política CSP esperada.');
+  }
+  if (landing.headers.get('x-content-type-options') !== 'nosniff' || landing.headers.get('referrer-policy') !== 'no-referrer') {
+    fail('Faltan cabeceras HTTP básicas de protección.');
+  }
+  check('main-security-headers', 'La página principal aplica CSP, nosniff y no-referrer.');
+
+  const anonymousAccess = await request('/api/access-check');
+  if (anonymousAccess.status !== 401) fail('Una solicitud sin sesión debe recibir HTTP 401.');
+  const rawPasswordAccess = await request('/api/access-check', {
+    headers: { authorization: 'Bearer ' + key }
+  });
+  if (rawPasswordAccess.status !== 401) fail('La contraseña de bootstrap no debe servir como token Bearer.');
+  check('session-required', 'Rutas privadas rechazan tanto solicitudes anónimas como la contraseña usada directamente como token.');
+
+  const login = await json(await request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username: 'admin', password: key })
+  }), 'Inicio de sesión de administrador');
+  if (!login.token || login.user?.role !== 'admin') fail('El inicio de sesión no devolvió una sesión de administrador válida.');
+  sessionToken = login.token;
+  check('auth-session', 'Inicio de sesión correcto; la contraseña compartida no se usa como token de API.');
+
+  const access = await json(await request('/api/access-check', { auth: true }), 'Validación de sesión');
+  if (access.ok !== true || access.user?.role !== 'admin') fail('La sesión no obtuvo acceso administrativo.');
+  check('auth-protected-routes', 'Las rutas privadas aceptan la sesión y no la clave de bootstrap directamente.');
 
   const objective = [
     'PRUEBA AUTOMÁTICA E2E DE SWARM. Generá una entrega mínima, real y completa.',
@@ -113,6 +142,8 @@ try {
     { path: 'index.html', content: '<!doctype html><html><head><link rel="stylesheet" href="site.css"></head><body><h1>ZIP PREVIEW E2E</h1><button id="go">Probar</button><script src="app.js"></script></body></html>' },
     { path: 'app.js', content: "document.getElementById('go').addEventListener('click', () => { document.body.dataset.clicked = 'yes'; });" },
     { path: 'site.css', content: 'body { color: rebeccapurple; }' },
+    { path: 'assets/untrusted.html', content: "<script>parent.document.body.dataset.pwned = 'yes';</script>" },
+    { path: 'assets/untrusted.svg', content: "<svg xmlns='http://www.w3.org/2000/svg'><script>parent.document.body.dataset.pwned='yes'</script></svg>" },
     { path: 'game.wasm', content: 'WASMTEST' },
     { path: 'ignored.exe', content: 'not a real executable' }
   ]);
@@ -141,6 +172,18 @@ try {
   const uploadedAsset = await uploadedAssetResponse.text();
   if (!uploadedAssetResponse.ok || !uploadedAsset.includes("dataset.clicked = 'yes'") || uploadedAssetResponse.headers.get('access-control-allow-origin') !== '*') fail('El JavaScript local del ZIP no se pudo cargar correctamente con CORS para módulos.');
   const token = uploaded.url.split('/')[2];
+  const htmlAssetResponse = await fetch(base + '/preview/' + token + '/assets/assets/untrusted.html', { signal: AbortSignal.timeout(20000) });
+  const htmlAssetType = htmlAssetResponse.headers.get('content-type') || '';
+  const htmlAssetCsp = htmlAssetResponse.headers.get('content-security-policy') || '';
+  if (!htmlAssetResponse.ok || !/^text\/plain/i.test(htmlAssetType) || !htmlAssetCsp.includes('sandbox') || !htmlAssetCsp.includes("script-src 'none'")) {
+    fail('Un HTML incluido como recurso debe servirse como texto y con CSP aislada.');
+  }
+  const svgAssetResponse = await fetch(base + '/preview/' + token + '/assets/assets/untrusted.svg', { signal: AbortSignal.timeout(20000) });
+  const svgAssetCsp = svgAssetResponse.headers.get('content-security-policy') || '';
+  if (!svgAssetResponse.ok || !svgAssetCsp.includes('sandbox') || !svgAssetCsp.includes("script-src 'none'")) {
+    fail('Un SVG abierto como recurso no debe ejecutarse con el origen privilegiado de la aplicación.');
+  }
+  check('preview-resource-sandbox', 'Los HTML/SVG auxiliares se aíslan para evitar XSS del origen de la aplicación.');
   const wasmResponse = await fetch(base + '/preview/' + token + '/assets/game.wasm', { signal: AbortSignal.timeout(20000) });
   if (!wasmResponse.ok || wasmResponse.headers.get('content-type') !== 'application/wasm' || wasmResponse.headers.get('access-control-allow-origin') !== '*') fail('El recurso WASM no se sirvió con MIME/CORS compatibles.');
   check('zip-local-assets', 'JavaScript y WASM locales disponibles con MIME/CORS para juegos web.');
@@ -168,6 +211,66 @@ try {
   }
   check('zip-js-entrypoint', 'ZIP sin HTML detectado y lanzador aislado generado para src/main.js.');
 
+  const adminToken = sessionToken;
+  const invitation = await json(await request('/api/admin/invites', {
+    method: 'POST', auth: true, body: JSON.stringify({ hours: 1 })
+  }), 'Creación de invitación de prueba');
+  if (!invitation.code) fail('No se generó el código de invitación para la prueba de aislamiento.');
+  const suffix = Date.now().toString(36);
+  const secondaryUsername = 'e2e-' + suffix;
+  const secondaryPassword = 'E2E-' + suffix + '-SecurePass42!';
+  const secondary = await json(await request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ invite: invitation.code, username: secondaryUsername, password: secondaryPassword })
+  }), 'Registro de cuenta aislada');
+  if (!secondary.token || secondary.user?.role !== 'user') fail('El registro mediante invitación no creó una cuenta estándar.');
+  sessionToken = secondary.token;
+
+  // Use only a fake test credential on the throwaway E2E account; always remove it.
+  const probeApiKey = 'sk-test-only-e2e-secret-1234567890';
+  await json(await request('/api/account/apis', {
+    method: 'PUT', auth: true,
+    body: JSON.stringify({ apis: [{
+      slot: 1, label: 'E2E probe', baseUrl: 'https://api.openai.com/v1',
+      models: { reasoning: 'gpt-6-sol', coding: 'gpt-6-sol', validation: 'gpt-6-luna' },
+      apiKey: probeApiKey
+    }] })
+  }), 'Guardar clave de prueba cifrada');
+  const listedApis = await json(await request('/api/account/apis', { auth: true }), 'Listar APIs de la cuenta de prueba');
+  if (!Array.isArray(listedApis.apis) || listedApis.apis.some(item =>
+      Object.hasOwn(item, 'encrypted_api_key') || Object.hasOwn(item, 'apiKey') ||
+      JSON.stringify(item).includes(probeApiKey))) {
+    fail('La API de listado expuso una credencial o su representación cifrada.');
+  }
+  const removedProbe = await json(await request('/api/account/apis/1', {
+    method: 'DELETE', auth: true, body: '{}'
+  }), 'Eliminar clave de prueba');
+  if (removedProbe.ok !== true) fail('No se pudo eliminar la API de prueba temporal.');
+  check('api-secret-not-returned', 'Una clave ficticia se guarda y se elimina sin devolverse en las respuestas de listado.');
+
+  const secondaryJobs = await json(await request('/api/jobs?status=all&limit=100', { auth: true }), 'Tareas de la segunda cuenta');
+  if ((secondaryJobs.total || 0) !== 0) fail('La cuenta recién creada no debería ver las tareas de la cuenta administradora.');
+  const crossAccountResponse = await request('/api/jobs/' + encodeURIComponent(report.taskId) + '/history', { auth: true });
+  if (crossAccountResponse.status !== 404) fail('La segunda cuenta debe recibir HTTP 404 al consultar la tarea del administrador.');
+  check('account-task-isolation', 'La segunda cuenta no lista ni abre la tarea del administrador.');
+
+  const reusedInvite = await request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      invite: invitation.code,
+      username: 'e2ereuse-' + suffix,
+      password: 'Reuse-' + suffix + '-SecurePass42!'
+    })
+  });
+  if (reusedInvite.status !== 400) fail('Una invitación ya consumida debe rechazarse con HTTP 400.');
+  check('invite-single-use', 'Una invitación consumida no permite crear otra cuenta.');
+
+  const logoutResult = await json(await request('/api/auth/logout', { method: 'POST', auth: true, body: '{}' }), 'Cierre de sesión de cuenta de prueba');
+  if (logoutResult.ok !== true) fail('El cierre de sesión no confirmó la revocación de sesión.');
+  const revokedSession = await request('/api/account', { auth: true });
+  if (revokedSession.status !== 401) fail('La sesión de prueba siguió siendo válida después del cierre.');
+  check('session-revocation', 'Cerrar sesión invalida el token inmediatamente.');
+  sessionToken = adminToken;
 
   report.finishedAt = new Date().toISOString();
   report.result = 'passed';

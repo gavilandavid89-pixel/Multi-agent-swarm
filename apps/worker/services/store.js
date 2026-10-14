@@ -194,7 +194,7 @@ export async function recoverableBudgetContinuations() {
   return rows.flatMap(row => {
     try {
       const payload = unseal(row.encrypted_payload);
-      return payload.continuedByJobId ? [] : [{ id: row.id, checkpoint: payload.lastCheckpoint || null }];
+      return payload.continuedByJobId ? [] : [{ id: row.id, checkpoint: payload.lastCheckpoint || null, userId: payload.userId || null }];
     } catch (error) {
       console.error('[worker][budget_continuation_recovery_read_failed]', JSON.stringify({ jobId: row.id, message: String(error?.message || error).slice(0, 200) }));
       return [];
@@ -202,6 +202,14 @@ export async function recoverableBudgetContinuations() {
   });
 }
 
+export async function getJobsByIds(ids) {
+  if (!Array.isArray(ids)) throw new TypeError('ids must be an array.');
+  const safeIds = [...new Set(ids.filter(id => typeof id === 'string' && id.length > 0 && id.length <= 100))].slice(0, 100);
+  if (!safeIds.length) return [];
+  const { rows } = await pool.query('SELECT * FROM jobs WHERE id = ANY($1::text[])', [safeIds]);
+  const byId = new Map(rows.map(row => [String(row.id), toPublic(row)]));
+  return safeIds.map(id => byId.get(id)).filter(Boolean);
+}
 export async function getJob(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? toPublic(rows[0]) : null;
@@ -321,7 +329,20 @@ export async function listJobs({ limit = 25, offset = 0, status = '' } = {}) {
   const countArgs = filterStatus ? [filterStatus] : [];
   const count = await pool.query(`SELECT COUNT(*)::int AS count FROM jobs${where}`, countArgs);
   const total = count.rows[0].count;
-  return { jobs: rows.map(toPublic), total, limit: safeLimit, offset: safeOffset, hasMore: safeOffset + rows.length < total, status: filterStatus || 'all' };
+  const jobs = rows.map(row => {
+    const publicJob = toPublic(row);
+    try {
+      const payload = unseal(row.encrypted_payload);
+      return {
+        ...publicJob,
+        userId: typeof payload.userId === 'string' ? payload.userId : null,
+        continuationOf: typeof payload.continuationOf === 'string' ? payload.continuationOf : null
+      };
+    } catch {
+      return { ...publicJob, userId: null, continuationOf: null };
+    }
+  });
+  return { jobs, total, limit: safeLimit, offset: safeOffset, hasMore: safeOffset + rows.length < total, status: filterStatus || 'all' };
 }
 export async function historySummary() {
   const { rows } = await pool.query('SELECT status, COUNT(*)::int AS count FROM jobs GROUP BY status');
