@@ -1,5 +1,5 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
+import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
@@ -270,7 +270,20 @@ async function runJob(jobId) {
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);
-      return { blocked: true, reason: patch.error };
+      // At the 100k ceiling, fork a durable continuation automatically. The database
+      // row lock inside createContinuationJob makes this transition idempotent.
+      const continuation = await createContinuationJob(jobId);
+      if (continuation?.error) {
+        console.error('[worker][token_batch_continuation_failed]', JSON.stringify({ jobId, status: continuation.status || null, error: continuation.error }));
+        return { blocked: true, reason: patch.error };
+      }
+      console.warn('[worker][token_batch_continuation]', JSON.stringify({
+        sourceJobId: jobId, continuationJobId: continuation.job.id,
+        created: continuation.created, tokenBudget: 100000,
+        continuationNumber: continuation.job.attempt || null,
+        checkpoint: patch.payload.lastCheckpoint
+      }));
+      return { deferred: true, retryAfterMs: 1000, continuationJobId: continuation.job.id, budgetContinuation: true };
     }
     if (error?.code === 'PROVIDER_TEMPORARY' && current) {
       const failureStreak = Math.min(20, (Number(current.payload.providerFailureStreak) || 0) + 1);
