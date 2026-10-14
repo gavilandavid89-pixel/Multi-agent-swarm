@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000, jobStatuses: new Map() };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000, jobStatuses: new Map() };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -7,12 +7,12 @@ function authHeaders(json = true) { return { ...(json ? { 'content-type': 'appli
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) } });
   const data = await response.json().catch(() => ({}));
-  if (response.status === 401) { state.accessKey = ''; sessionStorage.removeItem('swarm-access-key'); showAccess(); throw new Error(data.error || 'La clave de acceso no es válida.'); }
+  if (response.status === 401) { state.accessKey = ''; state.user = null; sessionStorage.removeItem('swarm-session-token'); showAccess(); throw new Error(data.error || 'La sesión venció.'); }
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('access-key').value = state.accessKey; }
-function showApp() { $('access-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); }
+function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; }
+function showApp() { $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -421,7 +421,8 @@ async function showDetail(id) {
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
 async function enterApp() {
-  await api('/api/access-check');
+  const access = await api('/api/access-check');
+  state.user = access.user || state.user;
   $('access-status').textContent = '';
   showApp();
   try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
@@ -432,15 +433,119 @@ async function enterApp() {
   }, 12000);
 }
 $('access-form').addEventListener('submit', async event => {
-  event.preventDefault(); state.accessKey = $('access-key').value.trim();
-  if (!state.accessKey) { $('access-status').textContent = 'Ingresá la clave de acceso.'; return; }
-  sessionStorage.setItem('swarm-access-key', state.accessKey);
+  event.preventDefault();
+  const username = $('access-username').value.trim().toLowerCase();
+  const password = $('access-key').value;
   const button = $('access-form').querySelector('button[type="submit"]'); button.disabled = true;
   $('access-status').textContent = 'Verificando acceso…';
-  try { await enterApp(); }
-  catch (error) { $('access-status').textContent = error.message; showAccess(); }
+  try {
+    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'No se pudo iniciar sesión.');
+    state.accessKey = data.token; state.user = data.user;
+    sessionStorage.setItem('swarm-session-token', state.accessKey);
+    $('access-key').value = '';
+    await enterApp();
+  } catch (error) { $('access-status').textContent = error.message; showAccess(); }
   finally { button.disabled = false; }
 });
+
+// Account menu and compact, dynamically-added API fields.
+function apiFieldRow(api = {}) {
+  const row = document.createElement('div');
+  row.className = 'api-field-row';
+  row.dataset.slot = String(api.slot || state.apiFields.length + 1);
+  row.dataset.saved = api.saved ? 'true' : 'false';
+  row.dataset.label = api.label || `API ${row.dataset.slot}`;
+  row.dataset.baseUrl = api.base_url || 'https://api.openai.com/v1';
+  row.dataset.model = api.model_reasoning || 'gpt-4o-mini';
+  const main = document.createElement('div'); main.className = 'api-field-main';
+  const label = document.createElement('label'); label.textContent = `API ${row.dataset.slot} · Clave`;
+  const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
+  input.placeholder = api.saved ? 'Clave guardada (oculta por seguridad)' : 'Pegá la clave de tu API';
+  input.setAttribute('aria-label', `Clave API ${row.dataset.slot}`);
+  main.append(label, input);
+  const meta = document.createElement('div'); meta.className = 'api-field-meta';
+  meta.textContent = api.saved ? `${api.label || 'API guardada'} · ${api.base_url || 'Proveedor configurado'}` : 'Se guardará cifrada en tu cuenta.';
+  main.append(meta);
+  const actions = document.createElement('div');
+  if (api.saved) {
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Quitar';
+    remove.addEventListener('click', async () => {
+      if (!confirm(`¿Quitar la API ${row.dataset.slot} de tu cuenta? Esta acción no se puede deshacer.`)) return;
+      try { await apiCallDelete(row.dataset.slot); await loadApiSettings(); $('api-settings-status').textContent = 'API eliminada de tu cuenta.'; }
+      catch (error) { $('api-settings-status').textContent = error.message; }
+    });
+    actions.append(remove);
+  } else if (Number(row.dataset.slot) > 1) {
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Quitar campo'; remove.addEventListener('click', () => { row.remove(); updateAddApiButton(); });
+    actions.append(remove);
+  }
+  row.append(main, actions); return row;
+}
+async function apiCallDelete(slot) { return api(`/api/account/apis/${encodeURIComponent(slot)}`, { method: 'DELETE' }); }
+function updateAddApiButton() {
+  const count = $('api-fields').children.length;
+  $('add-api-field').disabled = count >= 10;
+  $('add-api-field').textContent = count >= 10 ? 'Límite de 10 APIs alcanzado' : '＋ Añadir otra API';
+}
+async function loadApiSettings() {
+  const data = await api('/api/account/apis');
+  const existing = (data.apis || []).map(item => ({ ...item, saved: true }));
+  state.apiFields = existing;
+  $('api-fields').replaceChildren();
+  const rows = existing.length ? existing : [{ slot: 1, saved: false }];
+  rows.forEach(item => $('api-fields').append(apiFieldRow(item)));
+  updateAddApiButton();
+  $('api-settings-status').textContent = existing.length ? `${existing.length} API(s) guardada(s). Las claves se mantienen ocultas.` : 'Todavía no hay APIs guardadas. Podés probar con una sola.';
+}
+$('account-menu-toggle').addEventListener('click', () => $('account-menu-items').classList.toggle('hidden'));
+$('open-api-settings').addEventListener('click', async () => {
+  $('account-menu-items').classList.add('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.remove('hidden');
+  $('api-settings-status').textContent = 'Cargando tus APIs…';
+  try { await loadApiSettings(); } catch (error) { $('api-settings-status').textContent = error.message; }
+});
+$('back-to-app').addEventListener('click', () => { $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); });
+$('add-api-field').addEventListener('click', () => {
+  const rows = $('api-fields').children;
+  if (rows.length >= 10) return;
+  const used = new Set(Array.from(rows, row => Number(row.dataset.slot)));
+  let slot = 1; while (used.has(slot) && slot <= 10) slot++;
+  if (slot <= 10) $('api-fields').append(apiFieldRow({ slot, saved: false }));
+  updateAddApiButton();
+});
+$('save-api-settings').addEventListener('click', async () => {
+  const button = $('save-api-settings'); button.disabled = true; $('api-settings-status').textContent = 'Guardando claves cifradas…';
+  try {
+    const apis = Array.from($('api-fields').children).map(row => ({
+      slot: Number(row.dataset.slot), label: row.dataset.label || `API ${row.dataset.slot}`,
+      baseUrl: row.dataset.baseUrl || 'https://api.openai.com/v1', model: row.dataset.model || 'gpt-4o-mini',
+      apiKey: row.querySelector('input').value.trim()
+    })).filter(item => item.apiKey);
+    await api('/api/account/apis', { method: 'PUT', body: JSON.stringify({ apis }) });
+    await loadApiSettings(); $('api-settings-status').textContent = 'Cambios guardados. Las claves permanecen cifradas y ocultas.';
+  } catch (error) { $('api-settings-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('logout-button').addEventListener('click', async () => {
+  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
+  state.accessKey = ''; state.user = null; sessionStorage.removeItem('swarm-session-token'); showAccess();
+});
+$('create-invite').addEventListener('click', async () => {
+  const button = $('create-invite'); button.disabled = true; $('invite-status').textContent = 'Creando invitación de un solo uso…';
+  try {
+    const data = await api('/api/admin/invites', { method: 'POST', body: JSON.stringify({ hours: 72 }) });
+    const url = `${location.origin}/?invite=${encodeURIComponent(data.code)}`;
+    $('invite-result').classList.remove('hidden'); $('invite-result').replaceChildren();
+    const note = document.createElement('p'); note.textContent = 'Compartí este enlace con tu amigo. Caduca en 72 horas y solo puede usarse una vez.';
+    const link = document.createElement('a'); link.href = url; link.textContent = url; link.className = 'invite-code';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'button button-secondary'; copy.textContent = 'Copiar invitación';
+    copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(url); $('invite-status').textContent = 'Invitación copiada.'; } catch { $('invite-status').textContent = 'Seleccioná y copiá el enlace mostrado.'; } });
+    $('invite-result').append(note, link, copy); $('invite-status').textContent = 'Invitación creada.';
+  } catch (error) { $('invite-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
