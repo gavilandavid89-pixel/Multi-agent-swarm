@@ -10,7 +10,7 @@ export function parseImprovementVote(value) {
     .replace(/^\s*(?:JUSTIFICACIÓN|JUSTIFICACION)\s*[:：-]\s*/im, '')
     .trim()
     .slice(0, 1800);
-  return { vote, rationale: rationale || (match ? 'El agente no proporcionó argumentos adicionales.' : 'El agente no entregó un voto en el formato esperado.') };
+  return { vote, validFormat: Boolean(match), rationale: rationale || (match ? 'El agente no proporcionó argumentos adicionales.' : 'El agente no entregó un voto en el formato esperado.') };
 }
 
 export function summarizeImprovementVotes(votes = []) {
@@ -29,7 +29,7 @@ export function summarizeImprovementVotes(votes = []) {
     outcome = 'MAYORIA_EN_CONTRA';
     summary = 'La mayoría desaconseja aplicar la mejora tal como está planteada. Revisá los riesgos o reformulá la propuesta.';
   }
-  const answered = (Array.isArray(votes) ? votes : []).filter(item => item?.error == null && item?.responseReceived !== false).length;
+  const answered = (Array.isArray(votes) ? votes : []).filter(item => item?.error == null && item?.responseReceived === true).length;
   const total = Array.isArray(votes) ? votes.length : 0;
   return { tally, outcome: answered === 0 ? 'SIN_VOTOS_VALIDOS' : outcome, summary: answered === 0 ? 'No se obtuvieron votos válidos del proveedor. Revisá la configuración y volvé a intentarlo.' : summary, answered, total };
 }
