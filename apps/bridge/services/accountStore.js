@@ -118,6 +118,7 @@ export async function saveApiKeys(userId, entries) {
       seen.add(slot);
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
       if (apiKey.length > 4096) throw new Error('La clave API supera el tamaño máximo permitido.');
+      if (/[\u0000-\u001f\u007f]/.test(apiKey)) throw new Error('La clave API contiene caracteres no permitidos.');
       const previous = bySlot.get(slot);
       let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
       const suppliedModels = item.models && typeof item.models === 'object' ? item.models : {};
