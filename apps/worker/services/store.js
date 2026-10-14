@@ -2,7 +2,7 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import { applyTokenUsage, prepareContinuationPayload } from './tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -154,7 +154,7 @@ export async function createContinuationJob(sourceId) {
       }
     }
 
-    if (source.status !== 'needs_review' || !/presupuesto|tokens/i.test(String(source.stage || ''))) {
+    if (!isBudgetPausedJob(source)) {
       await client.query('ROLLBACK');
       return { error: 'Solo se puede abrir una nueva tanda cuando la tarea está pausada por presupuesto de tokens.', status: 409 };
     }
