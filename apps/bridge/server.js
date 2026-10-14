@@ -231,6 +231,21 @@ function limitJobCreation(req, res, next) {
   }
   next();
 }
+function limitPreviewUpload(req, res, next) {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const userLimit = windowLimit(previewUploadWindows, String(req.user?.id || ip), 10, 10 * 60 * 1000);
+  if (!userLimit.allowed) {
+    res.set('Retry-After', String(userLimit.retryAfter));
+    return res.status(429).json({ error: 'Alcanzaste el límite temporal de vistas previas ZIP. Probá más tarde.' });
+  }
+  const ipLimit = windowLimit(previewUploadIpWindows, ip, 30, 10 * 60 * 1000);
+  if (!ipLimit.allowed) {
+    res.set('Retry-After', String(ipLimit.retryAfter));
+    return res.status(429).json({ error: 'Se alcanzó el límite temporal de cargas ZIP desde esta conexión. Probá más tarde.' });
+  }
+  next();
+}
+
 function safeEqual(a, b) {
   const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b));
   return aa.length === bb.length && aa.length > 0 && timingSafeEqual(aa, bb);
@@ -450,18 +465,7 @@ async function previewFile(session, index) {
   if (!result.file || (typeof result.file.content !== 'string' && !Buffer.isBuffer(result.file.content))) { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
   return { item, file: result.file, files };
 }
-app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const userLimit = windowLimit(previewUploadWindows, String(req.user?.id || ip), 10, 10 * 60 * 1000);
-  if (!userLimit.allowed) {
-    res.set('Retry-After', String(userLimit.retryAfter));
-    return res.status(429).json({ error: 'Alcanzaste el límite temporal de vistas previas ZIP. Probá más tarde.' });
-  }
-  const ipLimit = windowLimit(previewUploadIpWindows, ip, 30, 10 * 60 * 1000);
-  if (!ipLimit.allowed) {
-    res.set('Retry-After', String(ipLimit.retryAfter));
-    return res.status(429).json({ error: 'Se alcanzó el límite temporal de cargas ZIP desde esta conexión. Probá más tarde.' });
-  }
+app.post('/api/preview-zip', limitPreviewUpload, express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
   try {
     const parsed = parsePreviewZip(req.body);
