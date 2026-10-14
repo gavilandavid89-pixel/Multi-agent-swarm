@@ -33,7 +33,7 @@ function isFailoverEligible(error) {
 
 function providerModelForSlot(provider, requestedModel, maxTokens) {
   const slot = Number(maxTokens) >= 5000 ? 'coding' : (/20b|validation/i.test(String(requestedModel)) ? 'validation' : 'reasoning');
-  return String(provider.models?.[slot] || provider.model || requestedModel || '').trim();
+  return String(provider.models?.[slot] || provider.model || '').trim();
 }
 
 export function configuredOpenAIProviders(requestedModel, maxTokens, env = process.env) {
@@ -231,8 +231,8 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
-const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
-const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
+const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
+const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
 const validationModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b');
 function boundContext(value, maxChars, label) {
   const text = String(value ?? '');
