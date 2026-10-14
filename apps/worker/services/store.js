@@ -133,6 +133,101 @@ export async function createJob(objective, requestedTokenBudget) {
   await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
   return toPublic(row);
 }
+/**
+ * Fork a budget-paused task into a fresh 100k-token batch while preserving its encrypted
+ * checkpoint, source artifacts and agent decisions. The source row lock makes the action idempotent.
+ */
+export async function createContinuationJob(sourceId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [sourceId]);
+    const source = rows[0];
+    if (!source) { await client.query('ROLLBACK'); return { error: 'No existe esa tarea.', status: 404 }; }
+    const sourcePayload = unseal(source.encrypted_payload);
+
+    if (sourcePayload.continuedByJobId) {
+      const { rows: existingRows } = await client.query('SELECT * FROM jobs WHERE id=$1', [sourcePayload.continuedByJobId]);
+      if (existingRows[0]) {
+        await client.query('COMMIT');
+        return { job: toPublic(existingRows[0]), created: false };
+      }
+    }
+
+    if (source.status !== 'needs_review' || !/presupuesto|tokens/i.test(String(source.stage || ''))) {
+      await client.query('ROLLBACK');
+      return { error: 'Solo se puede abrir una nueva tanda cuando la tarea está pausada por presupuesto de tokens.', status: 409 };
+    }
+
+    const closedAt = now();
+    const currentUsage = sourcePayload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
+    const previousBatches = Array.isArray(sourcePayload.tokenBatchHistory) ? sourcePayload.tokenBatchHistory : [];
+    const batchNumber = previousBatches.length + 2;
+    const batchSnapshot = {
+      jobId: source.id,
+      batchNumber: batchNumber - 1,
+      tokenBudget: Number(sourcePayload.tokenBudget) || 50000,
+      tokenUsage: {
+        promptTokens: Number(currentUsage.promptTokens) || 0,
+        completionTokens: Number(currentUsage.completionTokens) || 0,
+        totalTokens: Number(currentUsage.totalTokens) || 0,
+        calls: Number(currentUsage.calls) || 0,
+        wastedTokens: Number(currentUsage.wastedTokens) || 0
+      },
+      lastCheckpoint: sourcePayload.lastCheckpoint || null,
+      stage: source.stage,
+      closedAt
+    };
+    const transcript = [...(Array.isArray(sourcePayload.transcript) ? sourcePayload.transcript : [])];
+    transcript.push({
+      at: closedAt,
+      agent: 'sistema',
+      type: 'budget',
+      content: 'Se abrió una nueva tanda de 100.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
+    });
+
+    const payload = {
+      ...sourcePayload,
+      tokenBudget: 100000,
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
+      usageEventIds: [],
+      tokenBatchHistory: [...previousBatches, batchSnapshot].slice(-50),
+      continuationOf: source.id,
+      continuationNumber: batchNumber,
+      continuedByJobId: null,
+      retryAt: null,
+      providerBlock: null,
+      providerFailureStreak: 0,
+      result: null,
+      activeStage: null,
+      transcript: transcript.slice(-150)
+    };
+    const timestamp = closedAt;
+    const childId = randomUUID();
+    const childRow = {
+      id: childId, status: 'queued', stage: 'Nueva tanda · recuperando checkpoint',
+      progress: Math.min(Number(source.progress) || 0, 90),
+      attempt: Number(source.attempt) || 0,
+      created_at: timestamp, updated_at: timestamp, error: null,
+      encrypted_payload: seal(payload)
+    };
+    await client.query(
+      'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [childRow.id,childRow.status,childRow.stage,childRow.progress,childRow.attempt,childRow.created_at,childRow.updated_at,childRow.error,childRow.encrypted_payload]
+    );
+    sourcePayload.continuedByJobId = childId;
+    sourcePayload.continuedAt = timestamp;
+    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [sourceId, timestamp, seal(sourcePayload)]);
+    await client.query('COMMIT');
+    return { job: toPublic(childRow), created: true };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getJob(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? toPublic(rows[0]) : null;
