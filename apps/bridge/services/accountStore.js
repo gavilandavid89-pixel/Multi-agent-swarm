@@ -161,7 +161,7 @@ export async function saveApiKeys(userId, entries) {
       let parsedUrl;
       try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL del proveedor de la API ${slot} no es válida.`); }
       const hostname = parsedUrl.hostname.toLowerCase();
-      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(hostname) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
+      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(hostname) || (parsedUrl.port && parsedUrl.port !== '443') || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
         throw new Error(`El proveedor de la API ${slot} no está permitido por la política de seguridad.`);
       }
       const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
@@ -172,7 +172,10 @@ export async function saveApiKeys(userId, entries) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
       const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
-      const label = String(item.label || defaultLabel).trim().slice(0,80) || defaultLabel;
+      const label = defaultLabel;
+      if (/^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelReasoning) || /^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelCoding) || /^(?:sk-|sk-or-v1-|gsk_|AIza)[A-Za-z0-9_-]{8,}/i.test(modelValidation)) {
+        throw new Error('El campo modelo no puede contener una clave API.');
+      }
       modelReasoning = modelReasoning || defaultReasoning;
       modelCoding = modelCoding || defaultCoding;
       modelValidation = modelValidation || defaultValidation;
