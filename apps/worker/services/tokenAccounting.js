@@ -74,3 +74,51 @@ export function applyTokenUsage(currentValue, info = {}, { eventIds = [], status
     event: { usageId: usageId || null, model, agent, stage, interaction, promptTokens, completionTokens, totalTokens, statusAtResponse: status, countedAsWaste }
   };
 }
+
+/**
+ * Prepare a fresh budget batch without losing checkpoint data or source artifacts.
+ * Usage counters reset per batch; prior batches remain visible for cumulative accounting.
+ */
+export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, timestamp = new Date().toISOString()) {
+  const currentUsage = sourcePayload.tokenUsage || {};
+  const previousBatches = Array.isArray(sourcePayload.tokenBatchHistory) ? sourcePayload.tokenBatchHistory : [];
+  const continuationNumber = previousBatches.length + 2;
+  const batchSnapshot = {
+    jobId: String(sourceJob.id || ''),
+    batchNumber: continuationNumber - 1,
+    tokenBudget: Math.max(0, Number(sourcePayload.tokenBudget) || 50000),
+    tokenUsage: {
+      promptTokens: number(currentUsage.promptTokens),
+      completionTokens: number(currentUsage.completionTokens),
+      totalTokens: number(currentUsage.totalTokens),
+      calls: number(currentUsage.calls),
+      wastedTokens: number(currentUsage.wastedTokens)
+    },
+    lastCheckpoint: sourcePayload.lastCheckpoint || null,
+    stage: String(sourceJob.stage || ''),
+    closedAt: timestamp
+  };
+  const transcript = [...(Array.isArray(sourcePayload.transcript) ? sourcePayload.transcript : [])];
+  transcript.push({
+    at: timestamp,
+    agent: 'sistema',
+    type: 'budget',
+    content: 'Se abrió una nueva tanda de 100.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
+  });
+  return {
+    ...sourcePayload,
+    tokenBudget: 100000,
+    tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
+    usageEventIds: [],
+    tokenBatchHistory: [...previousBatches, batchSnapshot].slice(-50),
+    continuationOf: String(sourceJob.id || ''),
+    continuationNumber,
+    continuedByJobId: null,
+    retryAt: null,
+    providerBlock: null,
+    providerFailureStreak: 0,
+    result: null,
+    activeStage: null,
+    transcript: transcript.slice(-150)
+  };
+}

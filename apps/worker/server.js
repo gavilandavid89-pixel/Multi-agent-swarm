@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 
@@ -67,6 +67,15 @@ app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
   }
   res.json({ tokenBudget: nextBudget }); } catch (error) { next(error); }
 });
+app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
+  try {
+    const result = await createContinuationJob(req.params.id);
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    enqueue(result.job.id);
+    console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 100000 }));
+    res.status(202).json(result.job);
+  } catch (error) { next(error); }
+});
 app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
@@ -101,7 +110,10 @@ app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   const tokenBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
   const tokenUsage = record.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
   const tokensUsed = Math.max(0, Number(tokenUsage.totalTokens) || 0);
-  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, artifacts: await listArtifacts(req.params.id) });
+  const tokenBatchHistory = Array.isArray(record.payload.tokenBatchHistory) ? record.payload.tokenBatchHistory : [];
+  const priorTokensUsed = tokenBatchHistory.reduce((sum, batch) => sum + (Number(batch?.tokenUsage?.totalTokens) || 0), 0);
+  const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
+  res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: budgetPaused && !record.payload.continuedByJobId, continuedByJobId: record.payload.continuedByJobId || null, artifacts: await listArtifacts(req.params.id) });
 } catch (error) { next(error); } });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
 function maybeExit() { if (shuttingDown && active.size === 0) { try { server?.close(); } catch {} void closeStore().catch(error => console.error('[worker] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0)); } }

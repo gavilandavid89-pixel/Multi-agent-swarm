@@ -18,10 +18,17 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
+export function estimateInputTokens(messages) {
+  const characters = (Array.isArray(messages) ? messages : []).reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
+  // Conservative estimate for Spanish and source code; provider-reported usage remains authoritative.
+  return Math.ceil(characters / 2.5) + (Array.isArray(messages) ? messages.length * 8 : 0);
+}
+
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
+  const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
-    const allowance = Number(await onRetry.getMaxOutputTokens(requestedOutputTokens));
+    const allowance = Number(await onRetry.getMaxOutputTokens(requestedOutputTokens, estimatedInputTokens));
     if (!Number.isFinite(allowance) || allowance < 256) {
       const error = new Error('Presupuesto de tokens insuficiente para iniciar otra llamada. El checkpoint se conserva para reanudar cuando se amplíe el límite.');
       error.code = 'TASK_TOKEN_BUDGET';
@@ -51,6 +58,12 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
   let safeMaxTokens = Math.min(maxSafeOutputTokens, requestedMaxTokens);
   while (true) {
+    const currentInputEstimate = estimateInputTokens(requestMessages);
+    if (typeof onRetry.getMaxOutputTokens === 'function') {
+      const allowedNow = Number(await onRetry.getMaxOutputTokens(safeMaxTokens, currentInputEstimate));
+      if (!Number.isFinite(allowedNow) || allowedNow < 256) { const error = new Error('Presupuesto insuficiente para la entrada y salida estimadas de esta llamada; se conserva el checkpoint.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+      safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowedNow));
+    }
     const usageId = randomUUID();
     let response;
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
@@ -76,7 +89,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       await onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        const allowance = await canContinue(safeMaxTokens);
+        const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
         if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
         if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;

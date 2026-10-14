@@ -24,6 +24,11 @@ function retryDelay(retry, retryAfter, bodyText = '') {
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 
+function estimateInputTokens(messages) {
+  const characters = (Array.isArray(messages) ? messages : []).reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
+  return Math.ceil(characters / 2.5) + (Array.isArray(messages) ? messages.length * 8 : 0);
+}
+
 function toGeminiContents(messages) {
   const contents = [];
   const systemParts = [];
@@ -143,7 +148,7 @@ export async function consultarGemini({
 
       const truncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        const allowance = await canContinue(safeMaxTokens);
+        const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
         if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
           const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
           error.code = 'TASK_TOKEN_BUDGET';

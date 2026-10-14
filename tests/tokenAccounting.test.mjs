@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
@@ -50,4 +50,40 @@ test('cuenta llamadas sin usage de tokens reportado sin inventar consumo', () =>
   assert.equal(result.usage.calls, 1);
   assert.equal(result.usage.totalTokens, 0);
   assert.equal(result.usage.unreportedCalls, 1);
+});
+
+
+test('una nueva tanda de 100k conserva contexto y archivos pero reinicia el contador de tanda', () => {
+  const timestamp = '2026-10-14T01:00:00.000Z';
+  const source = {
+    objective: 'Construir una app',
+    tokenBudget: 50000,
+    tokenUsage: { promptTokens: 30000, completionTokens: 20000, totalTokens: 50000, calls: 12, wastedTokens: 100 },
+    usageEventIds: ['old-event'],
+    proposal: 'decisiones de arquitectura',
+    critique: 'riesgos',
+    strategy: 'plan aprobado',
+    coherence: 'contratos entre archivos',
+    delivery: '### Archivo: src/app.js\\n```js\\nconst ok = true;\\n```',
+    partialDelivery: '',
+    artifacts: [{ path: 'src/app.js', content: 'const ok = true;' }],
+    lastCheckpoint: 'validation-1',
+    validationRound: 1,
+    transcript: [{ agent: 'Arquitecto', type: 'message', content: 'decisión guardada' }]
+  };
+  const next = prepareContinuationPayload(source, { id: 'old-job', stage: 'Pausada por presupuesto de tokens' }, timestamp);
+  assert.equal(next.tokenBudget, 100000);
+  assert.equal(next.tokenUsage.totalTokens, 0);
+  assert.equal(next.tokenUsage.calls, 0);
+  assert.deepEqual(next.usageEventIds, []);
+  assert.equal(next.continuationOf, 'old-job');
+  assert.equal(next.continuationNumber, 2);
+  assert.equal(next.lastCheckpoint, 'validation-1');
+  assert.equal(next.delivery, source.delivery);
+  assert.deepEqual(next.artifacts, source.artifacts);
+  assert.equal(next.strategy, source.strategy);
+  assert.equal(next.tokenBatchHistory.length, 1);
+  assert.equal(next.tokenBatchHistory[0].tokenUsage.totalTokens, 50000);
+  assert.equal(next.tokenBatchHistory[0].tokenUsage.wastedTokens, 100);
+  assert.ok(next.transcript.some(item => /nueva tanda de 100.000/.test(item.content)));
 });

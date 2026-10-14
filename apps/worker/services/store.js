@@ -2,7 +2,7 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import { applyTokenUsage } from './tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload } from './tokenAccounting.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -133,6 +133,61 @@ export async function createJob(objective, requestedTokenBudget) {
   await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
   return toPublic(row);
 }
+/**
+ * Fork a budget-paused task into a fresh 100k-token batch while preserving its encrypted
+ * checkpoint, source artifacts and agent decisions. The source row lock makes the action idempotent.
+ */
+export async function createContinuationJob(sourceId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [sourceId]);
+    const source = rows[0];
+    if (!source) { await client.query('ROLLBACK'); return { error: 'No existe esa tarea.', status: 404 }; }
+    const sourcePayload = unseal(source.encrypted_payload);
+
+    if (sourcePayload.continuedByJobId) {
+      const { rows: existingRows } = await client.query('SELECT * FROM jobs WHERE id=$1', [sourcePayload.continuedByJobId]);
+      if (existingRows[0]) {
+        await client.query('COMMIT');
+        return { job: toPublic(existingRows[0]), created: false };
+      }
+    }
+
+    if (source.status !== 'needs_review' || !/presupuesto|tokens/i.test(String(source.stage || ''))) {
+      await client.query('ROLLBACK');
+      return { error: 'Solo se puede abrir una nueva tanda cuando la tarea está pausada por presupuesto de tokens.', status: 409 };
+    }
+
+    const closedAt = now();
+    const payload = prepareContinuationPayload(sourcePayload, { id: source.id, stage: source.stage }, closedAt);
+
+    const timestamp = closedAt;
+    const childId = randomUUID();
+    const childRow = {
+      id: childId, status: 'queued', stage: 'Nueva tanda · recuperando checkpoint',
+      progress: Math.min(Number(source.progress) || 0, 90),
+      attempt: Number(source.attempt) || 0,
+      created_at: timestamp, updated_at: timestamp, error: null,
+      encrypted_payload: seal(payload)
+    };
+    await client.query(
+      'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [childRow.id,childRow.status,childRow.stage,childRow.progress,childRow.attempt,childRow.created_at,childRow.updated_at,childRow.error,childRow.encrypted_payload]
+    );
+    sourcePayload.continuedByJobId = childId;
+    sourcePayload.continuedAt = timestamp;
+    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [sourceId, timestamp, seal(sourcePayload)]);
+    await client.query('COMMIT');
+    return { job: toPublic(childRow), created: true };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getJob(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? toPublic(rows[0]) : null;
