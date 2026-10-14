@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders } from './services/userProviders.js';
+import { withUserProviders, importLegacyProvidersForUser } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -40,6 +40,12 @@ function pump() {
     }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
+app.post('/internal/admin/import-legacy-apis', async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : '';
+  if (!userId) return res.status(400).json({ error: 'Cuenta de administrador inválida.' });
+  try { res.json({ imported: await importLegacyProvidersForUser(userId) }); }
+  catch (error) { console.error('[worker][legacy_api_import_failed]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudieron migrar las APIs heredadas.' }); }
+});
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
 app.get('/internal/jobs', async (req, res, next) => {
   const requestedStatus = String(req.query.status || '');
