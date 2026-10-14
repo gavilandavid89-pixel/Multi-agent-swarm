@@ -11,12 +11,12 @@ export async function replyToAgent(jobId, requestedAgent, message) {
   if (!agent) throw Object.assign(new Error('Elegí un agente válido.'), { status: 400 });
   if (!text) throw Object.assign(new Error('Escribí un mensaje para el agente.'), { status: 400 });
   if (text.length > 6000) throw Object.assign(new Error('El mensaje supera los 6.000 caracteres.'), { status: 413 });
-  const record = getPayload(jobId);
+  const record = await getPayload(jobId);
   if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
   const payload = record.payload;
   const now = () => new Date().toISOString();
   const userEntry = { at: now(), agent: 'Usuario', type: 'message', content: text };
-  updateJob(jobId, { payload: { transcript: append(payload.transcript, userEntry) } });
+  await updateJob(jobId, { payload: { transcript: append(payload.transcript, userEntry) } });
 
   const context = [
     `OBJETIVO ORIGINAL:\n${clip(payload.objective, 1800)}`,
@@ -36,10 +36,10 @@ export async function replyToAgent(jobId, requestedAgent, message) {
     Validador: 'Validador independiente: evaluá los hallazgos y separá errores demostrados de sospechas. No apruebes algo que no inspeccionaste.',
     'Coordinador de coherencia': 'Coordinador de coherencia: explicá los contratos entre archivos, dependencias y posibles incompatibilidades del mapa compartido. No afirmes que aplicaste cambios; indicá qué agente y qué archivo deberían cambiarse.'
   }[agent];
-  const current = getPayload(jobId)?.payload || payload;
+  const current = (await getPayload(jobId))?.payload || payload;
   const prior = current.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
-  const onRetry = info => {
-    const fresh = getPayload(jobId);
+  const onRetry = async info => {
+    const fresh = await getPayload(jobId);
     if (!fresh) return;
     const p = fresh.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
     if (info.usage) {
@@ -51,10 +51,10 @@ export async function replyToAgent(jobId, requestedAgent, message) {
       const byModel = { ...(p.byModel || {}), [model]: { promptTokens: modelPrior.promptTokens + promptTokens, completionTokens: modelPrior.completionTokens + completionTokens, totalTokens: modelPrior.totalTokens + totalTokens, calls: modelPrior.calls + 1 } };
       const tokenUsage = { promptTokens: p.promptTokens + promptTokens, completionTokens: p.completionTokens + completionTokens, totalTokens: p.totalTokens + totalTokens, calls: p.calls + 1, byModel };
       const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens, completionTokens, totalTokens }) });
-      updateJob(jobId, { payload: { tokenUsage, transcript } });
+      await updateJob(jobId, { payload: { tokenUsage, transcript } });
     } else {
       const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'retry', content: `Chat directo · reintento ${info.retry}; espera ${Math.ceil((info.wait || 0) / 1000)} s; motivo: ${clip(info.reason, 180)}` });
-      updateJob(jobId, { payload: { transcript } });
+      await updateJob(jobId, { payload: { transcript } });
     }
   };
   const geminiEnabled = Boolean(process.env.GEMINI_API_KEY);
@@ -68,10 +68,10 @@ export async function replyToAgent(jobId, requestedAgent, message) {
       { role: 'user', content: context }
     ]
   });
-  const fresh = getPayload(jobId);
+  const fresh = await getPayload(jobId);
   if (fresh) {
     const transcript = append(fresh.payload.transcript, { at: now(), agent, type: 'message', content: clip(response, 12000) });
-    updateJob(jobId, { payload: { transcript } });
+    await updateJob(jobId, { payload: { transcript } });
   }
   return { ok: true, taskId: jobId, agent, response };
 }

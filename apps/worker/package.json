@@ -1,6 +1,19 @@
 {
-  "name": "swarm-worker", "version": "1.2.1", "private": true, "type": "module",
-  "scripts": { "start": "node server.js", "check": "node --check server.js" },
-  "engines": { "node": ">=20" },
-  "dependencies": { "better-sqlite3": "^11.8.1", "dotenv": "^16.4.7", "express": "^4.21.2" }
+  "name": "swarm-worker",
+  "version": "1.2.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && find services -name '*.js' -print0 | xargs -0 -n1 node --check"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
 }

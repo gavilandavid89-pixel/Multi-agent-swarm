@@ -36,5 +36,7 @@ services:
         sync: false
       - key: HISTORY_ENCRYPTION_KEY
         sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: DATABASE_PATH
         value: ./data/swarm.sqlite
