@@ -48,14 +48,14 @@ app.post('/api/auth/login', async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512) return res.status(400).json({ error: 'Ingresá usuario y contraseña válidos.' });
   try {
-    let { rows } = await pool.query('SELECT id,username,password_hash,role FROM app_users WHERE username=$1 AND disabled_at IS NULL', [username]);
+    let { rows } = await pool.query('SELECT id,username,password_hash,role,created_at FROM app_users WHERE username=$1 AND disabled_at IS NULL', [username]);
     let user = rows[0];
     if (!user) {
       const count = await pool.query('SELECT count(*)::int AS total FROM app_users');
       if (count.rows[0].total !== 0 || username !== 'admin' || !APP_ACCESS_KEY || !safeEqual(password, APP_ACCESS_KEY)) {
         return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
       }
-      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role", [hashPassword(password)]);
+      const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role,created_at", [hashPassword(password)]);
       user = created.rows[0];
 
     } else if (!verifyPassword(password, user.password_hash)) {
@@ -67,15 +67,43 @@ app.post('/api/auth/login', async (req, res) => {
         console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
       } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
       try {
+        // Only jobs that predate the first administrator are legacy. Later jobs
+        // belong to the userId stored in their encrypted payload, or inherit the
+        // owner of their continuation parent. Never claim an unlinked new job as admin.
+        const cutoffMs = new Date(user.created_at).getTime();
+        const legacyJobs = [];
         let offset = 0; let total = 0;
         do {
-          const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
-          const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
-          total = Number(legacy?.total) || jobs.length;
-          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+          const page = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+          const jobs = Array.isArray(page) ? page : (Array.isArray(page?.jobs) ? page.jobs : []);
+          total = Number(page?.total) || jobs.length;
+          legacyJobs.push(...jobs);
           offset += jobs.length;
           if (!jobs.length) break;
         } while (offset < total);
+        legacyJobs.sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+        const ids = legacyJobs.filter(job => job?.id).map(job => String(job.id));
+        const existing = ids.length
+          ? await pool.query('SELECT job_id,user_id FROM user_job_ownership WHERE job_id = ANY($1::text[])', [ids])
+          : { rows: [] };
+        const owners = new Map(existing.rows.map(row => [String(row.job_id), String(row.user_id)]));
+        const knownUsers = await pool.query('SELECT id FROM app_users WHERE disabled_at IS NULL');
+        const knownUserIds = new Set(knownUsers.rows.map(row => String(row.id)));
+        let assigned = 0;
+        for (const job of legacyJobs) {
+          if (!job?.id) continue;
+          const jobId = String(job.id);
+          if (owners.has(jobId)) continue;
+          let ownerId = job.userId && knownUserIds.has(String(job.userId)) ? String(job.userId) : null;
+          if (!ownerId && job.continuationOf) ownerId = owners.get(String(job.continuationOf)) || null;
+          const createdMs = Date.parse(job.createdAt || '');
+          if (!ownerId && Number.isFinite(cutoffMs) && Number.isFinite(createdMs) && createdMs < cutoffMs) ownerId = user.id;
+          if (!ownerId) continue;
+          await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, ownerId]);
+          owners.set(jobId, ownerId);
+          assigned++;
+        }
+        console.info('[bridge][legacy_job_migration]', JSON.stringify({ scanned: legacyJobs.length, assigned }));
       } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
     }
     failedAuth.delete(ip);
