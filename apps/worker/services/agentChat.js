@@ -51,10 +51,10 @@ export async function replyToAgent(jobId, requestedAgent, message) {
       const byModel = { ...(p.byModel || {}), [model]: { promptTokens: modelPrior.promptTokens + promptTokens, completionTokens: modelPrior.completionTokens + completionTokens, totalTokens: modelPrior.totalTokens + totalTokens, calls: modelPrior.calls + 1 } };
       const tokenUsage = { promptTokens: p.promptTokens + promptTokens, completionTokens: p.completionTokens + completionTokens, totalTokens: p.totalTokens + totalTokens, calls: p.calls + 1, byModel };
       const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens, completionTokens, totalTokens }) });
-      updateJob(jobId, { payload: { tokenUsage, transcript } });
+      await updateJob(jobId, { payload: { tokenUsage, transcript } });
     } else {
       const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'retry', content: `Chat directo · reintento ${info.retry}; espera ${Math.ceil((info.wait || 0) / 1000)} s; motivo: ${clip(info.reason, 180)}` });
-      updateJob(jobId, { payload: { transcript } });
+      await updateJob(jobId, { payload: { transcript } });
     }
   };
   const geminiEnabled = Boolean(process.env.GEMINI_API_KEY);
@@ -71,7 +71,7 @@ export async function replyToAgent(jobId, requestedAgent, message) {
   const fresh = await getPayload(jobId);
   if (fresh) {
     const transcript = append(fresh.payload.transcript, { at: now(), agent, type: 'message', content: clip(response, 12000) });
-    updateJob(jobId, { payload: { transcript } });
+    await updateJob(jobId, { payload: { transcript } });
   }
   return { ok: true, taskId: jobId, agent, response };
 }
