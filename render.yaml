@@ -15,6 +15,10 @@ services:
         sync: false
       - key: APP_ACCESS_KEY
         sync: false
+      - key: SWARM_DATABASE_URL
+        sync: false
+      - key: SWARM_API_ENCRYPTION_KEY
+        sync: false
 
   - type: web
     name: swarm-worker
@@ -39,6 +43,10 @@ services:
       - key: HISTORY_ENCRYPTION_KEY
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: SWARM_DATABASE_URL
+        sync: false
+      - key: SWARM_API_ENCRYPTION_KEY
         sync: false
       - key: DATABASE_PATH
         value: ./data/swarm.sqlite
