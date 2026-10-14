@@ -118,16 +118,16 @@ export async function saveApiKeys(userId, entries) {
   const client = await pool.connect();
   const allowedHosts = new Set(['api.openai.com','api.groq.com','openrouter.ai','generativelanguage.googleapis.com','api.together.xyz','api.deepseek.com','api.mistral.ai','api.fireworks.ai','api.perplexity.ai','api.cohere.com']);
   const defaults = {
-    'api.openai.com': ['OpenAI', 'gpt-4o-mini'],
-    'api.groq.com': ['Groq', 'openai/gpt-oss-120b'],
-    'openrouter.ai': ['OpenRouter', 'openai/gpt-4o-mini'],
-    'generativelanguage.googleapis.com': ['Gemini', 'gemini-3.8-flash'],
-    'api.together.xyz': ['Together AI', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
-    'api.deepseek.com': ['DeepSeek', 'deepseek-chat'],
-    'api.mistral.ai': ['Mistral AI', 'mistral-small-latest'],
-    'api.fireworks.ai': ['Fireworks AI', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],
-    'api.perplexity.ai': ['Perplexity', 'sonar'],
-    'api.cohere.com': ['Cohere', 'command-a-03-2025']
+    'api.openai.com': ['OpenAI', 'gpt-4o-mini', 'gpt-4o-mini', 'gpt-4o-mini'],
+    'api.groq.com': ['Groq', 'openai/gpt-oss-120b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    'openrouter.ai': ['OpenRouter', 'openai/gpt-4o-mini', 'openai/gpt-4o-mini', 'openai/gpt-4o-mini'],
+    'generativelanguage.googleapis.com': ['Gemini', 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-3.8-flash'],
+    'api.together.xyz': ['Together AI', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
+    'api.deepseek.com': ['DeepSeek', 'deepseek-chat', 'deepseek-chat', 'deepseek-chat'],
+    'api.mistral.ai': ['Mistral AI', 'mistral-small-latest', 'mistral-small-latest', 'mistral-small-latest'],
+    'api.fireworks.ai': ['Fireworks AI', 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'accounts/fireworks/models/llama-v3p3-70b-instruct', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],
+    'api.perplexity.ai': ['Perplexity', 'sonar', 'sonar', 'sonar'],
+    'api.cohere.com': ['Cohere', 'command-a-03-2025', 'command-a-03-2025', 'command-a-03-2025']
   };
   try {
     await client.query('BEGIN');
@@ -141,7 +141,11 @@ export async function saveApiKeys(userId, entries) {
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
       const previous = bySlot.get(slot);
       let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
-      let model = String(item.model || '').trim().slice(0,120);
+      const legacyModel = String(item.model || '').trim().slice(0,120);
+      const suppliedModels = item.models && typeof item.models === 'object' ? item.models : {};
+      let modelReasoning = String(suppliedModels.reasoning || legacyModel).trim().slice(0,120);
+      let modelCoding = String(suppliedModels.coding || legacyModel).trim().slice(0,120);
+      let modelValidation = String(suppliedModels.validation || legacyModel).trim().slice(0,120);
       if (!baseUrl && apiKey) {
         if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) baseUrl = 'https://generativelanguage.googleapis.com';
         else if (/^gsk_[0-9A-Za-z]{20,}$/.test(apiKey)) baseUrl = 'https://api.groq.com/openai/v1';
@@ -162,17 +166,19 @@ export async function saveApiKeys(userId, entries) {
       if (!apiKey && previous && String(previous.base_url || '') !== canonicalBaseUrl) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
-      const [defaultLabel, defaultModel] = defaults[hostname];
+      const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
       const label = String(item.label || defaultLabel).trim().slice(0,80) || defaultLabel;
-      model = model || defaultModel;
+      modelReasoning = modelReasoning || defaultReasoning;
+      modelCoding = modelCoding || defaultCoding;
+      modelValidation = modelValidation || defaultValidation;
       if (!apiKey && previous) {
-        await client.query(`UPDATE user_api_keys SET label=$3,base_url=$4,model_reasoning=$5,model_coding=$5,model_validation=$5,updated_at=now() WHERE user_id=$1 AND slot=$2`,
-          [userId, slot, label, canonicalBaseUrl, model]);
+        await client.query(`UPDATE user_api_keys SET label=$3,base_url=$4,model_reasoning=$5,model_coding=$6,model_validation=$7,updated_at=now() WHERE user_id=$1 AND slot=$2`,
+          [userId, slot, label, canonicalBaseUrl, modelReasoning, modelCoding, modelValidation]);
       } else {
         await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
-          VALUES($1,$2,$3,$4,$5,$5,$5,$6)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8)
           ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
-          [userId, slot, label, canonicalBaseUrl, model, encryptSecret(apiKey)]);
+          [userId, slot, label, canonicalBaseUrl, modelReasoning, modelCoding, modelValidation, encryptSecret(apiKey)]);
       }
     }
     await client.query('COMMIT');
