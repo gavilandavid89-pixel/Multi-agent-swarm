@@ -2,6 +2,7 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { applyTokenUsage } from './tokenAccounting.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -135,6 +136,52 @@ export async function getJob(id) {
 export async function getPayload(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? { publicJob: toPublic(rows[0]), payload: unseal(rows[0].encrypted_payload) } : null;
+}
+export async function recordTokenUsage(id, info = {}) {
+  return serialized(id, async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
+      const row = rows[0];
+      if (!row) { await client.query('COMMIT'); return { missing: true, duplicate: false }; }
+      const payload = unseal(row.encrypted_payload);
+      const usageId = String(info.usageId || randomUUID());
+      const accounted = applyTokenUsage(payload.tokenUsage, { ...info, usageId }, {
+        eventIds: payload.usageEventIds || [],
+        status: row.status
+      });
+      payload.tokenUsage = accounted.usage;
+      payload.usageEventIds = accounted.eventIds;
+      if (accounted.event) {
+        const entry = {
+          at: now(),
+          agent: 'sistema',
+          type: 'usage',
+          content: JSON.stringify(accounted.event)
+        };
+        payload.transcript = [...(Array.isArray(payload.transcript) ? payload.transcript : []), entry].slice(-400);
+      }
+      const updatedAt = now();
+      await client.query(
+        'UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1',
+        [id, updatedAt, seal(payload)]
+      );
+      await client.query('COMMIT');
+      return {
+        duplicate: accounted.duplicate,
+        missing: false,
+        usage: payload.tokenUsage,
+        event: accounted.event,
+        statusAtResponse: row.status
+      };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
 }
 export async function updateJob(id, patch = {}) {
   return serialized(id, async () => {
