@@ -224,6 +224,8 @@ function renderTokenBudget(data) {
   state.currentTokenBudget = total;
   const extendButton = $('extend-task-budget');
   if (extendButton) { extendButton.disabled = total >= 100000; extendButton.textContent = total >= 100000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 100000 - total).toLocaleString('es-AR')}`; }
+  const continueButton = $('continue-token-batch');
+  if (continueButton) { continueButton.classList.toggle('hidden', !data.continuationAvailable); continueButton.disabled = !data.continuationAvailable; }
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
   const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
@@ -252,6 +254,12 @@ function renderTokenBudget(data) {
     .map(([stage, bucket]) => `${stage}: ${fmt(bucket.totalTokens)}`)
     .join(' · ');
   if ($('token-stage-breakdown')) $('token-stage-breakdown').textContent = stageSummary ? 'Por etapa: ' + stageSummary : 'Por etapa: todavía sin consumo registrado.';
+  if ($('token-batch-note')) {
+    const batch = Math.max(1, Number(data.continuationNumber) || 1);
+    const prior = Math.max(0, Number(data.priorTokensUsed) || 0);
+    const lifetime = Math.max(0, Number(data.lifetimeTokensUsed) || (prior + used));
+    $('token-batch-note').textContent = `Tanda ${batch} · ${fmt(used)} / ${fmt(total)} tokens. Tandas anteriores: ${fmt(prior)} · acumulado: ${fmt(lifetime)} tokens.`;
+  }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
   const baseNote = remaining === 0
@@ -370,6 +378,22 @@ $('extend-task-budget').addEventListener('click', async () => {
     await updateSelectedDetail(); await loadJobs();
   } catch (error) { $('token-budget-note').textContent = `No se pudo ampliar el límite: ${error.message}`; }
   finally { button.disabled = state.currentTokenBudget >= 100000; button.textContent = state.currentTokenBudget >= 100000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 100000 - state.currentTokenBudget).toLocaleString('es-AR')}`; }
+});
+$('continue-token-batch').addEventListener('click', async () => {
+  if (!state.currentDetailId) return;
+  const sourceId = state.currentDetailId;
+  const button = $('continue-token-batch');
+  button.disabled = true; button.textContent = 'Preparando nueva tanda…';
+  try {
+    const job = await api(`/api/jobs/${encodeURIComponent(sourceId)}/continue-budget`, { method: 'POST', body: '{}' });
+    $('token-budget-note').textContent = 'Nueva tanda creada: 100.000 tokens disponibles. Se recuperan los checkpoints y archivos de la tarea anterior.';
+    await showDetail(job.id);
+    await loadJobs();
+    await refresh();
+  } catch (error) {
+    $('token-budget-note').textContent = `No se pudo abrir la nueva tanda: ${error.message}`;
+    button.disabled = false; button.textContent = 'Continuar en nueva tanda · 100.000 tokens ↗';
+  }
 });
 $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
 $('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
