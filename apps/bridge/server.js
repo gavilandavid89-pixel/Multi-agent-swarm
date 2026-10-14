@@ -208,8 +208,29 @@ async function workerRequest(route, options = {}) {
   console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
   return data;
 }
+async function workerJobsByIds(ids) {
+  const jobs = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    const data = await workerRequest('/internal/jobs/batch', {
+      method: 'POST',
+      body: JSON.stringify({ ids: batch })
+    });
+    if (Array.isArray(data?.jobs)) jobs.push(...data.jobs);
+  }
+  return jobs;
+}
 app.get('/api/access-check', (req, res) => res.json({ ok: true, user: req.user }));
-app.get('/api/history', async (req, res) => { if (req.user.role !== 'admin') return res.json({ history: [], isolated: true }); try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
+app.get('/api/history', async (req, res) => {
+  try {
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1', [req.user.id]);
+    const jobs = await workerJobsByIds(owned.rows.map(row => String(row.job_id)));
+    const byStatus = { queued: 0, running: 0, completed: 0, failed: 0, needs_review: 0 };
+    for (const job of jobs) if (Object.hasOwn(byStatus, job.status)) byStatus[job.status]++;
+    const count = jobs.length;
+    res.json({ hasHistory: count > 0, count, byStatus, isolated: true });
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.get('/api/jobs', async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '25'), 10) || 25));
   const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
@@ -217,9 +238,8 @@ app.get('/api/jobs', async (req, res) => {
   if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
   try {
     const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
-    const jobs = (await Promise.all(owned.rows.map(async row => {
-      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
-    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    const jobs = (await workerJobsByIds(owned.rows.map(row => String(row.job_id))))
+      .filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
     jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
