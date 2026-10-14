@@ -95,7 +95,7 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
   }
 });
 app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
-  const record = getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
+  const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   const rawBudget = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
   const defaultBudget = Number.isFinite(rawBudget) ? Math.min(100000, Math.max(4000, rawBudget)) : 50000;
   const tokenBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
