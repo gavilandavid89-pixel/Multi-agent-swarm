@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
@@ -38,6 +39,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
   let safeMaxTokens = Math.min(maxSafeOutputTokens, requestedMaxTokens);
   while (true) {
+    const usageId = randomUUID();
     let response;
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
@@ -49,7 +51,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
     if (response.ok) {
       const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
       const usage = data?.usage || {};
-      await onRetry({ usage: true, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
+      await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
         const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
