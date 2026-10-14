@@ -47,3 +47,14 @@ export function getDeferredCooldownMs(retryAfterMs, failureStreak, { baseMs = 30
   const providerDelay = Math.max(0, Number(retryAfterMs) || 0);
   return Math.max(1000, Math.min(cap, Math.max(providerDelay, exponential)));
 }
+
+/**
+ * Returns the remaining scheduled delay for queued jobs.
+ * This guards against another worker's lock-busy poll bypassing a provider cooldown.
+ */
+export function getScheduledJobDelayMs({ status, retryAt, now = Date.now() } = {}) {
+  if (status !== 'queued' || !retryAt) return 0;
+  const dueAt = Date.parse(String(retryAt));
+  if (!Number.isFinite(dueAt)) return 0;
+  return Math.max(0, dueAt - Number(now));
+}
