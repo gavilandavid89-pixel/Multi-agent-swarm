@@ -457,8 +457,8 @@ function apiFieldRow(api = {}) {
   row.dataset.slot = String(api.slot || state.apiFields.length + 1);
   row.dataset.saved = api.saved ? 'true' : 'false';
   row.dataset.label = api.label || `API ${row.dataset.slot}`;
-  row.dataset.baseUrl = api.base_url || 'https://api.openai.com/v1';
-  row.dataset.model = api.model_reasoning || 'gpt-4o-mini';
+  row.dataset.baseUrl = api.base_url || '';
+  row.dataset.model = api.model_reasoning || '';
   const main = document.createElement('div'); main.className = 'api-field-main';
   const label = document.createElement('label'); label.textContent = `API ${row.dataset.slot} · Clave`;
   const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
@@ -519,7 +519,7 @@ $('save-api-settings').addEventListener('click', async () => {
   try {
     const apis = Array.from($('api-fields').children).map(row => ({
       slot: Number(row.dataset.slot), label: row.dataset.label || `API ${row.dataset.slot}`,
-      baseUrl: row.dataset.baseUrl || 'https://api.openai.com/v1', model: row.dataset.model || 'gpt-4o-mini',
+      baseUrl: row.dataset.baseUrl || '', model: row.dataset.model || '',
       apiKey: row.querySelector('input').value.trim()
     })).filter(item => item.apiKey);
     await api('/api/account/apis', { method: 'PUT', body: JSON.stringify({ apis }) });
