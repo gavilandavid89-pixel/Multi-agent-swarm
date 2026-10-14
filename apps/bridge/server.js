@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { pool, hashPassword, verifyPassword, createSession, findSession, revokeSession, importLegacyApiKeys, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
+import { pool, hashPassword, verifyPassword, createSession, findSession, revokeSession, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -57,8 +57,15 @@ app.post('/api/auth/login', async (req, res) => {
       }
       const created = await pool.query("INSERT INTO app_users(username,password_hash,role) VALUES('admin',$1,'admin') RETURNING id,username,password_hash,role", [hashPassword(password)]);
       user = created.rows[0];
-      const imported = await importLegacyApiKeys(user.id);
-      console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported }));
+
+    } else if (!verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
+    }
+    if (user.role === 'admin') {
+      try {
+        const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
+        console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
+      } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
       try {
         let offset = 0; let total = 0;
         do {
@@ -70,8 +77,6 @@ app.post('/api/auth/login', async (req, res) => {
           if (!jobs.length) break;
         } while (offset < total);
       } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
-    } else if (!verifyPassword(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
     failedAuth.delete(ip);
     const token = await createSession(user.id);
