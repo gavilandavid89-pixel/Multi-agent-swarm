@@ -38,6 +38,9 @@ export async function initAccountStore() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS user_job_ownership_user_created_idx ON user_job_ownership(user_id, created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_job_migrations (
+    user_id UUID PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE, migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS user_api_migrations (
     user_id UUID PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE, migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
