@@ -25,6 +25,19 @@ if (IS_PROD && (!WORKER_BASE_URL || WORKER_SHARED_SECRET.length < 32 || APP_ACCE
 }
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (IS_PROD && req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+  if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
+  // HTML previews have their own stricter, sandboxed CSP below. Do not override it
+  // here: the app must be able to display its isolated preview iframe.
+  if (!req.path.startsWith('/preview/')) {
+    res.set('Content-Security-Policy', "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-src 'self' about:; form-action 'self'; frame-ancestors 'none'");
+  }
+  next();
+});
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
