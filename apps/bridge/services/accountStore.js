@@ -140,7 +140,7 @@ export async function saveApiKeys(userId, entries) {
       seen.add(slot);
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
       const previous = bySlot.get(slot);
-      let baseUrl = String(item.baseUrl || '').trim().replace(/\\/+$/, '');
+      let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
       let model = String(item.model || '').trim().slice(0,120);
       if (!baseUrl && apiKey) {
         if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) baseUrl = 'https://generativelanguage.googleapis.com';
@@ -158,7 +158,7 @@ export async function saveApiKeys(userId, entries) {
       }
       const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
         : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
-        : `https://${hostname}${parsedUrl.pathname.replace(/\\/+$/, '')}`;
+        : `https://${hostname}${parsedUrl.pathname.replace(/\/+$/, '')}`;
       if (!apiKey && previous && String(previous.base_url || '') !== canonicalBaseUrl) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
