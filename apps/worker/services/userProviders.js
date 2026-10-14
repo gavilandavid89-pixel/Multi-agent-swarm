@@ -60,11 +60,41 @@ export async function importLegacyProvidersForUser(userId) {
 }
 
 export function currentUserProviders() { return context.getStore() || null; }
+
+export async function resolveJobUserId(jobId, payloadUserId = null) {
+  if (payloadUserId) return String(payloadUserId);
+  if (!pool || !jobId) return null;
+  const { rows } = await pool.query(
+    'SELECT user_id FROM user_job_ownership WHERE job_id=$1 LIMIT 1',
+    [String(jobId)]
+  );
+  return rows[0]?.user_id ? String(rows[0].user_id) : null;
+}
+
+export async function withJobProviders(jobId, payloadUserId, operation) {
+  const userId = await resolveJobUserId(jobId, payloadUserId);
+  return withUserProviders(userId, operation);
+}
+
+/**
+ * Give an automatically-created continuation the same owner as its source.
+ * Falls back to the encrypted source payload's userId for the race where the bridge
+ * has not yet finished inserting the source ownership row.
+ */
+export async function copyJobOwnership(sourceJobId, childJobId, payloadUserId = null) {
+  if (!pool) return false;
+  if (!sourceJobId || !childJobId) throw new Error('Both source and child job IDs are required.');
+  const query = 'INSERT INTO user_job_ownership(job_id,user_id) SELECT $2, COALESCE((SELECT user_id FROM user_job_ownership WHERE job_id=$1), $3::uuid) WHERE EXISTS (SELECT 1 FROM user_job_ownership WHERE job_id=$1) OR $3::uuid IS NOT NULL ON CONFLICT(job_id) DO NOTHING RETURNING user_id';
+  const { rows } = await pool.query(query, [String(sourceJobId), String(childJobId), payloadUserId || null]);
+  return rows.length > 0;
+}
+
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
   if (!pool) throw new Error('User API database is not configured.');
   const { rows } = await pool.query('SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
   const providers = [];
+  const providerOrder = [];
   let gemini = null;
   for (const row of rows) {
     let apiKey;
@@ -80,8 +110,14 @@ export async function withUserProviders(userId, operation) {
       }
     };
     if (/generativelanguage\.googleapis\.com/i.test(provider.baseUrl)) {
-      if (!gemini) gemini = { apiKey, models: provider.models, name: provider.name };
-    } else if (/^https:\/\//i.test(provider.baseUrl)) providers.push(provider);
+      const entry = { type: 'gemini', apiKey, models: provider.models, name: provider.name, baseUrl: provider.baseUrl };
+      providerOrder.push(entry);
+      if (!gemini) gemini = entry;
+    } else if (/^https:\/\//i.test(provider.baseUrl)) {
+      const entry = { ...provider, type: 'openai-compatible' };
+      providers.push(entry);
+      providerOrder.push(entry);
+    }
   }
-  return context.run({ userId, providers, gemini }, operation);
+  return context.run({ userId, providers, gemini, providerOrder }, operation);
 }
