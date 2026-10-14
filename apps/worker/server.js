@@ -24,8 +24,19 @@ function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.
 async function runJobWithAccountProviders(id) {
   const record = await getPayload(id);
   const userId = record?.payload?.userId || null;
-  if (record?.payload?.continuationOf) {
-    await copyJobOwnership(record.payload.continuationOf, id, userId);
+  if (userId) {
+    try {
+      if (record?.payload?.continuationOf) {
+        await copyJobOwnership(record.payload.continuationOf, id, userId);
+      } else {
+        await ensureJobOwnership(id, userId);
+      }
+    } catch (error) {
+      // Keep the task's encrypted userId as execution authority; the bridge-side
+      // mapping is retried on later recovery, but credentials never fall back to
+      // another account's provider when the mapping write is temporarily unavailable.
+      console.warn('[worker][job_ownership_mapping_deferred]', JSON.stringify({ jobId: id, code: error?.code || 'internal' }));
+    }
   }
   return withJobProviders(id, userId, () => processJob(id));
 }
