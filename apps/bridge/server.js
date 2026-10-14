@@ -14,6 +14,8 @@ const WORKER_SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
 const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const failedAuth = new Map();
+const registrationWindows = new Map();
+const adminInviteWindows = new Map();
 const jobCreateWindows = new Map();
 const previewSessions = new Map();
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
@@ -144,6 +146,12 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
 });
 app.post('/api/auth/register', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const rate = windowLimit(registrationWindows, ip, 10, 60 * 60 * 1000);
+  if (!rate.allowed) {
+    res.set('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ error: 'Demasiados intentos de registro. Probá más tarde.' });
+  }
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const invite = typeof req.body?.invite === 'string' ? req.body.invite.trim() : '';
@@ -184,8 +192,18 @@ app.delete('/api/account/apis/:slot', async (req, res) => {
 });
 app.post('/api/admin/invites', async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede crear invitaciones.' });
-  try { const invite = await createInvite(req.user.id, req.body?.hours); res.status(201).json(invite); }
-  catch { res.status(503).json({ error: 'No se pudo crear la invitación.' }); }
+  const rate = windowLimit(adminInviteWindows, req.user.id, 5, 60 * 60 * 1000);
+  if (!rate.allowed) {
+    res.set('Retry-After', String(rate.retryAfter));
+    return res.status(429).json({ error: 'Límite de creación de invitaciones alcanzado. Probá más tarde.' });
+  }
+  try {
+    const invite = await createInvite(req.user.id, req.body?.hours);
+    res.status(201).json(invite);
+  } catch (error) {
+    if (error?.code === 'INVITE_ACTIVE_LIMIT') return res.status(429).json({ error: error.message });
+    res.status(503).json({ error: 'No se pudo crear la invitación.' });
+  }
 });
 app.param('id', async (req, res, next, id) => {
   try {
