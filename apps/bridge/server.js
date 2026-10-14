@@ -447,6 +447,24 @@ app.post('/api/jobs/:id/preview-session', async (req, res) => {
     res.json({ url: `/preview/${token}/${index}`, expiresInSeconds: Math.floor(PREVIEW_TTL_MS / 1000) });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+function setPreviewAssetHeaders(res, item) {
+  const pathLower = String(item?.path || '').toLowerCase();
+  // Asset URLs share the bridge origin. Prevent untrusted HTML/SVG opened directly
+  // from becoming an unsandboxed document; HTML assets remain readable as text/fetch.
+  const contentType = pathLower.endsWith('.html') || pathLower.endsWith('.htm')
+    ? 'text/plain; charset=utf-8'
+    : (item?.contentType || previewMimeType(item?.path || ''));
+  res.set({
+    'Content-Type': contentType,
+    'Content-Disposition': 'inline',
+    'X-Content-Type-Options': 'nosniff',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': "sandbox; default-src 'none'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  });
+}
+
 app.get('/preview/:token/assets/*', async (req, res) => {
   const session = validPreviewSession(req.params.token);
   if (!session) return res.status(404).type('text/plain').send('La vista previa expiró. Volvé a abrirla desde Swarm.');
@@ -456,7 +474,7 @@ app.get('/preview/:token/assets/*', async (req, res) => {
     if (Array.isArray(session.files)) {
       const item = session.files.find(file => file.path === assetPath);
       if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
-      res.set({ 'Content-Type': item.contentType || previewMimeType(item.path), 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      setPreviewAssetHeaders(res, item);
       return res.send(item.content);
     }
     const listing = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files`);
@@ -464,7 +482,7 @@ app.get('/preview/:token/assets/*', async (req, res) => {
     if (!item) return res.status(404).type('text/plain').send('Recurso no incluido en el paquete.');
     const result = await workerRequest(`/internal/jobs/${encodeURIComponent(session.jobId)}/files/${encodeURIComponent(item.index)}`);
     if (!result.file || typeof result.file.content !== 'string') return res.status(404).type('text/plain').send('Recurso no disponible.');
-    res.set({ 'Content-Type': item.contentType || 'text/plain; charset=utf-8', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+    setPreviewAssetHeaders(res, item);
     res.send(result.file.content);
   } catch (error) { res.status(error.status || 502).type('text/plain').send('No se pudo cargar el recurso local.'); }
 });
