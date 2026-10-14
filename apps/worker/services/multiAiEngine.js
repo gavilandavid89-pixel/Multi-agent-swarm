@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
-import { buildBudgetPausePatch } from './tokenAccounting.js';
+import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
@@ -222,7 +222,12 @@ async function runJob(jobId) {
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
-        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: (await getPayload(jobId))?.payload?.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, lastCheckpoint: 'completed' } });
+        const latestPayload = (await getPayload(jobId))?.payload || {};
+        const transcript = appendEntries(latestPayload.transcript, [{
+          at: new Date().toISOString(), agent: 'sistema', type: 'check',
+          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA'}). El resultado está listo para revisar.`
+        }]);
+        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
@@ -238,10 +243,30 @@ async function runJob(jobId) {
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
     const finalPayload = (await getPayload(jobId))?.payload || {};
-    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
+    const reviewTranscript = appendEntries(finalPayload.transcript, [{
+      at: new Date().toISOString(), agent: 'sistema', type: 'check',
+      content: 'El comité terminó sus intentos automáticos, pero la validación no aprobó todos los criterios. La entrega queda pendiente de revisión humana; no se considera aprobada.'
+    }]);
+    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
+      const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
+      const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000;
+      const currentBudget = Math.min(100000, Math.max(4000, Number(current.payload.tokenBudget) || fallback));
+      const nextBudget = nextAutomaticTokenBudget(currentBudget);
+      if (nextBudget && nextBudget > currentBudget) {
+        const patch = buildAutomaticBudgetExtensionPatch(current, currentBudget, nextBudget);
+        if (patch) {
+          await updateJob(jobId, patch);
+          console.warn('[worker][token_budget_auto_extended]', JSON.stringify({
+            jobId, usedTokens: error.usedTokens ?? null, previousLimit: currentBudget,
+            nextLimit: nextBudget, increment: nextBudget - currentBudget,
+            checkpoint: patch.payload.lastCheckpoint, progress: patch.progress
+          }));
+          return { deferred: true, retryAfterMs: 1000, budgetExtended: true };
+        }
+      }
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);

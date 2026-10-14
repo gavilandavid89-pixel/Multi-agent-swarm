@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
@@ -136,4 +136,29 @@ test('una segunda tanda conserva el historial de tandas y registra el consumo pr
   assert.equal(second.tokenBatchHistory[1].jobId, 'job-2');
   assert.equal(second.artifacts[0].content, 'ok');
   assert.equal(second.tokenUsage.totalTokens, 0);
+});
+
+
+test('el presupuesto aumenta automáticamente en pasos de 25k hasta el máximo de 100k', () => {
+  assert.equal(nextAutomaticTokenBudget(50000), 75000);
+  assert.equal(nextAutomaticTokenBudget(75000), 100000);
+  assert.equal(nextAutomaticTokenBudget(100000), null);
+  assert.equal(nextAutomaticTokenBudget(25000), 50000);
+});
+
+test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el estado terminal obsoleto', () => {
+  const current = {
+    publicJob: { id: 'job-1', status: 'needs_review', stage: 'Pausada por presupuesto de tokens', progress: 99 },
+    payload: { tokenBudget: 50000, result: { status: 'needs_review' }, lastCheckpoint: 'validation-1', transcript: [{ agent: 'Validador', type: 'message', content: 'checkpoint' }] }
+  };
+  const patch = buildAutomaticBudgetExtensionPatch(current, 50000, 75000, '2026-10-14T03:00:00Z');
+  assert.equal(patch.status, 'queued');
+  assert.match(patch.stage, /75\.000/);
+  assert.equal(patch.progress, 95);
+  assert.equal(patch.error, null);
+  assert.equal(patch.payload.tokenBudget, 75000);
+  assert.equal(patch.payload.result, null);
+  assert.equal(patch.payload.lastCheckpoint, 'validation-1');
+  assert.deepEqual(patch.payload.lastBudgetIncrease, { from: 50000, to: 75000, at: '2026-10-14T03:00:00Z' });
+  assert.match(patch.payload.transcript.at(-1).content, /checkpoint validation-1/);
 });

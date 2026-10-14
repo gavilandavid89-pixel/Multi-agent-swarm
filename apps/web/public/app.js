@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000 };
+const state = { accessKey: sessionStorage.getItem('swarm-access-key') || '', jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000, jobStatuses: new Map() };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -222,10 +222,18 @@ function renderTokenBudget(data) {
   const usage = data.tokenUsage || {};
   const total = Math.max(1, Number(data.tokenBudget) || 50000);
   state.currentTokenBudget = total;
+  const job = data.job || {};
+  const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
+  const canExtend = ['queued', 'running'].includes(job.status) || budgetPaused;
   const extendButton = $('extend-task-budget');
-  if (extendButton) { extendButton.disabled = total >= 100000; extendButton.textContent = total >= 100000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 100000 - total).toLocaleString('es-AR')}`; }
+  if (extendButton) {
+    extendButton.classList.toggle('hidden', !canExtend || total >= 100000);
+    extendButton.disabled = !canExtend || total >= 100000;
+    extendButton.textContent = `Ampliar límite +${Math.min(25000, 100000 - total).toLocaleString('es-AR')}`;
+  }
   const continueButton = $('continue-token-batch');
-  if (continueButton) { continueButton.classList.toggle('hidden', !data.continuationAvailable); continueButton.disabled = !data.continuationAvailable; }
+  const canOpenNextBatch = Boolean(data.continuationAvailable) && total >= 100000;
+  if (continueButton) { continueButton.classList.toggle('hidden', !canOpenNextBatch); continueButton.disabled = !canOpenNextBatch; }
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
   const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
@@ -262,9 +270,11 @@ function renderTokenBudget(data) {
   }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
-  const baseNote = remaining === 0
-    ? 'Presupuesto agotado; la tarea debe pausarse hasta ampliar el límite.'
-    : remaining <= total * 0.15
+  const baseNote = budgetPaused
+    ? (total >= 100000 ? 'Tanda de 100.000 agotada. El checkpoint está guardado; abrí una tanda nueva para continuar.' : 'Esta tarea quedó pausada. Ampliá el límite +25.000 para reanudar desde el checkpoint; el próximo aumento ya será automático.')
+    : remaining === 0
+      ? 'El límite se ampliará automáticamente en pasos de 25.000 tokens hasta 100.000. Al alcanzar el máximo, podrás abrir una tanda nueva.'
+      : remaining <= total * 0.15
       ? 'Queda menos del 15 % del presupuesto. Priorizá correcciones y validación.'
       : 'Consumo según el usage reportado por el proveedor; “Tras cierre” identifica respuestas automáticas tardías y el chat va separado.';
   const accountingNotes = [];
@@ -274,11 +284,14 @@ function renderTokenBudget(data) {
 }
 function updateDetailView(data) {
   const job = data.job || {};
-  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}`;
+  const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
+  const batchLabel = data.continuationOf ? ` · Tanda ${batchNumber}` : '';
+  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}${batchLabel}`;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
-  $('detail-status').textContent = job.status === 'needs_review' && job.stage?.includes('presupuesto') ? 'Bloqueada · presupuesto' : statusNames[job.status] || job.status || 'Sin estado';
+  const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
+  $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Tanda ${batchNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
   $('detail-status').className = `status ${job.status || 'queued'}`;
-  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : '● ACTUALIZADO';
+  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ COMITÉ FINALIZADO' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
   $('detail-live').classList.toggle('live-active', ['queued','running'].includes(job.status));
   const fill = $('detail-progress-fill');
   const track = $('detail-progress');
@@ -304,11 +317,35 @@ function updateDetailView(data) {
     technicalEvents
   };
   $('detail-content').textContent = JSON.stringify(diagnostic, null, 2);
-  const previousStatus = state.lastJobStatus;
+  const previousStatus = state.jobStatuses.get(job.id);
+  state.jobStatuses.set(job.id, job.status);
+  if (previousStatus && previousStatus !== job.status) {
+    const wasActive = ['queued', 'running'].includes(previousStatus);
+    if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
+    else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
+    else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tanda de la tarea ${job.id.slice(0,8)} agotó el presupuesto. Se guardó el checkpoint; abrí otra tanda para continuar.`, 'warning');
+    else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
+    if (wasActive && ['completed', 'failed', 'needs_review'].includes(job.status)) loadJobs().catch(() => {});
+  }
   state.lastJobStatus = job.status;
-  if (previousStatus && previousStatus !== job.status) loadJobs().catch(() => {});
   state.lastDetailSignature = JSON.stringify({ id: job.id, status: job.status, stage: job.stage, updatedAt: job.updatedAt, historyLength: (data.history || []).length });
 }
+function showTaskNotice(message, kind = 'completed') {
+  const notice = $('task-notice');
+  const text = $('task-notice-text');
+  if (!notice || !text) return;
+  text.textContent = message;
+  notice.className = `task-notice ${kind}`;
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+    try { new Notification('Swarm · estado de tarea', { body: message }); } catch {}
+  }
+}
+function hideTaskNotice() {
+  const notice = $('task-notice');
+  if (notice) notice.classList.add('hidden');
+}
+$('task-notice-close')?.addEventListener('click', hideTaskNotice);
+
 async function updateSelectedDetail() {
   if (!state.currentDetailId) return;
   const data = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/history`);
@@ -330,6 +367,7 @@ async function showDetail(id) {
     $('artifact-preview-frame').src = 'about:blank';
     $('artifact-preview').classList.add('hidden');
   }
+  if (state.currentDetailId !== id) hideTaskNotice();
   state.currentDetailId = id;
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
