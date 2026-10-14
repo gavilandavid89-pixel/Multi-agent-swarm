@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
-import { buildBudgetPausePatch } from './tokenAccounting.js';
+import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
@@ -242,6 +242,22 @@ async function runJob(jobId) {
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
+      const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
+      const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000;
+      const currentBudget = Math.min(100000, Math.max(4000, Number(current.payload.tokenBudget) || fallback));
+      const nextBudget = nextAutomaticTokenBudget(currentBudget);
+      if (nextBudget && nextBudget > currentBudget) {
+        const patch = buildAutomaticBudgetExtensionPatch(current, currentBudget, nextBudget);
+        if (patch) {
+          await updateJob(jobId, patch);
+          console.warn('[worker][token_budget_auto_extended]', JSON.stringify({
+            jobId, usedTokens: error.usedTokens ?? null, previousLimit: currentBudget,
+            nextLimit: nextBudget, increment: nextBudget - currentBudget,
+            checkpoint: patch.payload.lastCheckpoint, progress: patch.progress
+          }));
+          return { deferred: true, retryAfterMs: 1000, budgetExtended: true };
+        }
+      }
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);
