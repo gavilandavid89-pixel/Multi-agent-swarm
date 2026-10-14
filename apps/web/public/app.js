@@ -546,6 +546,36 @@ $('create-invite').addEventListener('click', async () => {
   finally { button.disabled = false; }
 });
 
+
+$('show-register').addEventListener('click', () => {
+  $('register-form').classList.toggle('hidden');
+  const invite = new URLSearchParams(location.search).get('invite');
+  if (invite) $('register-invite').value = invite;
+});
+$('register-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('register-form').querySelector('button[type="submit]'); button.disabled = true;
+  $('register-status').textContent = 'Creando tu cuenta privada…';
+  try {
+    const body = { invite: $('register-invite').value.trim(), username: $('register-username').value.trim().toLowerCase(), password: $('register-password').value };
+    const response = await fetch('/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'No se pudo crear la cuenta.');
+    state.accessKey = data.token; state.user = data.user;
+    sessionStorage.setItem('swarm-session-token', state.accessKey);
+    $('register-password').value = ''; $('access-status').textContent = '';
+    await enterApp();
+  } catch (error) { $('register-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+fetch('/api/auth/bootstrap-status').then(response => response.json()).then(data => {
+  if (data.initialized) $('access-status').textContent = 'Entrá con tu usuario y contraseña. El registro está disponible solo con invitación.';
+}).catch(() => {});
+if (new URLSearchParams(location.search).has('invite')) {
+  $('register-form').classList.remove('hidden');
+  $('register-invite').value = new URLSearchParams(location.search).get('invite') || '';
+}
+
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
   const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
