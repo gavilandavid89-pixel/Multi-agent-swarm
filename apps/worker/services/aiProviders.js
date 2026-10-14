@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { sanitizeProviderErrorBody } from './sanitizeProviderError.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 // Feature branch: bounded continuation support.
@@ -299,7 +300,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       // by the worker scheduler so one blocked provider cannot occupy a worker slot.
       await sleep(wait); continue;
     }
-    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
+    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${sanitizeProviderErrorBody(body, apiKey)}`);
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
