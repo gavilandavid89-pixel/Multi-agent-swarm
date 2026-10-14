@@ -90,9 +90,15 @@ export async function saveApiKeys(userId, entries) {
       if (!Number.isInteger(slot) || slot < 1 || slot > 10) throw new Error('Campo de API inválido.');
       const apiKey = typeof item.apiKey === 'string' ? item.apiKey.trim() : '';
       const label = String(item.label || `API ${slot}`).trim().slice(0,80);
-      const baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
-      const model = String(item.model || 'openai/gpt-oss-120b').trim().slice(0,120);
+      let baseUrl = String(item.baseUrl || '').trim().replace(/\/+$/, '');
+      let model = String(item.model || '').trim().slice(0,120);
       if (!apiKey) continue;
+      if (!baseUrl || baseUrl === 'https://api.openai.com/v1') {
+        if (/^AIza[0-9A-Za-z_-]{20,}$/.test(apiKey)) { baseUrl = 'https://generativelanguage.googleapis.com'; model = model || 'gemini-3.8-flash'; }
+        else if (/^gsk_[0-9A-Za-z]{20,}$/.test(apiKey)) { baseUrl = 'https://api.groq.com/openai/v1'; model = model || 'openai/gpt-oss-120b'; }
+        else if (/^sk-or-v1-[0-9a-f]{20,}$/i.test(apiKey)) { baseUrl = 'https://openrouter.ai/api/v1'; model = model || 'openai/gpt-4o-mini'; }
+        else { baseUrl = 'https://api.openai.com/v1'; model = model || 'gpt-4o-mini'; }
+      } else model = model || 'gpt-4o-mini';
       if (!(baseUrl.startsWith('https://') || /^http:\/\/(localhost|127\.0\.0\.1)(:\\d+)?/.test(baseUrl))) throw new Error(`La URL de ${label} debe usar HTTPS.`);
       await client.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
         VALUES($1,$2,$3,$4,$5,$5,$5,$6) ON CONFLICT(user_id,slot) DO UPDATE SET label=EXCLUDED.label,base_url=EXCLUDED.base_url,model_reasoning=EXCLUDED.model_reasoning,model_coding=EXCLUDED.model_coding,model_validation=EXCLUDED.model_validation,encrypted_api_key=EXCLUDED.encrypted_api_key,updated_at=now()`,
