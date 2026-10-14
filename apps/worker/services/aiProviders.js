@@ -221,7 +221,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     let response;
     try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : (providerHostname === 'api.openai.com' ? { max_completion_tokens: safeMaxTokens } : { max_tokens: safeMaxTokens })), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
-      const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      const reason = `error de red: ${sanitizeProviderErrorBody(String(error?.message || error), apiKey, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
       retry++; const wait = retryDelay(retry); await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
