@@ -30,7 +30,7 @@ export async function withUserProviders(userId, operation) {
     try { apiKey = decrypt(row.encrypted_api_key); } catch { continue; }
     const provider = {
       name: String(row.label || 'User API').slice(0, 80),
-      baseUrl: String(row.base_url || '').replace(/\\/+$/, ''),
+      baseUrl: String(row.base_url || '').replace(/\/+$/, ''),
       apiKey,
       models: {
         reasoning: String(row.model_reasoning || '').trim(),
