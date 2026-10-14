@@ -34,6 +34,8 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: AI_FALLBACK_PROVIDERS
+        sync: false
       - key: HISTORY_ENCRYPTION_KEY
         sync: false
       - key: DATABASE_URL
