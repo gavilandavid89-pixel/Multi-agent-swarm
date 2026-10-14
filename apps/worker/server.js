@@ -13,7 +13,7 @@ const MAX_CONCURRENCY = Number.isFinite(concurrencyRaw) ? Math.min(8, Math.max(1
 if (SHARED_SECRET.length < 32 || /replace-with|your-/i.test(SHARED_SECRET)) throw new Error('WORKER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
-const queue = new Set(); const active = new Set(); let shuttingDown = false; let server;
+const queue = new Set(); const active = new Set(); let shuttingDown = false; let storeClosing = false; let server;
 const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '15000', 10) || 15000));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
 app.use('/internal', (req, res, next) => { if (!safeEqual(req.get('x-swarm-bridge-secret') || '', SHARED_SECRET)) return res.status(401).json({ error: 'No autorizado.' }); next(); });
@@ -116,7 +116,7 @@ app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: budgetPaused && !record.payload.continuedByJobId, continuedByJobId: record.payload.continuedByJobId || null, artifacts: await listArtifacts(req.params.id) });
 } catch (error) { next(error); } });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
-function maybeExit() { if (shuttingDown && active.size === 0) { try { server?.close(); } catch {} void closeStore().catch(error => console.error('[worker] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0)); } }
+function maybeExit() { if (shuttingDown && active.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void closeStore().catch(error => console.error('[worker] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0)); } }
 function shutdown() {
   if (shuttingDown) return; shuttingDown = true;
   console.log('[worker] apagado solicitado; el trabajo activo tiene una ventana para guardar checkpoints.');
