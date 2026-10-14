@@ -36,31 +36,31 @@ function providerModelForSlot(provider, requestedModel, maxTokens) {
   return String(provider.models?.[slot] || provider.model || requestedModel || '').trim();
 }
 
-function configuredOpenAIProviders(requestedModel, maxTokens) {
+export function configuredOpenAIProviders(requestedModel, maxTokens, env = process.env) {
   const providers = [];
-  if (process.env.GROQ_API_KEY) {
+  if (env.GROQ_API_KEY) {
     providers.push({
-      name: 'Groq', baseUrl: GROQ_BASE_URL, apiKey: process.env.GROQ_API_KEY,
+      name: 'Groq', baseUrl: GROQ_BASE_URL, apiKey: env.GROQ_API_KEY,
       model: Number(maxTokens) >= 5000
-        ? (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
-        : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b')
+        ? (env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b')
+        : (env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b')
     });
   }
   let custom = [];
   try {
-    const parsed = JSON.parse(process.env.AI_FALLBACK_PROVIDERS || '[]');
+    const parsed = JSON.parse(env.AI_FALLBACK_PROVIDERS || '[]');
     if (Array.isArray(parsed)) custom = parsed.slice(0, 10);
     else console.warn('[worker][provider_config_invalid] AI_FALLBACK_PROVIDERS debe ser un array JSON.');
   } catch {
-    if (process.env.AI_FALLBACK_PROVIDERS) console.warn('[worker][provider_config_invalid] AI_FALLBACK_PROVIDERS no contiene JSON válido.');
+    if (env.AI_FALLBACK_PROVIDERS) console.warn('[worker][provider_config_invalid] AI_FALLBACK_PROVIDERS no contiene JSON válido.');
   }
   for (const entry of custom) {
     if (!entry || typeof entry !== 'object') continue;
     const name = String(entry.name || '').trim().slice(0, 80);
-    const baseUrl = String(entry.baseUrl || '').trim().replace(/\\/+$/, '');
+    const baseUrl = String(entry.baseUrl || '').trim().replace(/\/+$/, '');
     const apiKeyEnv = String(entry.apiKeyEnv || '').trim();
-    const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(apiKeyEnv) ? process.env[apiKeyEnv] : '';
-    const validUrl = /^https:\/\//i.test(baseUrl) || /^http:\/\/(?:localhost|127\\.0\\.0\\.1)(?::\\d+)?(?:\/|$)/i.test(baseUrl);
+    const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(apiKeyEnv) ? env[apiKeyEnv] : '';
+    const validUrl = /^https:\/\//i.test(baseUrl) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl);
     if (!name || !validUrl || !apiKey || providers.some(provider => provider.baseUrl === baseUrl)) continue;
     const model = providerModelForSlot(entry, requestedModel, maxTokens);
     if (!model) {
@@ -78,7 +78,7 @@ function configuredOpenAIProviders(requestedModel, maxTokens) {
  */
 export async function consultarModelo(options) {
   const { model, maxTokens = 1200, messages } = options;
-  const providers = configuredOpenAIProviders(model, maxTokens);
+  const providers = configuredOpenAIProviders(model, maxTokens, process.env);
   if (process.env.GEMINI_API_KEY) {
     try {
       return await consultarGemini({ ...options, failoverOnRetryable: providers.length > 0 });
@@ -148,7 +148,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     }
     const usageId = randomUUID();
     let response;
-    try { response = await fetch(`${String(baseUrl).replace(/\\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -231,8 +231,8 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
-const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
-const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
+const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
+const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
 const validationModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b');
 function boundContext(value, maxChars, label) {
   const text = String(value ?? '');
