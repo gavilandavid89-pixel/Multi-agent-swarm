@@ -65,7 +65,7 @@ export async function replyToAgent(jobId, requestedAgent, message) {
     ? (geminiEnabled ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b'))
     : (geminiEnabled ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'));
   const response = await consultarModelo({
-    model, temperature: agent === 'Validador' ? 0 : 0.2, maxTokens: 1800, onRetry,
+    model, providerSlot: agent === 'Desarrollador' ? 'coding' : agent === 'Validador' ? 'validation' : 'reasoning', temperature: agent === 'Validador' ? 0 : 0.2, maxTokens: 1800, onRetry,
     messages: [
       { role: 'system', content: `Sos el agente ${agent} del comité Swarm. ${role} Respondé en español, breve pero útil. Esta es una conversación directa dentro de una tarea existente, no crees otra tarea. Sé honesto sobre lo que podés verificar.` },
       { role: 'user', content: context }
