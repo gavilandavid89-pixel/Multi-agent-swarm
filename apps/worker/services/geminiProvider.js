@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -76,6 +77,7 @@ export async function consultarGemini({
   let requestMessages = messages;
 
   while (true) {
+    const usageId = randomUUID();
     const converted = toGeminiContents(requestMessages);
     if (!converted.contents.length) throw new Error('Gemini recibió una conversación vacía.');
     const body = {
@@ -112,6 +114,7 @@ export async function consultarGemini({
       const usage = data?.usageMetadata || {};
       await onRetry({
         usage: true,
+        usageId,
         model,
         promptTokens: Number(usage.promptTokenCount) || 0,
         completionTokens: Number(usage.candidatesTokenCount) || 0,
