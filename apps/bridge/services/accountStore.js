@@ -10,6 +10,41 @@ export const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 3000
 const encryptionKey = Buffer.from(encryptionKeyHex, 'hex');
 const digest = value => createHash('sha256').update(String(value)).digest('hex');
 
+export async function initAccountStore() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), disabled_at TIMESTAMPTZ
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS app_sessions_user_expiry_idx ON app_sessions(user_id, expires_at)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS app_invites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code_hash TEXT NOT NULL UNIQUE,
+    created_by UUID REFERENCES app_users(id) ON DELETE SET NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL, used_at TIMESTAMPTZ, used_by UUID REFERENCES app_users(id) ON DELETE SET NULL
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    slot SMALLINT NOT NULL CHECK (slot BETWEEN 1 AND 10), label TEXT NOT NULL, base_url TEXT NOT NULL,
+    model_reasoning TEXT NOT NULL, model_coding TEXT, model_validation TEXT, encrypted_api_key TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(user_id, slot)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_job_ownership (
+    job_id TEXT PRIMARY KEY, user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS user_job_ownership_user_created_idx ON user_job_ownership(user_id, created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_api_migrations (
+    user_id UUID PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE, migrated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await pool.query('SELECT 1');
+}
+
+
 export function hashPassword(password) {
   const salt = randomBytes(16);
   const derived = scryptSync(password, salt, 64);
