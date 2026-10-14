@@ -41,6 +41,18 @@ try {
   check('bridge-health', 'El puente responde /healthz.');
   if (!healthData.workerConfigured) fail('El puente no confirma la configuración del worker.');
 
+  const landing = await fetch(base + '/', { signal: AbortSignal.timeout(20000) });
+  const landingHtml = await landing.text();
+  const csp = landing.headers.get('content-security-policy') || '';
+  if (!landing.ok || !/text\/html/i.test(landing.headers.get('content-type') || '')) fail('La página principal no devuelve HTML correctamente.');
+  if (!csp.includes("script-src 'self'") || !csp.includes("object-src 'none'") || !csp.includes("frame-ancestors 'none'")) {
+    fail('La página principal no aplica la política CSP esperada.');
+  }
+  if (landing.headers.get('x-content-type-options') !== 'nosniff' || landing.headers.get('referrer-policy') !== 'no-referrer') {
+    fail('Faltan cabeceras HTTP básicas de protección.');
+  }
+  check('main-security-headers', 'La página principal aplica CSP, nosniff y no-referrer.');
+
   const anonymousAccess = await request('/api/access-check');
   if (anonymousAccess.status !== 401) fail('Una solicitud sin sesión debe recibir HTTP 401.');
   const rawPasswordAccess = await request('/api/access-check', {
@@ -217,7 +229,11 @@ try {
   if (reusedInvite.status !== 400) fail('Una invitación ya consumida debe rechazarse con HTTP 400.');
   check('invite-single-use', 'Una invitación consumida no permite crear otra cuenta.');
 
-  await request('/api/auth/logout', { method: 'POST', auth: true, body: '{}' });
+  const logoutResult = await json(await request('/api/auth/logout', { method: 'POST', auth: true, body: '{}' }), 'Cierre de sesión de cuenta de prueba');
+  if (logoutResult.ok !== true) fail('El cierre de sesión no confirmó la revocación de sesión.');
+  const revokedSession = await request('/api/account', { auth: true });
+  if (revokedSession.status !== 401) fail('La sesión de prueba siguió siendo válida después del cierre.');
+  check('session-revocation', 'Cerrar sesión invalida el token inmediatamente.');
   sessionToken = adminToken;
 
   report.finishedAt = new Date().toISOString();
