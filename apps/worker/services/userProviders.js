@@ -8,9 +8,12 @@ const connectionString = process.env.SWARM_DATABASE_URL || '';
 const keyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 let pool;
 if (connectionString && /^[a-f0-9]{64}$/i.test(keyHex)) {
-  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: false } });
+  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000 });
 }
 const key = /^[a-f0-9]{64}$/i.test(keyHex) ? Buffer.from(keyHex, 'hex') : null;
+if (process.env.NODE_ENV === 'production' && (!pool || !key)) {
+  throw new Error('SWARM_DATABASE_URL y SWARM_API_ENCRYPTION_KEY válidos son obligatorios para el worker en producción.');
+}
 function decrypt(value) {
   if (!key) throw new Error('API encryption is not configured.');
   const [ivHex, tagHex, bodyHex] = String(value).split(':');
