@@ -17,6 +17,9 @@ const failedAuth = new Map();
 const registrationWindows = new Map();
 const adminInviteWindows = new Map();
 const jobCreateWindows = new Map();
+const jobCreateIpWindows = new Map();
+const previewUploadWindows = new Map();
+const previewUploadIpWindows = new Map();
 const previewSessions = new Map();
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -192,7 +195,7 @@ app.delete('/api/account/apis/:slot', async (req, res) => {
 });
 app.post('/api/admin/invites', async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede crear invitaciones.' });
-  const rate = windowLimit(adminInviteWindows, req.user.id, 5, 60 * 60 * 1000);
+  const rate = windowLimit(adminInviteWindows, req.user.id, 20, 60 * 60 * 1000);
   if (!rate.allowed) {
     res.set('Retry-After', String(rate.retryAfter));
     return res.status(429).json({ error: 'Límite de creación de invitaciones alcanzado. Probá más tarde.' });
@@ -214,8 +217,18 @@ app.param('id', async (req, res, next, id) => {
 });
 function limitJobCreation(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(jobCreateWindows, ip, 5, 10 * 60 * 1000);
-  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Alcanzaste el límite temporal de creación de tareas. Probá más tarde.' }); }
+  // Isolate normal usage by account; retain a looser IP ceiling for abuse from
+  // many throwaway accounts on the same source address.
+  const userLimit = windowLimit(jobCreateWindows, String(req.user?.id || ip), 5, 10 * 60 * 1000);
+  if (!userLimit.allowed) {
+    res.set('Retry-After', String(userLimit.retryAfter));
+    return res.status(429).json({ error: 'Alcanzaste tu límite temporal de creación de tareas. Probá más tarde.' });
+  }
+  const ipLimit = windowLimit(jobCreateIpWindows, ip, 25, 10 * 60 * 1000);
+  if (!ipLimit.allowed) {
+    res.set('Retry-After', String(ipLimit.retryAfter));
+    return res.status(429).json({ error: 'Se alcanzó el límite temporal de tareas desde esta conexión. Probá más tarde.' });
+  }
   next();
 }
 function safeEqual(a, b) {
@@ -438,6 +451,17 @@ async function previewFile(session, index) {
   return { item, file: result.file, files };
 }
 app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const userLimit = windowLimit(previewUploadWindows, String(req.user?.id || ip), 10, 10 * 60 * 1000);
+  if (!userLimit.allowed) {
+    res.set('Retry-After', String(userLimit.retryAfter));
+    return res.status(429).json({ error: 'Alcanzaste el límite temporal de vistas previas ZIP. Probá más tarde.' });
+  }
+  const ipLimit = windowLimit(previewUploadIpWindows, ip, 30, 10 * 60 * 1000);
+  if (!ipLimit.allowed) {
+    res.set('Retry-After', String(ipLimit.retryAfter));
+    return res.status(429).json({ error: 'Se alcanzó el límite temporal de cargas ZIP desde esta conexión. Probá más tarde.' });
+  }
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
   try {
     const parsed = parsePreviewZip(req.body);
