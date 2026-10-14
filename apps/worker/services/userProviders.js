@@ -38,14 +38,14 @@ export async function importLegacyProvidersForUser(userId) {
       const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(keyName) ? process.env[keyName] : '';
       const baseUrl = String(item?.baseUrl || '').trim().replace(/\/+$/, '');
       const model = String(item?.model || item?.models?.reasoning || '').trim();
-      if (apiKey && model && /^https:\/\//i.test(baseUrl) && !candidates.some(x => x.baseUrl === baseUrl)) {
+      if (apiKey && model && /^https:\/\//i.test(baseUrl)) {
         candidates.push({ label: String(item.name || 'Proveedor externo').slice(0,80), key: apiKey, baseUrl, reasoning: String(item.models?.reasoning || model), coding: String(item.models?.coding || model), validation: String(item.models?.validation || model) });
       }
     }
   } catch { /* Never log legacy provider configuration or credentials. */ }
   let imported = 0;
   for (const item of candidates.slice(0, 10)) {
-    const exists = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 LIMIT 1', [userId, item.baseUrl]);
+    const exists = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 AND label=$3 LIMIT 1', [userId, item.baseUrl, item.label]);
     if (exists.rows.length) continue;
     await pool.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
       VALUES($1,(SELECT COALESCE(MAX(slot),0)+1 FROM user_api_keys WHERE user_id=$1),$2,$3,$4,$5,$6,$7)`,
