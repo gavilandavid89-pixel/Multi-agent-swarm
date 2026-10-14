@@ -12,10 +12,14 @@ if (!connectionString) throw new Error('DATABASE_URL es obligatorio: configurá 
 const encryptionHex = process.env.HISTORY_ENCRYPTION_KEY || '';
 if (!/^[0-9a-fA-F]{64}$/.test(encryptionHex)) throw new Error('HISTORY_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales. Generala con: openssl rand -hex 32');
 const encryptionKey = Buffer.from(encryptionHex, 'hex');
+const configuredConcurrency = Number.parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
+const workerConcurrency = Number.isFinite(configuredConcurrency) ? Math.min(8, Math.max(1, configuredConcurrency)) : 1;
+const configuredPoolSize = Number.parseInt(process.env.PG_POOL_SIZE || '5', 10);
+const poolMax = Math.max(workerConcurrency + 2, Math.min(10, Number.isFinite(configuredPoolSize) ? Math.max(2, configuredPoolSize) : 5));
 const pool = new Pool({
   connectionString,
   ssl: /render\.com/i.test(connectionString) ? { rejectUnauthorized: false } : undefined,
-  max: Math.max(2, Math.min(10, Number.parseInt(process.env.PG_POOL_SIZE || '5', 10) || 5)),
+  max: poolMax,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000
 });
