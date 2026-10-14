@@ -4,7 +4,7 @@ import express from 'express';
 import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
-import { canContinueBudgetTask } from './services/tokenAccounting.js';
+import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
 
 const app = express();
@@ -62,12 +62,20 @@ app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
   if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
   const nextBudget = Math.min(100000, Math.max(4000, Math.round(requested / 1000) * 1000));
   if (nextBudget <= currentBudget) return res.status(400).json({ error: 'El nuevo límite debe superar el límite actual.' });
-  await updateJob(req.params.id, { payload: { tokenBudget: nextBudget } });
-  if (record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '')) {
-    await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reanudar con más tokens', progress: Math.min(record.publicJob.progress, 90), error: null });
+  const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
+  if (budgetPaused) {
+    const patch = buildAutomaticBudgetExtensionPatch(record, currentBudget, nextBudget);
+    if (!patch) return res.status(400).json({ error: 'No se pudo preparar la reanudación con ese límite.' });
+    await updateJob(req.params.id, patch);
     enqueue(req.params.id);
+  } else {
+    await updateJob(req.params.id, { payload: { tokenBudget: nextBudget } });
   }
-  res.json({ tokenBudget: nextBudget }); } catch (error) { next(error); }
+  console.info('[worker][token_budget_manual_extended]', JSON.stringify({
+    jobId: req.params.id, previousLimit: currentBudget, nextLimit: nextBudget,
+    resumed: budgetPaused, checkpoint: record.payload.lastCheckpoint || null
+  }));
+  res.json({ tokenBudget: nextBudget, resumed: budgetPaused }); } catch (error) { next(error); }
 });
 app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
   try {
