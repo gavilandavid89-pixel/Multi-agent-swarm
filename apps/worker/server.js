@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withJobProviders, copyJobOwnership, importLegacyProvidersForUser } from './services/userProviders.js';
+import { withJobProviders, copyJobOwnership, ensureJobOwnership, importLegacyProvidersForUser } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -71,7 +71,16 @@ app.post('/internal/jobs', async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
+  try {
+    const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null;
+    const job = await createJob(objective, tokenBudget, userId);
+    if (userId) {
+      try { await ensureJobOwnership(job.id, userId); }
+      catch (error) { console.warn('[worker][job_ownership_mapping_deferred]', JSON.stringify({ jobId: job.id, code: error?.code || 'internal' })); }
+    }
+    enqueue(job.id);
+    res.status(202).json(job);
+  }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
