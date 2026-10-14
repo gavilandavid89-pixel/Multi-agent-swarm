@@ -167,6 +167,11 @@ export async function consultarGemini({
       retry++;
       const wait = retryDelay(retry, response.headers.get('retry-after'), bodyText);
       const reason = `HTTP ${response.status}`;
+      // A very long Gemini 429 cooldown usually indicates exhausted quota, not a short transient.
+      // If Groq is configured, fail over immediately instead of sleeping for many hours.
+      if (response.status === 429 && wait >= 5 * 60 * 1000 && process.env.GROQ_API_KEY) {
+        throw deferredProviderError(model, retry, wait, reason);
+      }
       await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
       await sleep(wait);
