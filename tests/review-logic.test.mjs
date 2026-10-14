@@ -89,3 +89,61 @@ test('respeta el margen restante y no envía otra llamada si solo quedan unos po
 });
 
 test('estima entrada de forma conservadora antes de gastar presupuesto en salida', () => { assert.equal(estimateInputTokens([]), 0); assert.equal(estimateInputTokens([{ role: 'user', content: '12345' }]), 10); assert.ok(estimateInputTokens([{ content: 'x'.repeat(2500) }]) >= 1000); });
+
+
+test('recorta salida en respuesta HTTP 413 por TPM y reintenta con presupuesto menor', async () => {
+  const { consultarModelo } = await import('../apps/worker/services/aiProviders.js');
+  const priorKey = process.env.GROQ_API_KEY, priorGemini = process.env.GEMINI_API_KEY;
+  const priorFetch = globalThis.fetch, priorLimit = process.env.MAX_OUTPUT_TOKENS_PER_CALL;
+  process.env.GROQ_API_KEY = 'mock-key';
+  delete process.env.GEMINI_API_KEY;
+  process.env.MAX_OUTPUT_TOKENS_PER_CALL = '6000';
+  const requests = [], retryEvents = [];
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    if (requests.length === 1) return new Response(JSON.stringify({
+      error: { message: 'Request too large for model on tokens per minute (TPM): Limit 8000, Requested 8102, reduce message size.' }
+    }), { status: 413, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({
+      choices: [{ finish_reason: 'stop', message: { content: 'respuesta compacta' } }],
+      usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await consultarModelo({ model: 'test-model', messages: [{ role: 'user', content: 'test' }], maxTokens: 6000, onRetry: info => retryEvents.push(info) });
+    assert.equal(result, 'respuesta compacta');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].max_completion_tokens, 6000);
+    assert.equal(requests[1].max_completion_tokens, 5834);
+    assert.ok(retryEvents.some(info => /413.*TPM/.test(info.reason || '')));
+  } finally {
+    globalThis.fetch = priorFetch;
+    if (priorKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = priorKey;
+    if (priorGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = priorGemini;
+    if (priorLimit === undefined) delete process.env.MAX_OUTPUT_TOKENS_PER_CALL; else process.env.MAX_OUTPUT_TOKENS_PER_CALL = priorLimit;
+  }
+});
+
+test('si el presupuesto de salida ya está en el mínimo, un HTTP 413 se detiene sin bucle', async () => {
+  const { consultarModelo } = await import('../apps/worker/services/aiProviders.js');
+  const priorKey = process.env.GROQ_API_KEY, priorGemini = process.env.GEMINI_API_KEY;
+  const priorFetch = globalThis.fetch;
+  process.env.GROQ_API_KEY = 'mock-key';
+  delete process.env.GEMINI_API_KEY;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(JSON.stringify({ error: { message: 'TPM: Limit 8000, Requested 8200' } }), {
+      status: 413, headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    await assert.rejects(consultarModelo({ model: 'test-model', messages: [], maxTokens: 256 }),
+      error => error.code === 'PROVIDER_INPUT_TOO_LARGE' && /HTTP 413/.test(error.message));
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = priorFetch;
+    if (priorKey === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = priorKey;
+    if (priorGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = priorGemini;
+  }
+});
