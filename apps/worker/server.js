@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 
@@ -66,6 +66,15 @@ app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
     enqueue(req.params.id);
   }
   res.json({ tokenBudget: nextBudget }); } catch (error) { next(error); }
+});
+app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
+  try {
+    const result = await createContinuationJob(req.params.id);
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    enqueue(result.job.id);
+    console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 100000 }));
+    res.status(202).json(result.job);
+  } catch (error) { next(error); }
 });
 app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
