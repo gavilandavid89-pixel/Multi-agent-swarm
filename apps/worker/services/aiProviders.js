@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
+import { currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -78,19 +79,23 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
  */
 export async function consultarModelo(options) {
   const { model, maxTokens = 1200, messages } = options;
-  const providers = configuredOpenAIProviders(model, maxTokens, process.env);
-  if (process.env.GEMINI_API_KEY) {
+  const userContext = currentUserProviders();
+  const providers = userContext
+    ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
+    : configuredOpenAIProviders(model, maxTokens, process.env);
+  const gemini = userContext ? userContext.gemini : (process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : null);
+  if (gemini?.apiKey) {
     try {
-      return await consultarGemini({ ...options, failoverOnRetryable: providers.length > 0 });
+      return await consultarGemini({ ...options, ...(gemini.models?.reasoning ? { model: providerModelForSlot(gemini, model, maxTokens) } : {}), apiKey: gemini.apiKey, failoverOnRetryable: providers.length > 0 });
     } catch (error) {
       if (!isFailoverEligible(error) || !providers.length) throw error;
       console.warn('[worker][provider_failover]', JSON.stringify({
-        from: 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
+        from: gemini.name || 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
         model: providers[0].model
       }));
     }
   }
-  if (!providers.length) throw new Error('No hay proveedores de IA configurados. Configurá GEMINI_API_KEY, GROQ_API_KEY o AI_FALLBACK_PROVIDERS.');
+  if (!providers.length) throw new Error(userContext ? 'Esta cuenta no tiene proveedores de IA configurados. Abrí API 🔐 y agregá una clave.' : 'No hay proveedores de IA configurados. Configurá GEMINI_API_KEY, GROQ_API_KEY o AI_FALLBACK_PROVIDERS.');
   const errors = [];
   for (let index = 0; index < providers.length; index++) {
     const provider = providers[index];
@@ -233,9 +238,16 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
-const reasoningModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b');
-const codingModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
-const validationModel = () => process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b');
+function userModel(slot) {
+  const context = currentUserProviders();
+  if (!context) return null;
+  if (context.gemini?.models?.[slot]) return context.gemini.models[slot];
+  const provider = context.providers[0];
+  return provider?.models?.[slot] || provider?.models?.reasoning || 'gpt-4o-mini';
+}
+const reasoningModel = () => userModel('reasoning') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b'));
+const codingModel = () => userModel('coding') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b'));
+const validationModel = () => userModel('validation') || (currentUserProviders() ? 'gpt-4o-mini' : process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b'));
 function boundContext(value, maxChars, label) {
   const text = String(value ?? '');
   if (text.length <= maxChars) return text;
