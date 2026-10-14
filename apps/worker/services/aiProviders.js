@@ -19,6 +19,18 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
+  const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
+  if (typeof onRetry.getMaxOutputTokens === 'function') {
+    const allowance = Number(await onRetry.getMaxOutputTokens(requestedOutputTokens));
+    if (!Number.isFinite(allowance) || allowance < 256) {
+      const error = new Error('Presupuesto de tokens insuficiente para iniciar otra llamada. El checkpoint se conserva para reanudar cuando se amplíe el límite.');
+      error.code = 'TASK_TOKEN_BUDGET';
+      throw error;
+    }
+    maxTokens = Math.min(requestedOutputTokens, Math.floor(allowance));
+  } else {
+    maxTokens = requestedOutputTokens;
+  }
   if (process.env.GEMINI_API_KEY) {
     try {
       return await consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
@@ -64,7 +76,9 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       await onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!(await canContinue())) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        const allowance = await canContinue(safeMaxTokens);
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
         console.info('[worker][provider_continuation]', JSON.stringify({ model, continuation: continuationCount, maxContinuations }));
