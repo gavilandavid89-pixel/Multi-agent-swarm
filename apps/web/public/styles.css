@@ -67,7 +67,7 @@
 .token-budget-track{height:9px;overflow:hidden;border-radius:99px;background:#ffffff10;border:1px solid #c7a9ff12}
 .token-budget-track span{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--violet),var(--pink));transition:width .4s ease}
 .token-budget-track.token-budget-low span{background:linear-gradient(90deg,#ffb36b,var(--red))}
-.token-budget-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+.token-budget-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
 .token-budget-stats span{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:10px}
 .token-budget-stats strong{color:var(--text);font-size:12px;font-variant-numeric:tabular-nums}
 #token-budget-note{margin:9px 0 0}

@@ -2,6 +2,7 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { applyTokenUsage } from './tokenAccounting.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -11,10 +12,14 @@ if (!connectionString) throw new Error('DATABASE_URL es obligatorio: configurá 
 const encryptionHex = process.env.HISTORY_ENCRYPTION_KEY || '';
 if (!/^[0-9a-fA-F]{64}$/.test(encryptionHex)) throw new Error('HISTORY_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales. Generala con: openssl rand -hex 32');
 const encryptionKey = Buffer.from(encryptionHex, 'hex');
+const configuredConcurrency = Number.parseInt(process.env.WORKER_CONCURRENCY || '1', 10);
+const workerConcurrency = Number.isFinite(configuredConcurrency) ? Math.min(8, Math.max(1, configuredConcurrency)) : 1;
+const configuredPoolSize = Number.parseInt(process.env.PG_POOL_SIZE || '5', 10);
+const poolMax = Math.max(workerConcurrency + 2, Math.min(10, Number.isFinite(configuredPoolSize) ? Math.max(2, configuredPoolSize) : 5));
 const pool = new Pool({
   connectionString,
   ssl: /render\.com/i.test(connectionString) ? { rejectUnauthorized: false } : undefined,
-  max: Math.max(2, Math.min(10, Number.parseInt(process.env.PG_POOL_SIZE || '5', 10) || 5)),
+  max: poolMax,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000
 });
@@ -135,6 +140,86 @@ export async function getJob(id) {
 export async function getPayload(id) {
   const { rows } = await pool.query('SELECT * FROM jobs WHERE id=$1', [id]);
   return rows[0] ? { publicJob: toPublic(rows[0]), payload: unseal(rows[0].encrypted_payload) } : null;
+}
+/**
+ * Cross-process per-job mutex. A PostgreSQL session lock prevents duplicate work during
+ * overlapping deploys or when the service runs more than one instance. It is released
+ * automatically if the process or database connection dies.
+ */
+export async function withJobLock(id, operation) {
+  let client;
+  let locked = false;
+  let discardConnection = null;
+  const jobId = String(id);
+  try {
+    client = await pool.connect();
+    const { rows } = await client.query(
+      'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked',
+      [jobId]
+    );
+    locked = Boolean(rows[0]?.locked);
+    if (!locked) return { lockBusy: true };
+    return await operation();
+  } finally {
+    if (client) {
+      if (locked) {
+        try {
+          await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [jobId]);
+        } catch (error) {
+          discardConnection = error;
+          console.error('[worker][job_lock_release_error]', JSON.stringify({ jobId, message: String(error?.message || error).slice(0, 300) }));
+        }
+      }
+      client.release(discardConnection || undefined);
+    }
+  }
+}
+
+export async function recordTokenUsage(id, info = {}) {
+  return serialized(id, async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
+      const row = rows[0];
+      if (!row) { await client.query('COMMIT'); return { missing: true, duplicate: false }; }
+      const payload = unseal(row.encrypted_payload);
+      const usageId = String(info.usageId || randomUUID());
+      const accounted = applyTokenUsage(payload.tokenUsage, { ...info, usageId }, {
+        eventIds: payload.usageEventIds || [],
+        status: row.status
+      });
+      payload.tokenUsage = accounted.usage;
+      payload.usageEventIds = accounted.eventIds;
+      if (accounted.event) {
+        const entry = {
+          at: now(),
+          agent: 'sistema',
+          type: 'usage',
+          content: JSON.stringify(accounted.event)
+        };
+        payload.transcript = [...(Array.isArray(payload.transcript) ? payload.transcript : []), entry].slice(-400);
+      }
+      const updatedAt = now();
+      await client.query(
+        'UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1',
+        [id, updatedAt, seal(payload)]
+      );
+      await client.query('COMMIT');
+      return {
+        duplicate: accounted.duplicate,
+        missing: false,
+        usage: payload.tokenUsage,
+        event: accounted.event,
+        statusAtResponse: row.status
+      };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
 }
 export async function updateJob(id, patch = {}) {
   return serialized(id, async () => {

@@ -1,5 +1,5 @@
 import { consultarModelo } from './aiProviders.js';
-import { getPayload, updateJob } from './store.js';
+import { getPayload, updateJob, recordTokenUsage } from './store.js';
 
 const allowedAgents = new Set(['Arquitecto', 'Escéptico', 'Árbitro', 'Desarrollador', 'Validador', 'Coordinador de coherencia']);
 const clip = (value, max = 5000) => String(value ?? '').slice(0, max);
@@ -36,26 +36,29 @@ export async function replyToAgent(jobId, requestedAgent, message) {
     Validador: 'Validador independiente: evaluá los hallazgos y separá errores demostrados de sospechas. No apruebes algo que no inspeccionaste.',
     'Coordinador de coherencia': 'Coordinador de coherencia: explicá los contratos entre archivos, dependencias y posibles incompatibilidades del mapa compartido. No afirmes que aplicaste cambios; indicá qué agente y qué archivo deberían cambiarse.'
   }[agent];
-  const current = (await getPayload(jobId))?.payload || payload;
-  const prior = current.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
   const onRetry = async info => {
+    if (info.usage) {
+      const accounted = await recordTokenUsage(jobId, {
+        ...info,
+        agent,
+        stage: 'Chat directo',
+        interaction: 'direct-chat'
+      });
+      console.info('[worker][provider_usage]', JSON.stringify({
+        jobId, model: info.model, agent, stage: 'Chat directo', interaction: 'direct-chat',
+        promptTokens: info.promptTokens || 0, completionTokens: info.completionTokens || 0,
+        totalTokens: info.totalTokens || 0, duplicateIgnored: Boolean(accounted.duplicate),
+        countedAsWaste: Boolean(accounted.event?.countedAsWaste)
+      }));
+      return;
+    }
     const fresh = await getPayload(jobId);
     if (!fresh) return;
-    const p = fresh.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
-    if (info.usage) {
-      const model = String(info.model || 'desconocido');
-      const promptTokens = Number(info.promptTokens) || 0;
-      const completionTokens = Number(info.completionTokens) || 0;
-      const totalTokens = Number(info.totalTokens) || promptTokens + completionTokens;
-      const modelPrior = p.byModel?.[model] || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
-      const byModel = { ...(p.byModel || {}), [model]: { promptTokens: modelPrior.promptTokens + promptTokens, completionTokens: modelPrior.completionTokens + completionTokens, totalTokens: modelPrior.totalTokens + totalTokens, calls: modelPrior.calls + 1 } };
-      const tokenUsage = { promptTokens: p.promptTokens + promptTokens, completionTokens: p.completionTokens + completionTokens, totalTokens: p.totalTokens + totalTokens, calls: p.calls + 1, byModel };
-      const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'usage', content: JSON.stringify({ model, promptTokens, completionTokens, totalTokens }) });
-      await updateJob(jobId, { payload: { tokenUsage, transcript } });
-    } else {
-      const transcript = append(fresh.payload.transcript, { at: now(), agent: 'sistema', type: 'retry', content: `Chat directo · reintento ${info.retry}; espera ${Math.ceil((info.wait || 0) / 1000)} s; motivo: ${clip(info.reason, 180)}` });
-      await updateJob(jobId, { payload: { transcript } });
-    }
+    const transcript = append(fresh.payload.transcript, {
+      at: now(), agent: 'sistema', type: 'retry',
+      content: `[Chat directo · ${agent}] Reintento ${info.retry}; espera ${Math.ceil((info.wait || 0) / 1000)} s; motivo: ${clip(info.reason, 180)}`
+    });
+    await updateJob(jobId, { payload: { transcript } });
   };
   const geminiEnabled = Boolean(process.env.GEMINI_API_KEY);
   const model = agent === 'Validador'

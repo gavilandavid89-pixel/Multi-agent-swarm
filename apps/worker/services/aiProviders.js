@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
@@ -18,6 +19,18 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
 export async function consultarModelo({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {} }) {
+  const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
+  if (typeof onRetry.getMaxOutputTokens === 'function') {
+    const allowance = Number(await onRetry.getMaxOutputTokens(requestedOutputTokens));
+    if (!Number.isFinite(allowance) || allowance < 256) {
+      const error = new Error('Presupuesto de tokens insuficiente para iniciar otra llamada. El checkpoint se conserva para reanudar cuando se amplíe el límite.');
+      error.code = 'TASK_TOKEN_BUDGET';
+      throw error;
+    }
+    maxTokens = Math.min(requestedOutputTokens, Math.floor(allowance));
+  } else {
+    maxTokens = requestedOutputTokens;
+  }
   if (process.env.GEMINI_API_KEY) {
     try {
       return await consultarGemini({ model, messages, temperature, maxTokens, responseFormat, onRetry, continueOnLength, maxContinuations, canContinue, onPartialOutput });
@@ -38,6 +51,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
   let safeMaxTokens = Math.min(maxSafeOutputTokens, requestedMaxTokens);
   while (true) {
+    const usageId = randomUUID();
     let response;
     try { response = await fetch(GROQ_URL, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false, ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
@@ -49,7 +63,7 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
     if (response.ok) {
       const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
       const usage = data?.usage || {};
-      await onRetry({ usage: true, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
+      await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
         emptyRetries++;
         const diagnostic = `finish_reason=${String(choice?.finish_reason || 'desconocido')}; campos_mensaje=${Object.keys(message || {}).join(',') || 'ninguno'}; tokens_salida=${String(data?.usage?.completion_tokens ?? 'desconocido')}; razonamiento_oculto=${typeof message?.reasoning === 'string' ? message.reasoning.length : 0}`;
@@ -62,7 +76,9 @@ export async function consultarModelo({ model, messages, temperature = 0.3, maxT
       await onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!(await canContinue())) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        const allowance = await canContinue(safeMaxTokens);
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
         console.info('[worker][provider_continuation]', JSON.stringify({ model, continuation: continuationCount, maxContinuations }));
@@ -108,7 +124,7 @@ export async function agenteCoordinador(objetivo, estrategia, propuesta, critica
   return consultarModelo({
     model: reasoningModel(), temperature: 0.1, maxTokens: 1800, onRetry,
     messages: [
-      sys('Coordinador de coherencia', 'Convertí el objetivo y el plan en un contrato compartido para todos los agentes. Devolvé un mapa estructurado en español con: OBJETIVO Y ALCANCE, DECISIONES FIJAS, INVENTARIO DE MÓDULOS/ARCHIVOS ESPERADOS, CONTRATOS ENTRE ARCHIVOS (clases, funciones, formatos de datos, rutas y eventos), DEPENDENCIAS Y ORDEN DE IMPLEMENTACIÓN, REGLAS DE COMPATIBILIDAD, CRITERIOS DE COHERENCIA y RIESGOS/INCERTIDUMBRES. No inventes archivos ya existentes: distinguí entre propuestos y confirmados. Cada agente debe respetar estos contratos y avisar si necesita cambiarlos; favorecé cambios mínimos y coherentes.'),
+      sys('Coordinador de coherencia', 'Fijá un contrato de equipo conciso: alcance y decisiones invariables; inventario de módulos con responsable lógico; dependencias en orden; exportaciones/importaciones, rutas, esquemas y eventos compartidos; límites de seguridad; compatibilidad y criterios de coherencia. Distinguí archivos confirmados de propuestos. Evitá definir dos veces la misma responsabilidad. Indicá qué otros módulos hay que revisar si cambia un contrato. No inventes archivos ni presentes supuestos como hechos; cada agente debe avisar antes de romper un contrato.'),
       { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 2200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2600, 'estrategia') + '\n\nPROPUESTA:\n' + boundContext(propuesta, 1400, 'propuesta') + '\n\nAUDITORÍA ESCÉPTICA:\n' + boundContext(critica, 1400, 'auditoría') }
     ]
   });
@@ -155,13 +171,13 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
   };
 }
 export async function agenteArquitecto(objetivo, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Diseñá una solución modular, concreta y mantenible. Enumerá supuestos, componentes, riesgos y criterios de aceptación.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Entregá una propuesta compacta con OBJETIVO/ALCANCE, decisiones e invariantes, módulos afectados, orden de etapas, criterios de aceptación observables, pruebas y riesgos/supuestos. Favorecé la solución mínima que satisfaga el objetivo; distinguí requisitos obligatorios de mejoras opcionales. No inventes infraestructura disponible ni prometas pruebas ejecutadas.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
 }
 export async function agenteEsceptico(objetivo, propuesta, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1000, onRetry, messages: [sys('Escéptico/Auditor', 'Buscá fallos lógicos, amenazas, casos límite, dependencias y costos ocultos. Intentá refutar la propuesta de forma útil.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1000, onRetry, messages: [sys('Escéptico/Auditor', 'Intentá refutar la propuesta con escenarios concretos de fallo, no con opiniones de estilo. Priorizá como BLOQUEANTE/ALTO/MEDIO; por cada hallazgo incluye condición que lo dispara, impacto y cómo comprobarlo. Máximo cinco riesgos distintos, eliminá duplicados y reconocé explícitamente los supuestos que no podés verificar.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
 }
 export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sintetizá una estrategia final y accionable. Resolvé explícitamente las objeciones válidas y señalá las incertidumbres restantes.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Resolvé cada hallazgo del Escéptico con decisión ACEPTAR/RECHAZAR/APLAZAR y una razón breve; no copies la crítica entera. Convertí los riesgos aceptados en controles verificables y producí un plan mínimo ordenado, criterios de aceptación y dudas que requieren decisión humana. No escondas desacuerdos sin resolver.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
 export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}) {
   const repairing = Boolean(errores && String(errores).trim());

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -76,6 +77,7 @@ export async function consultarGemini({
   let requestMessages = messages;
 
   while (true) {
+    const usageId = randomUUID();
     const converted = toGeminiContents(requestMessages);
     if (!converted.contents.length) throw new Error('Gemini recibió una conversación vacía.');
     const body = {
@@ -112,6 +114,7 @@ export async function consultarGemini({
       const usage = data?.usageMetadata || {};
       await onRetry({
         usage: true,
+        usageId,
         model,
         promptTokens: Number(usage.promptTokenCount) || 0,
         completionTokens: Number(usage.candidatesTokenCount) || 0,
@@ -140,11 +143,13 @@ export async function consultarGemini({
 
       const truncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
-        if (!(await canContinue())) {
+        const allowance = await canContinue(safeMaxTokens);
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
           const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; ampliá el límite desde la interfaz para reanudar.');
           error.code = 'TASK_TOKEN_BUDGET';
           throw error;
         }
+        if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [
           ...requestMessages,
