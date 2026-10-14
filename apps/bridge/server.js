@@ -66,45 +66,49 @@ app.post('/api/auth/login', async (req, res) => {
         const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
         console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
       } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
-      try {
-        // Only jobs that predate the first administrator are legacy. Later jobs
-        // belong to the userId stored in their encrypted payload, or inherit the
-        // owner of their continuation parent. Never claim an unlinked new job as admin.
-        const cutoffMs = new Date(user.created_at).getTime();
-        const legacyJobs = [];
-        let offset = 0; let total = 0;
-        do {
-          const page = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
-          const jobs = Array.isArray(page) ? page : (Array.isArray(page?.jobs) ? page.jobs : []);
-          total = Number(page?.total) || jobs.length;
-          legacyJobs.push(...jobs);
-          offset += jobs.length;
-          if (!jobs.length) break;
-        } while (offset < total);
-        legacyJobs.sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
-        const ids = legacyJobs.filter(job => job?.id).map(job => String(job.id));
-        const existing = ids.length
-          ? await pool.query('SELECT job_id,user_id FROM user_job_ownership WHERE job_id = ANY($1::text[])', [ids])
-          : { rows: [] };
-        const owners = new Map(existing.rows.map(row => [String(row.job_id), String(row.user_id)]));
-        const knownUsers = await pool.query('SELECT id FROM app_users WHERE disabled_at IS NULL');
-        const knownUserIds = new Set(knownUsers.rows.map(row => String(row.id)));
-        let assigned = 0;
-        for (const job of legacyJobs) {
-          if (!job?.id) continue;
-          const jobId = String(job.id);
-          if (owners.has(jobId)) continue;
-          let ownerId = job.userId && knownUserIds.has(String(job.userId)) ? String(job.userId) : null;
-          if (!ownerId && job.continuationOf) ownerId = owners.get(String(job.continuationOf)) || null;
-          const createdMs = Date.parse(job.createdAt || '');
-          if (!ownerId && Number.isFinite(cutoffMs) && Number.isFinite(createdMs) && createdMs < cutoffMs) ownerId = user.id;
-          if (!ownerId) continue;
-          await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, ownerId]);
-          owners.set(jobId, ownerId);
-          assigned++;
-        }
-        console.info('[bridge][legacy_job_migration]', JSON.stringify({ scanned: legacyJobs.length, assigned }));
-      } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+      const completedJobMigration = await pool.query('SELECT 1 FROM user_job_migrations WHERE user_id=$1', [user.id]);
+      if (!completedJobMigration.rows.length) {
+        try {
+          // Only jobs that predate the first administrator are legacy. Later jobs
+          // belong to the userId stored in their encrypted payload, or inherit the
+          // owner of their continuation parent. Never claim an unlinked new job as admin.
+          const cutoffMs = new Date(user.created_at).getTime();
+          const legacyJobs = [];
+          let offset = 0; let total = 0;
+          do {
+            const page = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+            const jobs = Array.isArray(page) ? page : (Array.isArray(page?.jobs) ? page.jobs : []);
+            total = Number(page?.total) || jobs.length;
+            legacyJobs.push(...jobs);
+            offset += jobs.length;
+            if (!jobs.length) break;
+          } while (offset < total);
+          legacyJobs.sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+          const ids = legacyJobs.filter(job => job?.id).map(job => String(job.id));
+          const existing = ids.length
+            ? await pool.query('SELECT job_id,user_id FROM user_job_ownership WHERE job_id = ANY($1::text[])', [ids])
+            : { rows: [] };
+          const owners = new Map(existing.rows.map(row => [String(row.job_id), String(row.user_id)]));
+          const knownUsers = await pool.query('SELECT id FROM app_users WHERE disabled_at IS NULL');
+          const knownUserIds = new Set(knownUsers.rows.map(row => String(row.id)));
+          let assigned = 0;
+          for (const job of legacyJobs) {
+            if (!job?.id) continue;
+            const jobId = String(job.id);
+            if (owners.has(jobId)) continue;
+            let ownerId = job.userId && knownUserIds.has(String(job.userId)) ? String(job.userId) : null;
+            if (!ownerId && job.continuationOf) ownerId = owners.get(String(job.continuationOf)) || null;
+            const createdMs = Date.parse(job.createdAt || '');
+            if (!ownerId && Number.isFinite(cutoffMs) && Number.isFinite(createdMs) && createdMs < cutoffMs) ownerId = user.id;
+            if (!ownerId) continue;
+            await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, ownerId]);
+            owners.set(jobId, ownerId);
+            assigned++;
+          }
+          console.info('[bridge][legacy_job_migration]', JSON.stringify({ scanned: legacyJobs.length, assigned }));
+          await pool.query('INSERT INTO user_job_migrations(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [user.id]);
+        } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+      }
     }
     failedAuth.delete(ip);
     const token = await createSession(user.id);
