@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
-import { getDeferredCooldownMs } from './providerRetryPolicy.js';
+import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -111,6 +111,11 @@ export async function processJob(jobId) {
 
 async function runJob(jobId) {
   const initial = await getPayload(jobId); if (!initial) return; if (initial.publicJob.status === 'completed') return;
+  const scheduledDelay = getScheduledJobDelayMs({ status: initial.publicJob.status, retryAt: initial.payload.retryAt });
+  if (scheduledDelay > 0) {
+    console.info('[worker][job_cooldown_respected]', JSON.stringify({ jobId, retryAfterMs: scheduledDelay, retryAt: initial.payload.retryAt }));
+    return { deferred: true, retryAfterMs: scheduledDelay, respectingScheduledCooldown: true };
+  }
   const objective = initial.payload.objective;
   const onRetry = (agent, stage) => {
     const notify = info => retryNotice(jobId, { ...info, agent, stage, interaction: 'workflow' });
