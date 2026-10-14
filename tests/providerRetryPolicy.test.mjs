@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getDeferredCooldownMs, getProviderRetryDelayMs } from '../apps/worker/services/providerRetryPolicy.js';
+import { getDeferredCooldownMs, getProviderRetryDelayMs, getScheduledJobDelayMs } from '../apps/worker/services/providerRetryPolicy.js';
 
 test('prioriza el Retry-After enviado por el proveedor', () => {
   assert.equal(getProviderRetryDelayMs({ retry: 4, retryAfter: '17', random: () => 0.5 }), 17000);
@@ -34,4 +34,12 @@ test('aumenta la pausa entre ciclos cuando el proveedor sigue limitado', () => {
 test('limita el cooldown máximo y conserva el mínimo de espera', () => {
   assert.equal(getDeferredCooldownMs(999999999, 20), 1800000);
   assert.equal(getDeferredCooldownMs(0, 0), 30000);
+});
+
+test('no permite que un sondeo de otro worker adelante una reanudación programada', () => {
+  const now = Date.parse('2026-10-14T00:00:00.000Z');
+  assert.equal(getScheduledJobDelayMs({ status: 'queued', retryAt: '2026-10-14T00:10:00.000Z', now }), 600000);
+  assert.equal(getScheduledJobDelayMs({ status: 'queued', retryAt: '2026-10-13T23:59:00.000Z', now }), 0);
+  assert.equal(getScheduledJobDelayMs({ status: 'running', retryAt: '2026-10-14T00:10:00.000Z', now }), 0);
+  assert.equal(getScheduledJobDelayMs({ status: 'queued', retryAt: 'invalid', now }), 0);
 });
