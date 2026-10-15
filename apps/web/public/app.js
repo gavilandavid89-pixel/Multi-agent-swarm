@@ -537,7 +537,7 @@ function apiFieldRow(api = {}) {
       }
       customUrlLabel.classList.remove('hidden');
       row.dataset.baseUrl = customUrlInput.value.trim();
-      row.dataset.label = api.label || 'API personalizada';
+      row.dataset.label = customProvider ? (api.label || 'API personalizada') : 'API personalizada';
       meta.textContent = 'La API personalizada debe ser compatible con OpenAI Chat Completions y usar HTTPS público. No se admiten direcciones privadas.';
     } else {
       for (const role of ['reasoning','coding','validation']) {
