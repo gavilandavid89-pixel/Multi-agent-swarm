@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
+import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -71,6 +71,24 @@ app.get('/api/auth/bootstrap-status', async (_req, res) => {
   try { const { rows } = await pool.query('SELECT EXISTS(SELECT 1 FROM app_users) AS initialized'); res.json({ initialized: rows[0].initialized }); }
   catch { res.status(503).json({ error: 'No se pudo consultar el estado de la cuenta.' }); }
 });
+app.post('/api/auth/validate-invite', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const limit = windowLimit(failedAuth, `invite:${ip}`, 12, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    res.set('Retry-After', String(limit.retryAfter));
+    return res.status(429).json({ valid: false, error: 'Demasiados intentos. Probá más tarde.' });
+  }
+  const invite = typeof req.body?.invite === 'string' ? req.body.invite.trim() : '';
+  if (invite.length < 20 || invite.length > 200) return res.status(400).json({ valid: false, error: 'Pegá un código de invitación válido.' });
+  try {
+    const valid = await validateInvite(invite);
+    res.status(valid ? 200 : 400).json(valid
+      ? { valid: true }
+      : { valid: false, error: 'La invitación no es válida, venció o ya fue utilizada.' });
+  } catch {
+    res.status(503).json({ valid: false, error: 'No se pudo validar la invitación. Intentá nuevamente.' });
+  }
+});
 app.post('/api/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const username = String(req.body?.username || '').trim().toLowerCase();
@@ -134,7 +152,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 app.use('/api', async (req, res, next) => {
-  if (['/auth/login','/auth/register','/auth/bootstrap-status'].includes(req.path)) return next();
+  if (['/auth/login','/auth/register','/auth/validate-invite','/auth/bootstrap-status'].includes(req.path)) return next();
   const auth = req.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   try {
