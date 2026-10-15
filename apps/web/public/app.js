@@ -12,7 +12,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
-function showApp() { $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
+function showApp() { $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -789,17 +789,33 @@ $('create-invite').addEventListener('click', async () => {
 });
 
 
+function syncRegistrationAvailability() {
+  const invite = $('register-invite').value.trim();
+  const submit = $('register-form').querySelector('button[type="submit"]');
+  submit.disabled = invite.length < 20;
+  $('register-status').textContent = invite.length < 20
+    ? 'Necesitás un enlace o código de invitación válido. Crear una cuenta nunca otorga permisos de administrador.'
+    : '';
+}
 $('show-register').addEventListener('click', () => {
   $('register-form').classList.toggle('hidden');
   const invite = new URLSearchParams(location.search).get('invite');
   if (invite) $('register-invite').value = invite;
+  syncRegistrationAvailability();
 });
+$('register-invite').addEventListener('input', syncRegistrationAvailability);
 $('register-form').addEventListener('submit', async event => {
   event.preventDefault();
+  const inviteCode = $('register-invite').value.trim();
+  if (inviteCode.length < 20) {
+    $('register-status').textContent = 'No se puede crear una cuenta sin invitación válida.';
+    syncRegistrationAvailability();
+    return;
+  }
   const button = $('register-form').querySelector('button[type="submit"]'); button.disabled = true;
-  $('register-status').textContent = 'Creando tu cuenta privada…';
+  $('register-status').textContent = 'Validando la invitación y creando una cuenta de usuario…';
   try {
-    const body = { invite: $('register-invite').value.trim(), username: $('register-username').value.trim().toLowerCase(), password: $('register-password').value };
+    const body = { invite: inviteCode, username: $('register-username').value.trim().toLowerCase(), password: $('register-password').value };
     const response = await fetch('/api/auth/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'No se pudo crear la cuenta.');
@@ -817,6 +833,7 @@ if (new URLSearchParams(location.search).has('invite')) {
   $('register-form').classList.remove('hidden');
   $('register-invite').value = new URLSearchParams(location.search).get('invite') || '';
 }
+syncRegistrationAvailability();
 
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault();
