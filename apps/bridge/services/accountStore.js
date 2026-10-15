@@ -1,4 +1,4 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createCipheriv, createDecipheriv, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import pg from 'pg';
 import { isIP } from 'node:net';
 
@@ -21,11 +21,16 @@ export async function initAccountStore() {
   await pool.query(`CREATE TABLE IF NOT EXISTS app_users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
+    account_code TEXT UNIQUE, access_key_hash TEXT, access_key_encrypted TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(), disabled_at TIMESTAMPTZ
   )`);
   // CREATE TABLE IF NOT EXISTS does not evolve an already deployed schema.
   // This migration is required for databases created before account deactivation existed.
   await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ');
+  await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS account_code TEXT');
+  await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS access_key_hash TEXT');
+  await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS access_key_encrypted TEXT');
+  await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS app_users_account_code_idx ON app_users(account_code) WHERE account_code IS NOT NULL');
   // Enforce at the database level that there can be only one administrator.
   // Registration from an invitation always assigns role='user'; this protects against future code paths accidentally creating a second admin.
   await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS app_users_single_admin_idx ON app_users ((role)) WHERE role='admin'");
@@ -83,6 +88,48 @@ export function decryptSecret(value) {
   const decipher = createDecipheriv('aes-256-gcm', encryptionKey, Buffer.from(ivHex, 'hex'));
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
   return Buffer.concat([decipher.update(Buffer.from(encryptedHex, 'hex')), decipher.final()]).toString('utf8');
+}
+function randomDigits(length) {
+  let value = '';
+  while (value.length < length) value += String(randomInt(0, 100000)).padStart(5, '0');
+  return value.slice(0, length);
+}
+async function uniqueAccountCode(client) {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const code = randomDigits(6);
+    const found = await client.query('SELECT 1 FROM app_users WHERE account_code=$1 LIMIT 1', [code]);
+    if (!found.rows.length) return code;
+  }
+  throw new Error('No se pudo generar un identificador de cuenta único. Intentá nuevamente.');
+}
+export async function ensureAccountKey(userId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query('SELECT id,account_code,access_key_hash,access_key_encrypted FROM app_users WHERE id=$1 AND disabled_at IS NULL FOR UPDATE', [userId]);
+    if (!result.rows.length) throw Object.assign(new Error('La cuenta no está disponible.'), { status: 404 });
+    let { account_code: accountCode, access_key_hash: keyHash, access_key_encrypted: encryptedKey } = result.rows[0];
+    if (!accountCode || !keyHash || !encryptedKey) {
+      accountCode = accountCode || await uniqueAccountCode(client);
+      const accessKey = randomDigits(15);
+      keyHash = hashPassword(accessKey);
+      encryptedKey = encryptSecret(accessKey);
+      await client.query('UPDATE app_users SET account_code=$2,access_key_hash=$3,access_key_encrypted=$4 WHERE id=$1', [userId, accountCode, keyHash, encryptedKey]);
+      await client.query('COMMIT');
+      return { accountCode, accessKey };
+    }
+    const accessKey = decryptSecret(encryptedKey);
+    await client.query('COMMIT');
+    return { accountCode, accessKey };
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+  finally { client.release(); }
+}
+export async function loginWithAccountKey(accountCode, accessKey) {
+  if (typeof accountCode !== 'string' || !/^\d{6}$/.test(accountCode) || typeof accessKey !== 'string' || !/^\d{15}$/.test(accessKey)) return null;
+  const { rows } = await pool.query('SELECT id,username,role,access_key_hash FROM app_users WHERE account_code=$1 AND disabled_at IS NULL LIMIT 1', [accountCode]);
+  const user = rows[0];
+  if (!user?.access_key_hash || !verifyPassword(accessKey, user.access_key_hash)) return null;
+  return { id: user.id, username: user.username, role: user.role };
 }
 export async function createSession(userId) {
   const token = randomBytes(32).toString('base64url');
@@ -353,10 +400,12 @@ export async function registerFromInvite(username, password, code) {
     await client.query('BEGIN');
     const invite = await client.query('SELECT id FROM app_invites WHERE code_hash=$1 AND used_at IS NULL AND expires_at>now() FOR UPDATE', [digest(code)]);
     if (!invite.rows.length) throw new Error('La invitación no existe, venció o ya fue usada.');
-    const inserted = await client.query('INSERT INTO app_users(username,password_hash,role) VALUES($1,$2,\'user\') RETURNING id,username,role', [username, hashPassword(password)]);
+    const accountCode = await uniqueAccountCode(client);
+    const accessKey = randomDigits(15);
+    const inserted = await client.query('INSERT INTO app_users(username,password_hash,role,account_code,access_key_hash,access_key_encrypted) VALUES($1,$2,\'user\',$3,$4,$5) RETURNING id,username,role,account_code', [username, hashPassword(password), accountCode, hashPassword(accessKey), encryptSecret(accessKey)]);
     await client.query('UPDATE app_invites SET used_at=now(),used_by=$1 WHERE id=$2', [inserted.rows[0].id, invite.rows[0].id]);
     await client.query('COMMIT');
-    return inserted.rows[0];
+    return { ...inserted.rows[0], accountCode, accessKey };
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }
