@@ -338,6 +338,15 @@ export async function createInvite(userId, hours = 72) {
   await pool.query('INSERT INTO app_invites(code_hash,created_by,expires_at) VALUES($1,$2,now()+($3 * interval \'1 hour\'))', [codeHash, userId, expiresHours]);
   return { code, expiresHours };
 }
+export async function validateInvite(code) {
+  if (typeof code !== 'string' || code.length < 20 || code.length > 200) return false;
+  const { rows } = await pool.query(
+    'SELECT 1 FROM app_invites WHERE code_hash=$1 AND used_at IS NULL AND expires_at>now() LIMIT 1',
+    [digest(code)]
+  );
+  return rows.length > 0;
+}
+
 export async function registerFromInvite(username, password, code) {
   const client = await pool.connect();
   try {

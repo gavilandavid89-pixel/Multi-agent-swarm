@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#292b2e">
   <title>Swarm · Chat de agentes</title>
-  <link rel="stylesheet" href="/styles.css?v=chat-metal-4">
+  <link rel="stylesheet" href="/styles.css?v=invite-gate-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -19,17 +19,30 @@
       <h1>¿En qué trabajamos<br><span>hoy?</span></h1>
       <p class="subtitle">Una conversación central para coordinar el trabajo global o hablar directamente con un agente.</p>
     </section>
-    <section id="access-panel" class="panel access-panel hidden">
-      <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
-      <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Iniciá sesión con tu cuenta. Las cuentas nuevas requieren una invitación y siempre se crean con rol Usuario.</p>
-      <button id="show-register" class="button button-secondary" type="button">Tengo una invitación · Crear cuenta de usuario</button>
-      <form id="register-form" class="auth-form hidden">
-        <label><span class="muted tiny">Código de invitación</span><input id="register-invite" autocomplete="off" minlength="20" maxlength="200" required></label>
-        <label><span class="muted tiny">Nuevo usuario</span><input id="register-username" autocomplete="username" minlength="3" maxlength="32" required></label>
-        <label><span class="muted tiny">Contraseña (mínimo 12 caracteres)</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label><p class="muted tiny">La contraseña pertenece a tu cuenta de Usuario. No concede acceso de administrador; sin una invitación válida, el servidor rechaza el registro.</p>
-        <button class="button button-primary" type="submit">Crear cuenta <span>↗</span></button>
+    <section id="access-panel" class="panel access-panel hidden" aria-label="Acceso privado">
+      <form id="invite-gate-form" class="auth-form gate-form">
+        <label for="register-invite" class="sr-only">Pegá aquí tu invitación</label>
+        <input id="register-invite" autocomplete="off" minlength="20" maxlength="200" placeholder="Pegá aquí tu invitación" aria-label="Pegá aquí tu invitación" required>
+        <button id="validate-invite-button" class="button button-primary" type="submit">Continuar <span>↗</span></button>
       </form>
-      <p id="register-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <p id="register-status" class="gate-status" role="status" aria-live="polite"></p>
+      <form id="register-form" class="auth-form hidden">
+        <label><span class="muted tiny">Usuario</span><input id="register-username" autocomplete="username" minlength="3" maxlength="32" placeholder="Usuario" required></label>
+        <label><span class="muted tiny">Contraseña</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" placeholder="Contraseña (mínimo 12 caracteres)" required></label>
+        <label><span class="muted tiny">Confirmar contraseña</span><input id="register-confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" placeholder="Repetí tu contraseña" required></label>
+        <p class="account-data-notice">Tu usuario y contraseña se guardarán asociados a tu cuenta personal. La contraseña se almacena de forma segura y no se guarda en texto legible. Tu cuenta será de Usuario, no de administrador.</p>
+        <button class="button button-primary" type="submit">Crear cuenta <span>↗</span></button>
+        <button id="back-to-invite" class="button button-secondary" type="button">← Volver</button>
+      </form>
+      <form id="access-form" class="auth-form hidden">
+        <label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" minlength="3" maxlength="32" placeholder="Usuario" required></label>
+        <label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Contraseña" required></label>
+        <button class="button button-primary" type="submit">Iniciar sesión <span>↗</span></button>
+        <p id="access-status" class="muted tiny" role="status" aria-live="polite"></p>
+        <button id="back-to-invite-login" class="button button-secondary" type="button">← Volver a la invitación</button>
+      </form>
+      <button id="show-login" class="gate-login-link hidden" type="button">¿Ya tenés cuenta? Iniciar sesión</button>
+      <button id="show-register" class="hidden" type="button" aria-hidden="true" tabindex="-1">Crear cuenta</button>
     </section>
     <section id="api-settings-panel" class="panel api-settings-panel hidden">
       <div class="section-head"><div><p class="panel-kicker">CUENTA PRIVADA</p><h2>Configuración de cuenta</h2><p class="muted">Administrá las APIs privadas y la seguridad de tu sesión.</p></div><button id="back-to-app" class="button button-secondary" type="button">← Volver</button></div>
@@ -101,6 +114,7 @@
     <aside id="files-drawer" class="files-drawer hidden" aria-label="Archivos generados"><div class="files-drawer-head"><div><p class="panel-kicker">ENTREGA</p><h3>Archivos generados</h3></div><button id="close-files-drawer" class="icon-button" type="button" aria-label="Cerrar archivos">×</button></div><div class="files-drawer-actions"><button id="files-preview-button" class="button button-secondary" type="button">Vista previa ▶</button><button id="files-download-button" class="button button-primary" type="button">Descargar ZIP ↓</button></div><p id="files-drawer-status" class="muted tiny">Abrí una tarea para ver sus archivos.</p><div id="files-drawer-slot"></div></aside>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=chat-metal-4" defer></script>
+  <script src="/app.js?v=invite-gate-1" defer></script>
+  <script src="/invite-gate.js?v=1" defer></script>
 </body>
 </html>
