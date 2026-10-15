@@ -528,8 +528,10 @@ function apiFieldRow(api = {}) {
     : api.saved ? 'Clave cifrada guardada. Los modelos se pueden cambiar sin volver a pegar la clave.' : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
   provider.addEventListener('change', () => {
     const isCustom = provider.value === CUSTOM_PROVIDER_VALUE;
+    const previousBaseUrl = row.dataset.baseUrl;
+    const wasCustom = !API_PROVIDERS.some(item => item.baseUrl === previousBaseUrl);
     const next = API_PROVIDERS.find(item => item.baseUrl === provider.value) || null;
-    const previous = API_PROVIDERS.find(item => item.baseUrl === row.dataset.baseUrl) || initialProvider;
+    const previous = API_PROVIDERS.find(item => item.baseUrl === previousBaseUrl) || initialProvider;
     if (isCustom) {
       for (const role of ['reasoning','coding','validation']) {
         if (!modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = '';
@@ -541,7 +543,7 @@ function apiFieldRow(api = {}) {
       meta.textContent = 'La API personalizada debe ser compatible con OpenAI Chat Completions y usar HTTPS público. No se admiten direcciones privadas.';
     } else {
       for (const role of ['reasoning','coding','validation']) {
-        if (!modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = next[role];
+        if (wasCustom || !modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = next[role];
         modelInputs[role].placeholder = next[role];
       }
       customUrlLabel.classList.add('hidden');
