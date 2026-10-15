@@ -26,14 +26,17 @@ async function runJobWithAccountProviders(id) {
   const userId = record?.payload?.userId || null;
   return withUserProviders(userId, async () => {
     if (userId) {
-      try { await registerJobOwnership(userId, id); }
+      try { await registerJobOwnership(userId, id, record.publicJob.createdAt); }
       catch (error) {
         console.warn('[worker][job_ownership_sync_deferred]', JSON.stringify({ jobId: id, reason: error?.code || 'database' }));
       }
     }
     const result = await processJob(id);
     if (userId && result?.continuationJobId) {
-      try { await registerJobOwnership(userId, result.continuationJobId); }
+      try {
+        const child = await getJob(result.continuationJobId);
+        await registerJobOwnership(userId, result.continuationJobId, child?.createdAt || null);
+      }
       catch (error) {
         console.warn('[worker][continuation_ownership_sync_deferred]', JSON.stringify({ jobId: result.continuationJobId, sourceJobId: id, reason: error?.code || 'database' }));
       }
