@@ -8,7 +8,7 @@
     "check": "node --check server.js && find services -name '*.js' -print0 | xargs -0 -n1 node --check"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

@@ -63,7 +63,7 @@ function pump() {
 app.post('/internal/admin/import-legacy-apis', async (req, res) => {
   const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : '';
   if (!userId) return res.status(400).json({ error: 'Cuenta de administrador inválida.' });
-  try { res.json({ imported: await importLegacyProvidersForUser(userId) }); }
+  try { res.json(await importLegacyProvidersForUser(userId)); }
   catch (error) { console.error('[worker][legacy_api_import_failed]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudieron migrar las APIs heredadas.' }); }
 });
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
