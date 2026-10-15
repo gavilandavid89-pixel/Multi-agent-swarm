@@ -8,7 +8,7 @@ const connectionString = process.env.SWARM_DATABASE_URL || '';
 const keyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 let pool;
 if (connectionString && /^[a-f0-9]{64}$/i.test(keyHex)) {
-  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: false } });
+  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
 }
 const key = /^[a-f0-9]{64}$/i.test(keyHex) ? Buffer.from(keyHex, 'hex') : null;
 function decrypt(value) {
@@ -60,6 +60,26 @@ export async function importLegacyProvidersForUser(userId) {
 }
 
 export function currentUserProviders() { return context.getStore() || null; }
+
+/** Ensure a job (including automatic continuation batches) stays owned by its originating account. */
+export async function registerJobOwnership(userId, jobId) {
+  if (!userId || !pool) return false;
+  const owner = String(userId);
+  const id = String(jobId || '');
+  if (!/^[0-9a-f-]{36}$/i.test(owner) || !id || id.length > 128) {
+    throw new Error('Invalid job ownership reference.');
+  }
+  await pool.query(
+    'INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING',
+    [id, owner]
+  );
+  const { rows } = await pool.query('SELECT user_id FROM user_job_ownership WHERE job_id=$1', [id]);
+  if (!rows[0] || rows[0].user_id !== owner) {
+    throw new Error('Job ownership conflict detected.');
+  }
+  return true;
+}
+
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
   if (!pool) throw new Error('User API database is not configured.');
