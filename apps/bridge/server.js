@@ -36,6 +36,21 @@ function windowLimit(map, key, limit, windowMs) {
   item.count += 1; map.set(key, item);
   return { allowed: item.count <= limit, retryAfter: Math.max(1, Math.ceil((item.until - now) / 1000)) };
 }
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Math.min(items.length, Math.max(1, concurrency));
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      try { results[index] = await mapper(items[index], index); }
+      catch { results[index] = null; }
+    }
+  }));
+  return results;
+}
 app.get('/api/auth/bootstrap-status', async (_req, res) => {
   try { const { rows } = await pool.query('SELECT EXISTS(SELECT 1 FROM app_users) AS initialized'); res.json({ initialized: rows[0].initialized }); }
   catch { res.status(503).json({ error: 'No se pudo consultar el estado de la cuenta.' }); }
@@ -188,12 +203,26 @@ app.get('/api/jobs', async (req, res) => {
   const requestedStatus = String(req.query.status || '');
   if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
   try {
-    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
-    const jobs = (await Promise.all(owned.rows.map(async row => {
-      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
-    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    if (!requestedStatus || requestedStatus === 'all') {
+      const [countResult, pageResult] = await Promise.all([
+        pool.query('SELECT count(*)::int AS total FROM user_job_ownership WHERE user_id=$1', [req.user.id]),
+        pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC, job_id DESC LIMIT $2 OFFSET $3', [req.user.id, limit, offset])
+      ]);
+      const jobs = (await mapWithConcurrency(pageResult.rows, 8, row =>
+        workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`)
+      )).filter(Boolean);
+      jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const total = countResult.rows[0]?.total || 0;
+      return res.json({ jobs, total, limit, offset, hasMore: offset + limit < total, status: 'all' });
+    }
+    // Status filtering still needs worker status, but concurrent requests are bounded to avoid
+    // flooding the worker when an account has a long history.
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC, job_id DESC', [req.user.id]);
+    const jobs = (await mapWithConcurrency(owned.rows, 8, row =>
+      workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`)
+    )).filter(Boolean).filter(job => job.status === requestedStatus);
     jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
+    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
