@@ -264,7 +264,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     }
     const jsonFormatRejected = response.status === 400 && /json_validate_failed|failed to generate json/i.test(body);
     const incompleteJsonGeneration = jsonFormatRejected && /max completion tokens reached before generating a valid document/i.test(body);
-    if (jsonFormatRejected && responseFormat && !incompleteJsonGeneration && jsonFormatFallbacks < 1) {
+    if (jsonFormatRejected && responseFormat && jsonFormatFallbacks < 1 && (!incompleteJsonGeneration || safeMaxTokens >= maxSafeOutputTokens || formatRetries >= 2)) {
       jsonFormatFallbacks++;
       const reason = 'El proveedor rechazó el modo JSON estricto; se reintenta una sola vez con salida JSON validada por el motor.';
       await onRetry({ retry: jsonFormatFallbacks, wait: 250, reason });
@@ -466,7 +466,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
       model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
       responseFormat: { type: 'json_object' }, onRetry,
       messages: [
-        sys('Validador independiente', 'Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
+        sys('Validador independiente', 'Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE un objeto JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. No uses Markdown, bloques de código ni texto antes/después del objeto. No reemplaces corchetes por entidades HTML (&#91; o &#93;). Escapá las comillas dobles dentro de las cadenas y no uses comas finales. Limitá findings a 10 elementos y summary a 600 caracteres. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nESTRATEGIA:\n' + boundContext(estrategia, 1000, 'estrategia') + '\nARCHIVOS:\n' + batches[i] }
       ]
     });
