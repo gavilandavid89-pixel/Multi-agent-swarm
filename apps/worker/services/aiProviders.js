@@ -397,7 +397,7 @@ export function parseValidationResponse(rawValue) {
       const char = raw[end];
       if (quoted) {
         if (escaped) escaped = false;
-        else if (char === '\\\\') escaped = true;
+        else if (char === '\\') escaped = true;
         else if (char === '"') quoted = false;
         continue;
       }
