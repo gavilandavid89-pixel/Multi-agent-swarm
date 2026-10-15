@@ -132,15 +132,15 @@ export async function getArtifact(id, index) {
 }
 export async function createJob(objective, requestedTokenBudget, userId = null) {
   const timestamp = now();
-  const rawDefault = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const defaultBudget = Number.isFinite(rawDefault) ? Math.min(100000, Math.max(4000, rawDefault)) : 50000;
-  const tokenBudget = Number.isFinite(Number(requestedTokenBudget)) ? Math.min(100000, Math.max(4000, Math.round(Number(requestedTokenBudget) / 1000) * 1000)) : defaultBudget;
+  const rawDefault = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+  const defaultBudget = Number.isFinite(rawDefault) ? Math.min(1000000, Math.max(4000, rawDefault)) : 1000000;
+  const tokenBudget = Number.isFinite(Number(requestedTokenBudget)) ? Math.min(1000000, Math.max(4000, Math.round(Number(requestedTokenBudget) / 1000) * 1000)) : defaultBudget;
   const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
   await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
   return toPublic(row);
 }
 /**
- * Fork a budget-paused task into a fresh 100k-token batch while preserving its encrypted
+ * Fork a budget-paused task into a fresh 1M-token batch while preserving its encrypted
  * checkpoint, source artifacts and agent decisions. The source row lock makes the action idempotent.
  */
 export async function createContinuationJob(sourceId) {
