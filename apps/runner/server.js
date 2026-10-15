@@ -105,7 +105,7 @@ function runSandbox(root, mode, paths) {
 }
 function sandboxArgs(root, command) {
   return [
-    '--unshare-all', '--die-with-parent', '--new-session',
+    '--unshare-all', '--uid', '0', '--gid', '0', '--die-with-parent', '--new-session',
     '--ro-bind', '/usr', '/usr',
     '--ro-bind', '/etc', '/etc',
     '--ro-bind', '/app', '/app',
@@ -128,7 +128,7 @@ async function removeTree(root) {
   await rm(root, { recursive: true, force: true, maxRetries: 2 }).catch(() => {});
 }
 app.get('/healthz', (_req, res) => {
-  const probe = spawnSync('bwrap', ['--unshare-all', '--ro-bind', '/usr', '/usr', '--proc', '/proc', '--dev', '/dev', '--', '/usr/bin/true'], { encoding: 'utf8', timeout: 1500 });
+  const probe = spawnSync('bwrap', ['--unshare-all', '--uid', '0', '--gid', '0', '--ro-bind', '/usr', '/usr', '--proc', '/proc', '--dev', '/dev', '--', '/usr/bin/true'], { encoding: 'utf8', timeout: 1500 });
   res.status(200).json({ ok: true, role: 'isolated-runner', sandboxAvailable: probe.status === 0, sandbox: probe.status === 0 ? 'bubblewrap-ready' : 'unavailable', sandboxError: probe.status === 0 ? null : String(probe.stderr || probe.error?.message || 'bubblewrap no disponible').slice(0, 500), xvfb: Boolean(process.env.RUNNER_XVFB_ENABLED === 'true') });
 });
 app.use('/v1', (req, res, next) => {
