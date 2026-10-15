@@ -434,7 +434,14 @@ async function previewFile(session, index) {
   if (!result.file || (typeof result.file.content !== 'string' && !Buffer.isBuffer(result.file.content))) { const error = new Error('No se pudo recuperar el archivo de la vista previa.'); error.status = 404; throw error; }
   return { item, file: result.file, files };
 }
-app.post('/api/preview-zip', express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
+app.post('/api/preview-zip', (req, res, next) => {
+  const limit = windowLimit(jobCreateWindows, `preview-zip:${req.user.id}`, 5, 5 * 60 * 1000);
+  if (!limit.allowed) {
+    res.set('Retry-After', String(limit.retryAfter));
+    return res.status(429).json({ error: 'Demasiadas vistas previas ZIP. Probá de nuevo en unos minutos.' });
+  }
+  next();
+}, express.raw({ type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], limit: '32mb' }), (req, res) => {
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Seleccioná un archivo ZIP válido.' });
   try {
     const parsed = parsePreviewZip(req.body);
