@@ -249,9 +249,9 @@ async function runJob(jobId) {
         const latestPayload = (await getPayload(jobId))?.payload || {};
         const transcript = appendEntries(latestPayload.transcript, [{
           at: new Date().toISOString(), agent: 'sistema', type: 'check',
-          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA'}). El resultado está listo para revisar.`
+          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_syntax_runtime' ? 'revisión de IA, sintaxis y ejecución aislada' : (validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA')}). El resultado está listo para revisar.`
         }]);
-        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
+        await updateJob(jobId, { status: 'completed', stage: syntax.runtime?.status === 'passed' ? 'Completado · IA + sintaxis + ejecución' : (syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA'), progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
