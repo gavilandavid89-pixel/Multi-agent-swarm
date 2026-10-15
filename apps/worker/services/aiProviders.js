@@ -12,7 +12,7 @@ const KNOWN_PROVIDER_HOSTS = new Set([
 ]);
 async function fetchProviderEndpoint(url, options, baseUrl) {
   const target = new URL(url);
-  const localDevelopmentEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(String(baseUrl || ''));
+  const localDevelopmentEndpoint = process.env.NODE_ENV !== 'production' && /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(String(baseUrl || ''));
   // The reserved .test TLD is used by mocked provider fixtures, never as a production custom host.
   const testFixtureEndpoint = process.env.NODE_ENV !== 'production' && /\.test$/i.test(target.hostname);
   if (KNOWN_PROVIDER_HOSTS.has(target.hostname.toLowerCase()) || localDevelopmentEndpoint || testFixtureEndpoint) {
@@ -80,7 +80,7 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
     const baseUrl = String(entry.baseUrl || '').trim().replace(/\/+$/, '');
     const apiKeyEnv = String(entry.apiKeyEnv || '').trim();
     const apiKey = /^[A-Z][A-Z0-9_]{1,79}$/.test(apiKeyEnv) ? env[apiKeyEnv] : '';
-    const validUrl = /^https:\/\//i.test(baseUrl) || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl);
+    const validUrl = /^https:\/\//i.test(baseUrl) || (env.NODE_ENV !== 'production' && /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(baseUrl));
     if (!name || !validUrl || !apiKey || providers.some(provider => provider.baseUrl === baseUrl)) continue;
     const model = providerModelForSlot(entry, requestedModel, maxTokens);
     if (!model) {
