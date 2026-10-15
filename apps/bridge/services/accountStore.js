@@ -22,6 +22,9 @@ export async function initAccountStore() {
     password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(), disabled_at TIMESTAMPTZ
   )`);
+  // CREATE TABLE IF NOT EXISTS does not evolve an already deployed schema.
+  // This migration is required for databases created before account deactivation existed.
+  await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ');
   await pool.query(`CREATE TABLE IF NOT EXISTS app_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

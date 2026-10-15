@@ -101,6 +101,12 @@ test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness Postgr
     await schemaPool.end().catch(() => {});
   });
   await schemaPool.query(`CREATE SCHEMA "${schemaName}"`);
+  // Simulate a previously deployed database: app_users exists without the newer disabled_at column.
+  await schemaPool.query(`CREATE TABLE "${schemaName}".app_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
   const isolatedUrl = new URL(sourceDatabaseUrl);
   isolatedUrl.searchParams.set('options', `-c search_path=${schemaName}`);
   const databaseUrl = isolatedUrl.toString();
