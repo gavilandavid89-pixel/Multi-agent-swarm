@@ -87,7 +87,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (user.role === 'admin') {
       try {
         const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
-        console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0 }));
+        console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0, skipped: Number(migrated?.skipped) || 0, alreadyMigrated: Boolean(migrated?.alreadyMigrated) }));
       } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
       try {
         let offset = 0; let total = 0;
