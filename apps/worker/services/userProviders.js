@@ -28,10 +28,15 @@ function encrypt(value) {
   const body = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
   return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), body.toString('hex')].join(':');
 }
+export function firstAvailableApiSlot(usedSlots) {
+  for (let slot = 1; slot <= 10; slot++) if (!usedSlots.has(slot)) return slot;
+  return null;
+}
+
 export async function importLegacyProvidersForUser(userId) {
   if (!pool) throw new Error('User API database is not configured.');
   const migration = await pool.query('SELECT 1 FROM user_api_migrations WHERE user_id=$1', [userId]);
-  if (migration.rows.length) return 0;
+  if (migration.rows.length) return { imported: 0, skipped: 0, alreadyMigrated: true };
   const candidates = [];
   if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
   if (process.env.GROQ_API_KEY) candidates.push({ label: 'Groq', key: process.env.GROQ_API_KEY, baseUrl: 'https://api.groq.com/openai/v1', reasoning: process.env.GROQ_MODEL_REASONING || 'openai/gpt-oss-120b', coding: process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b', validation: process.env.GROQ_MODEL_VALIDATION || 'openai/gpt-oss-20b' });
@@ -47,18 +52,36 @@ export async function importLegacyProvidersForUser(userId) {
       }
     }
   } catch { /* Never log legacy provider configuration or credentials. */ }
-  if (!candidates.length) return 0;
+  if (!candidates.length) return { imported: 0, skipped: 0, alreadyMigrated: false };
+
+  const existingResult = await pool.query(
+    'SELECT slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 ORDER BY slot',
+    [userId]
+  );
+  const existingRows = existingResult.rows.slice();
+  const usedSlots = new Set(existingRows.map(row => Number(row.slot)));
   let imported = 0;
-  for (const item of candidates.slice(0, 10)) {
-    const exists = await pool.query('SELECT 1 FROM user_api_keys WHERE user_id=$1 AND base_url=$2 AND label=$3 LIMIT 1', [userId, item.baseUrl, item.label]);
-    if (exists.rows.length) continue;
+  let skipped = 0;
+  for (const item of candidates) {
+    const alreadyPresent = existingRows.some(row => {
+      if (row.base_url !== item.baseUrl || row.label !== item.label) return false;
+      try { return decrypt(row.encrypted_api_key) === item.key; } catch { return false; }
+    });
+    if (alreadyPresent) continue;
+    const slot = firstAvailableApiSlot(usedSlots);
+    if (slot === null) { skipped++; continue; }
+    const encryptedKey = encrypt(item.key);
     await pool.query(`INSERT INTO user_api_keys(user_id,slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key)
-      VALUES($1,(SELECT COALESCE(MAX(slot),0)+1 FROM user_api_keys WHERE user_id=$1),$2,$3,$4,$5,$6,$7)`,
-      [userId,item.label,item.baseUrl,item.reasoning,item.coding,item.validation,encrypt(item.key)]);
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [userId,slot,item.label,item.baseUrl,item.reasoning,item.coding,item.validation,encryptedKey]);
+    existingRows.push({ slot, label: item.label, base_url: item.baseUrl, encrypted_api_key: encryptedKey });
+    usedSlots.add(slot);
     imported++;
   }
+  // Mark the migration after a successful pass. If a write fails midway, the next login
+  // compares decrypted keys in memory and safely resumes without duplicating imported rows.
   await pool.query('INSERT INTO user_api_migrations(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [userId]);
-  return imported;
+  return { imported, skipped, alreadyMigrated: false };
 }
 
 export function currentUserProviders() { return context.getStore() || null; }
