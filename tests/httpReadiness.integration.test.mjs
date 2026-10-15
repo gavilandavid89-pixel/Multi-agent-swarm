@@ -54,9 +54,12 @@ async function waitUntilReady(child, url, name) {
 }
 
 async function stopChild(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (!child) return true;
+  if (child.exitCode !== null || child.signalCode !== null) return child.exitCode === 0;
+  let forced = false;
   await new Promise(resolve => {
     const timer = setTimeout(() => {
+      forced = true;
       child.kill('SIGKILL');
       resolve();
     }, 5000);
@@ -66,6 +69,7 @@ async function stopChild(child) {
     });
     child.kill('SIGTERM');
   });
+  return !forced && child.exitCode === 0;
 }
 
 async function apiJson(base, path, { method = 'GET', token = '', body } = {}) {
@@ -89,8 +93,10 @@ test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness Postgr
   let worker;
   let bridge;
   t.after(async () => {
-    await stopChild(bridge);
-    await stopChild(worker);
+    const bridgeStopped = await stopChild(bridge);
+    const workerStopped = await stopChild(worker);
+    assert.equal(bridgeStopped, true, `Bridge no cerró de forma ordenada. Logs: ${bridge?.logs || ''}`);
+    assert.equal(workerStopped, true, `Worker no cerró de forma ordenada. Logs: ${worker?.logs || ''}`);
     await schemaPool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`).catch(() => {});
     await schemaPool.end().catch(() => {});
   });
@@ -173,6 +179,10 @@ test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness Postgr
   });
   assert.equal(invite.response.status, 201, JSON.stringify(invite.payload));
   assert.ok(invite.payload.code);
+  const reservedAdmin = await apiJson(bridgeUrl, '/api/auth/register', {
+    method: 'POST', body: { username: 'admin', password: 'reserved-admin-password-123', invite: invite.payload.code }
+  });
+  assert.equal(reservedAdmin.response.status, 400, 'the admin bootstrap username must be reserved');
   const suffix = Date.now().toString().slice(-7);
   const username = `smoke-user-${suffix}`;
   const oldPassword = 'old-http-smoke-password-123';
