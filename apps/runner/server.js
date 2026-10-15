@@ -92,7 +92,15 @@ function runSandbox(root, mode, paths) {
     child.stderr.on('data', chunk => { if (stderr.length < cap) stderr += chunk.slice(0, cap - stderr.length); });
     const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, MAX_RUN_MS);
     child.on('error', error => { if (settled) return; settled = true; clearTimeout(timer); resolve({ status: 'blocked', reason: error.message.includes('ENOENT') ? 'No está disponible bubblewrap/Xvfb; el ejecutor falla de forma segura.' : 'No se pudo iniciar el entorno aislado.', exitCode: null, stdout, stderr: error.message.slice(0, 1200), durationMs: Date.now() - start, mode: testMode }); });
-    child.on('close', code => { if (settled) return; settled = true; clearTimeout(timer); resolve({ status: timedOut ? 'timeout' : code === 0 ? 'passed' : 'failed', reason: timedOut ? 'Se alcanzó el límite de tiempo.' : code === 0 ? 'Las pruebas de ejecución finalizaron sin errores.' : 'El proceso de prueba devolvió un código distinto de cero.', exitCode: code, stdout, stderr, durationMs: Date.now() - start, mode: testMode }); });
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const isolationUnavailable = /No permissions to create new namespace|Operation not permitted|Failed to create namespace/i.test(stderr);
+      const status = timedOut ? 'timeout' : isolationUnavailable ? 'blocked' : code === 0 ? 'passed' : 'failed';
+      const reason = timedOut ? 'Se alcanzó el límite de tiempo.' : isolationUnavailable ? 'El sistema anfitrión no permite crear los espacios de nombres aislados; no se evaluó el código.' : code === 0 ? 'Las pruebas de ejecución finalizaron sin errores.' : 'El proceso de prueba devolvió un código distinto de cero.';
+      resolve({ status, reason, exitCode: code, stdout, stderr, durationMs: Date.now() - start, mode: testMode });
+    });
   });
 }
 function sandboxArgs(root, command) {
