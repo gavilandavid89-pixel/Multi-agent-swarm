@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map() };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {} };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -309,7 +309,7 @@ function renderAgentMemory(data) {
   const individual = $('agent-memory-content');
   const shared = $('shared-memory-content');
   if (!select || !individual || !shared) return;
-  const docs = Object.values(data.agentDocuments || {});
+  state.agentDocuments = data.agentDocuments || {};\n  const docs = Object.values(state.agentDocuments);
   const previous = select.value;
   select.replaceChildren();
   for (const doc of docs) {
@@ -909,6 +909,10 @@ $('copy-detail').addEventListener('click', async () => {
     else { const area = document.createElement('textarea'); area.value = content; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select(); const copied = document.execCommand('copy'); area.remove(); if (!copied) throw new Error('El navegador no permitió copiar.'); }
     $('copy-status').textContent = 'Diagnóstico copiado. No incluye claves secretas.'; button.textContent = 'Copiado ✓';
   } catch { $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.'; }
+});
+$('agent-memory-select').addEventListener('change', () => {
+  const selected = Object.values(state.agentDocuments || {}).find(doc => doc.agent === $('agent-memory-select').value);
+  $('agent-memory-content').textContent = selected?.markdown || 'Todavía no hay checkpoints registrados para agentes.';
 });
 $('improvement-vote-form').addEventListener('submit', async event => {
   event.preventDefault();
