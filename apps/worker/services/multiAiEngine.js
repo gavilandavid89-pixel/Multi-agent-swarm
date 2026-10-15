@@ -60,9 +60,9 @@ async function retryNotice(jobId, info) {
 }
 async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const current = await getPayload(jobId);
-  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const fallback = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
-  const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || fallback));
+  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+  const fallback = Number.isFinite(rawLimit) ? Math.min(1000000, Math.max(4000, rawLimit)) : 1000000;
+  const limit = Math.min(1000000, Math.max(4000, Number(current?.payload?.tokenBudget) || fallback));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   const remaining = Math.max(0, limit - used);
   const inputReserve = Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0));
@@ -75,10 +75,10 @@ async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   return Math.min(Math.max(256, Number(requested) || 1200), availableForOutput);
 }
 async function assertTaskTokenBudget(jobId) {
-  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const defaultLimit = Number.isFinite(rawLimit) ? Math.min(100000, Math.max(4000, rawLimit)) : 50000;
+  const rawLimit = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+  const defaultLimit = Number.isFinite(rawLimit) ? Math.min(1000000, Math.max(4000, rawLimit)) : 1000000;
   const current = await getPayload(jobId);
-  const limit = Math.min(100000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
+  const limit = Math.min(1000000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
     const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.`);
@@ -136,7 +136,7 @@ async function runJob(jobId) {
       : fresh;
     await updateJob(jobId, { payload: { partialDelivery: preserved, partialOutputAt: new Date().toISOString() } });
   };
-  const canContinue = async (_requested, estimatedInputTokens = 0) => { const record = await getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10); const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000; const budget = Math.min(100000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); const used = Number(record?.payload?.tokenUsage?.totalTokens) || 0; return Math.max(0, budget - used - Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0))); };
+  const canContinue = async (_requested, estimatedInputTokens = 0) => { const record = await getPayload(jobId); const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10); const fallback = Number.isFinite(configured) ? Math.min(1000000, Math.max(4000, configured)) : 1000000; const budget = Math.min(1000000, Math.max(4000, Number(record?.payload?.tokenBudget) || fallback)); const used = Number(record?.payload?.tokenUsage?.totalTokens) || 0; return Math.max(0, budget - used - Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0))); };
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
@@ -251,9 +251,9 @@ async function runJob(jobId) {
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
-      const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-      const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000;
-      const currentBudget = Math.min(100000, Math.max(4000, Number(current.payload.tokenBudget) || fallback));
+      const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+      const fallback = Number.isFinite(configured) ? Math.min(1000000, Math.max(4000, configured)) : 1000000;
+      const currentBudget = Math.min(1000000, Math.max(4000, Number(current.payload.tokenBudget) || fallback));
       const nextBudget = nextAutomaticTokenBudget(currentBudget);
       if (nextBudget && nextBudget > currentBudget) {
         const patch = buildAutomaticBudgetExtensionPatch(current, currentBudget, nextBudget);
@@ -270,7 +270,7 @@ async function runJob(jobId) {
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);
-      // At the 100k ceiling, fork a durable continuation automatically. The database
+      // At the 1M ceiling, fork a durable continuation automatically. The database
       // row lock inside createContinuationJob makes this transition idempotent.
       const continuation = await createContinuationJob(jobId);
       if (continuation?.error) {
@@ -279,7 +279,7 @@ async function runJob(jobId) {
       }
       console.warn('[worker][token_batch_continuation]', JSON.stringify({
         sourceJobId: jobId, continuationJobId: continuation.job.id,
-        created: continuation.created, tokenBudget: 100000,
+        created: continuation.created, tokenBudget: 1000000,
         continuationNumber: continuation.job.attempt || null,
         checkpoint: patch.payload.lastCheckpoint
       }));
