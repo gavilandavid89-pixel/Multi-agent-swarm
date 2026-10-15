@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
-import { parseProviderResponseBody, validateGeminiResponse } from './providerResponse.js';
+import { normalizeProviderResponse, parseProviderResponseBody, validateGeminiResponse } from './providerResponse.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -136,20 +136,21 @@ export async function consultarGemini({
         await onRetry({ retry, wait, reason }); await sleep(wait); continue;
       }
       const candidate = data?.candidates?.[0];
-      const content = extractText(candidate);
-      const usage = data?.usageMetadata || {};
+      const translated = normalizeProviderResponse(data, { provider: 'Gemini', model });
+      const content = translated.content;
+      const usage = translated.usage;
       await onRetry({
         usage: true,
         usageId,
         model,
-        promptTokens: Number(usage.promptTokenCount) || 0,
-        completionTokens: Number(usage.candidatesTokenCount) || 0,
-        totalTokens: Number(usage.totalTokenCount) || (Number(usage.promptTokenCount) || 0) + (Number(usage.candidatesTokenCount) || 0)
+        promptTokens: Number(usage.inputTokens) || 0,
+        completionTokens: Number(usage.outputTokens) || 0,
+        totalTokens: Number(usage.totalTokens) || (Number(usage.inputTokens) || 0) + (Number(usage.outputTokens) || 0)
       });
 
       if (!content.trim()) {
         emptyRetries++;
-        const reason = `respuesta vacía (finishReason=${String(candidate?.finishReason || 'desconocido')})`;
+        const reason = `respuesta vacía (finishReason=${String(translated.finishReason || 'desconocido')})`;
         console.warn('[worker][gemini_empty_response]', JSON.stringify({ model, attempt: emptyRetries, reason }));
         if (emptyRetries <= 2) {
           const wait = retryDelay(emptyRetries);
@@ -164,10 +165,10 @@ export async function consultarGemini({
         throw new Error(`Gemini ${model} superó el límite acumulado de seguridad (1.000.000 caracteres).`);
       }
       accumulatedContent += content;
-      const finishReason = candidate?.finishReason || null;
+      const finishReason = translated.finishReason || null;
       await onPartialOutput({ content: accumulatedContent, finishReason, continuation: continuationCount });
 
-      const truncated = finishReason === 'MAX_TOKENS' || finishReason === 'LENGTH';
+      const truncated = finishReason === 'length';
       if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
         const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
         if (!allowance || (typeof allowance === 'number' && allowance < 256)) {
