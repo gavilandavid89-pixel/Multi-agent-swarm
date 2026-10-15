@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=security-accounts-1">
+  <link rel="stylesheet" href="/styles.css?v=security-password-rotation-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -36,6 +36,16 @@
       <div id="api-fields" class="api-fields"></div>
       <div class="api-settings-actions"><button id="add-api-field" class="button button-secondary" type="button">＋ Añadir otra API</button><button id="save-api-settings" class="button button-primary" type="button">Guardar APIs ↗</button></div>
       <p id="api-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
+      <section class="account-security-panel">
+        <div class="section-head"><div><p class="panel-kicker">SEGURIDAD</p><h3>Cambiar contraseña</h3><p class="muted tiny">Al cambiarla, se cerrarán las demás sesiones y esta sesión seguirá activa con un token nuevo.</p></div></div>
+        <form id="change-password-form" class="auth-form">
+          <label><span class="muted tiny">Contraseña actual</span><input id="current-password" type="password" autocomplete="current-password" minlength="1" maxlength="512" required></label>
+          <label><span class="muted tiny">Nueva contraseña (12 caracteres mínimo)</span><input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label>
+          <label><span class="muted tiny">Repetir nueva contraseña</span><input id="confirm-new-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label>
+          <button id="change-password-submit" class="button button-primary" type="submit">Actualizar contraseña</button>
+        </form>
+        <p id="password-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
+      </section>
       <section id="invite-admin-panel" class="invite-admin-panel hidden"><div class="section-head"><div><p class="panel-kicker">ACCESO DE AMIGOS</p><h3>Invitación privada</h3><p class="muted tiny">Cada invitación sirve para crear una cuenta y se puede usar una sola vez.</p></div></div><button id="create-invite" class="button button-secondary" type="button">Crear invitación ↗</button><p id="invite-status" class="muted tiny" role="status" aria-live="polite"></p><div id="invite-result" class="hidden"></div></section>
     </section>
     <section id="app-content" class="hidden">
