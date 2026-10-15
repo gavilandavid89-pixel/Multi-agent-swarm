@@ -209,13 +209,14 @@ async function runJob(jobId) {
         syntax = await checkJavascriptSyntax(delivery);
         const hasRunnableCode = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:\s*[^\n]+\.(?:js|mjs|cjs|html?|py)\s*$/im.test(String(delivery || ''));
         if (hasRunnableCode) {
-          await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, 'Especialista de pruebas · Node/Xvfb', 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
+          const runtimeAgent = /\.html?\b/im.test(String(delivery || '')) ? 'Especialista gráfico · Xvfb/Chromium' : 'Especialista de ejecución aislada · Node/Python';
+          await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, runtimeAgent, 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
           const runtime = await runSandboxTests(delivery, objective);
           syntax = { ...syntax, runtime };
           const runtimeFailed = ['failed', 'timeout', 'blocked', 'rejected'].includes(runtime.status) || (runtime.required && runtime.status !== 'passed');
           const runtimeTranscript = (await getPayload(jobId))?.payload?.transcript || [];
           await updateJob(jobId, { payload: { transcript: appendEntries(runtimeTranscript, [{
-            at: new Date().toISOString(), agent: 'Especialista de pruebas · Node/Xvfb', type: 'check',
+            at: new Date().toISOString(), agent: runtimeAgent, type: 'check',
             content: JSON.stringify({ status: runtime.status, mode: runtime.mode, reason: runtime.reason, exitCode: runtime.exitCode ?? null, durationMs: runtime.durationMs ?? null, sandbox: runtime.sandbox ?? null, network: runtime.network ?? null, stdout: runtime.stdout || '', stderr: runtime.stderr || '' }).slice(0, 9000)
           }]) } });
           if (runtimeFailed) {
