@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: npm --prefix apps/bridge install --no-audit --no-fund
     startCommand: npm --prefix apps/bridge start
-    healthCheckPath: /healthz
+    healthCheckPath: /readyz
     envVars:
       - key: NODE_ENV
         value: production
@@ -26,7 +26,7 @@ services:
     plan: free
     dockerfilePath: ./apps/worker/Dockerfile
     dockerContext: ./apps/worker
-    healthCheckPath: /healthz
+    healthCheckPath: /readyz
     envVars:
       - key: NODE_ENV
         value: production
