@@ -139,6 +139,64 @@ export async function changePassword(userId, currentPassword, newPassword, curre
     client.release();
   }
 }
+export async function listManagedUsers() {
+  const { rows } = await pool.query(
+    "SELECT id,username,role,created_at,disabled_at FROM app_users ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, username ASC"
+  );
+  return rows.map(row => ({
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+    disabledAt: row.disabled_at ? (row.disabled_at instanceof Date ? row.disabled_at.toISOString() : new Date(row.disabled_at).toISOString()) : null
+  }));
+}
+
+export async function setManagedUserDisabled(userId, disabled) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(userId || ''))) {
+    throw Object.assign(new Error('La cuenta indicada no es válida.'), { status: 400 });
+  }
+  if (typeof disabled !== 'boolean') {
+    throw Object.assign(new Error('El estado de la cuenta no es válido.'), { status: 400 });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const account = await client.query(
+      'SELECT id,username,role,created_at,disabled_at FROM app_users WHERE id=$1 FOR UPDATE',
+      [userId]
+    );
+    if (!account.rows.length) throw Object.assign(new Error('No se encontró la cuenta.'), { status: 404 });
+    if (account.rows[0].role !== 'user') {
+      throw Object.assign(new Error('Por seguridad, esta herramienta solo puede administrar cuentas de usuario, no cuentas administradoras.'), { status: 403 });
+    }
+    const updated = await client.query(
+      'UPDATE app_users SET disabled_at=CASE WHEN $2 THEN COALESCE(disabled_at,now()) ELSE NULL END WHERE id=$1 RETURNING id,username,role,created_at,disabled_at',
+      [userId, disabled]
+    );
+    if (disabled) {
+      await client.query(
+        'UPDATE app_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL',
+        [userId]
+      );
+    }
+    await client.query('COMMIT');
+    const row = updated.rows[0];
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      disabledAt: row.disabled_at ? (row.disabled_at instanceof Date ? row.disabled_at.toISOString() : new Date(row.disabled_at).toISOString()) : null
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function importLegacyApiKeys(userId) {
   const candidates = [];
   if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', model: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
