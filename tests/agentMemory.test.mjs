@@ -34,5 +34,5 @@ test('expone una instantánea sin modificar el payload original', () => {
   const snapshot = getAgentMemorySnapshot(payload);
   assert.equal(snapshot.agents[0].agent, 'Escéptico');
   assert.match(snapshot.sharedDocument, /Riesgo de regresión/);
-  assert.equal(payload.agentDocuments.esceptico.entries.length, 1);
+  assert.equal(payload.agentDocuments['escéptico'].entries.length, 1);
 });
