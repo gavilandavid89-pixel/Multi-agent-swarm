@@ -571,12 +571,80 @@ async function loadApiSettings() {
   updateAddApiButton();
   $('api-settings-status').textContent = existing.length ? `${existing.length} API(s) guardada(s). Las claves se mantienen ocultas.` : 'Todavía no hay APIs guardadas. Podés probar con una sola.';
 }
+
+async function loadManagedUsers() {
+  const list = $('managed-users-list');
+  const status = $('managed-users-status');
+  status.textContent = 'Cargando cuentas…';
+  try {
+    const data = await api('/api/admin/users');
+    const users = Array.isArray(data.users) ? data.users : [];
+    list.replaceChildren();
+    if (!users.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted tiny';
+      empty.textContent = 'Todavía no hay cuentas registradas.';
+      list.append(empty);
+    }
+    users.forEach(user => {
+      const row = document.createElement('div');
+      row.className = 'managed-user-row';
+      const main = document.createElement('div');
+      main.className = 'job-main';
+      const name = document.createElement('div');
+      name.className = 'job-name';
+      name.textContent = user.username;
+      const meta = document.createElement('div');
+      meta.className = 'job-meta';
+      meta.textContent = `${user.role === 'admin' ? 'Administrador' : 'Usuario'} · Alta: ${dateLabel(user.createdAt)}`;
+      const accountStatus = document.createElement('span');
+      accountStatus.className = `managed-user-status ${user.disabledAt ? 'disabled' : 'active'}`;
+      accountStatus.textContent = user.disabledAt ? 'Desactivada' : 'Activa';
+      main.append(name, meta, accountStatus);
+      row.append(main);
+      if (user.role === 'user') {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'mini-button';
+        button.textContent = user.disabledAt ? 'Reactivar' : 'Desactivar';
+        button.addEventListener('click', async () => {
+          const disabled = !user.disabledAt;
+          const action = disabled ? 'desactivar' : 'reactivar';
+          const consequence = disabled
+            ? 'Sus sesiones se cerrarán y no podrá entrar hasta reactivarla.'
+            : 'Podrá volver a iniciar sesión con su contraseña actual.';
+          if (!confirm(`¿Querés ${action} la cuenta “${user.username}”? ${consequence}`)) return;
+          button.disabled = true;
+          status.textContent = `Actualizando la cuenta ${user.username}…`;
+          try {
+            await api(`/api/admin/users/${encodeURIComponent(user.id)}/status`, {
+              method: 'PATCH',
+              body: JSON.stringify({ disabled })
+            });
+            await loadManagedUsers();
+            status.textContent = `Cuenta ${user.username} ${disabled ? 'desactivada' : 'reactivada'}.`;
+          } catch (error) {
+            status.textContent = error.message || 'No se pudo actualizar la cuenta.';
+            button.disabled = false;
+          }
+        });
+        row.append(button);
+      }
+      list.append(row);
+    });
+    if (users.length) status.textContent = `${users.length} cuenta(s) cargada(s). Las cuentas administradoras no se pueden desactivar desde este panel.`;
+  } catch (error) {
+    list.replaceChildren();
+    status.textContent = error.message || 'No se pudieron cargar las cuentas.';
+  }
+}
 $('account-menu-toggle').addEventListener('click', () => $('account-menu-items').classList.toggle('hidden'));
 $('open-api-settings').addEventListener('click', async () => {
   $('account-menu-items').classList.add('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.remove('hidden');
   $('api-settings-status').textContent = 'Cargando tus APIs…';
-  try { await loadApiSettings(); } catch (error) { $('api-settings-status').textContent = error.message; }
+  try { await loadApiSettings(); if (state.user?.role === 'admin') await loadManagedUsers(); } catch (error) { $('api-settings-status').textContent = error.message; }
 });
+$('refresh-managed-users').addEventListener('click', () => { void loadManagedUsers(); });
 $('back-to-app').addEventListener('click', () => { $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); });
 $('add-api-field').addEventListener('click', () => {
   const rows = $('api-fields').children;
