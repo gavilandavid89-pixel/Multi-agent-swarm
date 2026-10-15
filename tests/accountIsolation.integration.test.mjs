@@ -7,6 +7,7 @@ import {
   changePassword, verifyPassword, listManagedUsers, setManagedUserDisabled
 } from '../apps/bridge/services/accountStore.js';
 import { withUserProviders, currentUserProviders, closeUserProvidersStore, testUserProvider } from '../apps/worker/services/userProviders.js';
+import { consultarWithProviderContext } from '../apps/worker/services/aiProviders.js';
 
 test('isolates account APIs, protects saved keys, and enforces single-use invites', async t => {
   t.after(async () => { await closeUserProvidersStore(); await pool.end(); });
@@ -79,6 +80,24 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   const disabledUser = await setManagedUserDisabled(userB.id, true);
   assert.ok(disabledUser.disabledAt);
   assert.equal(await findSession(userBToken), null, 'disabling a user must revoke existing sessions');
+  let staleTaskProviderRequest = false;
+  globalThis.fetch = async () => {
+    staleTaskProviderRequest = true;
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'should never be used' } }] }) };
+  };
+  try {
+    await assert.rejects(
+      consultarWithProviderContext(
+        { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'test' }], maxTokens: 256 },
+        activeProviderContext,
+        {}
+      ),
+      error => error?.code === 'ACCOUNT_DISABLED'
+    );
+    assert.equal(staleTaskProviderRequest, false, 'a task that cached credentials before deactivation must not start a new provider request');
+  } finally {
+    globalThis.fetch = actualFetch;
+  }
   const disabledProviderContext = await withUserProviders(userB.id, () => currentUserProviders());
   assert.equal(disabledProviderContext.providers.length, 0, 'disabled accounts must not load saved providers');
   let providerRequestWhileDisabled = false;
