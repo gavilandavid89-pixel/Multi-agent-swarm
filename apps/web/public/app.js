@@ -413,6 +413,7 @@ async function showDetail(id) {
   }
   if (state.currentDetailId !== id) hideTaskNotice();
   state.currentDetailId = id;
+  $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
@@ -933,7 +934,7 @@ $('agent-reply-form').addEventListener('submit', async event => {
     button.disabled = false; button.textContent = 'Enviar al agente ↗';
   }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }
