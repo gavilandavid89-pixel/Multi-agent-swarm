@@ -13,6 +13,8 @@ const WORKER_BASE_URL = (process.env.WORKER_BASE_URL || '').replace(/\/$/, '');
 const WORKER_SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
 const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
+const configuredShutdownGrace = Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '20000', 10);
+const SHUTDOWN_GRACE_MS = Number.isFinite(configuredShutdownGrace) ? Math.min(30000, Math.max(1000, configuredShutdownGrace)) : 20000;
 const failedAuth = new Map();
 const jobCreateWindows = new Map();
 const previewSessions = new Map();
@@ -120,6 +122,7 @@ app.post('/api/auth/register', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const invite = typeof req.body?.invite === 'string' ? req.body.invite.trim() : '';
+  if (username === 'admin') return res.status(400).json({ error: 'El nombre admin está reservado para la cuenta administradora inicial.' });
   if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512 || invite.length < 20 || invite.length > 200) return res.status(400).json({ error: 'Usuario, contraseña o invitación inválidos.' });
   try {
     const user = await registerFromInvite(username, password, invite);
@@ -522,5 +525,34 @@ app.post('/api/jobs/:id/reply', async (req, res) => {
 });
 app.get('/api/jobs/:id/history', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/history`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
 app.use((error, _req, res, _next) => { console.error('[bridge]', error.message); res.status(400).json({ error: 'No se pudo procesar la solicitud.' }); });
+let server;
+let shuttingDown = false;
+let poolClosePromise;
+function closeAccountPool() {
+  if (!poolClosePromise) poolClosePromise = pool.end();
+  return poolClosePromise;
+}
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('[bridge] apagado solicitado; dejando terminar las solicitudes activas.');
+  const timer = setTimeout(() => {
+    console.warn('[bridge] terminó la ventana de apagado; cerrando las conexiones restantes.');
+    server?.closeAllConnections?.();
+    void closeAccountPool().catch(error => console.error('[bridge] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0));
+  }, SHUTDOWN_GRACE_MS);
+  timer.unref();
+  if (!server) {
+    clearTimeout(timer);
+    void closeAccountPool().catch(error => console.error('[bridge] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0));
+    return;
+  }
+  server.close(() => {
+    clearTimeout(timer);
+    void closeAccountPool().catch(error => console.error('[bridge] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0));
+  });
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 await initAccountStore();
-app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));
+server = app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));
