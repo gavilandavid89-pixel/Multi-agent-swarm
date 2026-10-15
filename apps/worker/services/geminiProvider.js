@@ -51,11 +51,6 @@ function toGeminiContents(messages) {
   };
 }
 
-function extractText(candidate) {
-  const parts = candidate?.content?.parts;
-  if (!Array.isArray(parts)) return '';
-  return parts.map(part => typeof part?.text === 'string' ? part.text : '').join('');
-}
 
 export async function consultarGemini({
   model,
