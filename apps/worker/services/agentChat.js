@@ -21,6 +21,7 @@ export async function replyToAgent(jobId, requestedAgent, message) {
   const context = [
     `OBJETIVO ORIGINAL:\n${clip(payload.objective, 1800)}`,
     `ESTRATEGIA:\n${clip(payload.strategy, 2200)}`,
+    `MEMORIA COMPARTIDA SWARM-STATE (checkpoints duraderos):\n${clip(payload.sharedDocument, 2200)}`,
     `MAPA DE COHERENCIA:\n${clip(payload.coherence, 3000)}`,
     `ÚLTIMA AUDITORÍA DE COHERENCIA:\n${clip(JSON.stringify(payload.coherenceReview || {}), 1500)}`,
     `ENTREGA ACTUAL (extracto):\n${clip(payload.delivery, 2600)}`,
