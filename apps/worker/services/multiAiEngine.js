@@ -1,6 +1,7 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { runSandboxTests } from './sandboxRunner.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -206,6 +207,26 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
+        const hasRunnableCode = /^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:/im.test(String(delivery || ''));
+        if (hasRunnableCode) {
+          await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, 'Especialista de pruebas · Node/Xvfb', 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
+          const runtime = await runSandboxTests(delivery, objective);
+          syntax = { ...syntax, runtime };
+          const runtimeFailed = ['failed', 'timeout', 'blocked', 'rejected'].includes(runtime.status) || (runtime.required && runtime.status !== 'passed');
+          const runtimeTranscript = (await getPayload(jobId))?.payload?.transcript || [];
+          await updateJob(jobId, { payload: { transcript: appendEntries(runtimeTranscript, [{
+            at: new Date().toISOString(), agent: 'Especialista de pruebas · Node/Xvfb', type: 'check',
+            content: JSON.stringify({ status: runtime.status, mode: runtime.mode, reason: runtime.reason, exitCode: runtime.exitCode ?? null, durationMs: runtime.durationMs ?? null, sandbox: runtime.sandbox ?? null, network: runtime.network ?? null, stdout: runtime.stdout || '', stderr: runtime.stderr || '' }).slice(0, 9000)
+          }]) } });
+          if (runtimeFailed) {
+            validation = {
+              ...validation,
+              verdict: 'NEEDS_CHANGES',
+              findings: [...(validation.findings || []), 'Prueba de ejecución (' + runtime.status + '): ' + String(runtime.reason || 'La prueba no fue aprobada.')].slice(0, 30),
+              summary: 'La prueba de ejecución no fue aprobada. ' + String(validation.summary || '').slice(0, 3000)
+            };
+          }
+        }
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
         for (let i = transcript.length - 1; i >= 0; i--) {
@@ -223,7 +244,7 @@ async function runJob(jobId) {
         resumeState = getValidationResumeState(payload, round);
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
-        const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
+        const validationLevel = syntax.runtime?.status === 'passed' ? 'ai_syntax_runtime' : (syntax.checked ? 'ai_and_syntax' : 'ai_review_only');
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
         const latestPayload = (await getPayload(jobId))?.payload || {};
         const transcript = appendEntries(latestPayload.transcript, [{
