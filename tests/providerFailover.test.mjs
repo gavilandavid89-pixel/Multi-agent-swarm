@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { configuredOpenAIProviders, consultarWithProviderContext } from '../apps/worker/services/aiProviders.js';
+import { firstAvailableApiSlot } from '../apps/worker/services/userProviders.js';
 
 test('uses Groq first and then configured OpenAI-compatible APIs in order', () => {
   const env = {
@@ -90,4 +91,11 @@ test('falls through every configured Gemini key in order before giving up', asyn
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test('la migración de APIs reutiliza huecos y respeta el máximo de diez slots', () => {
+  assert.equal(firstAvailableApiSlot(new Set([1, 3, 10])), 2);
+  assert.equal(firstAvailableApiSlot(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])), 10);
+  assert.equal(firstAvailableApiSlot(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])), null);
 });
