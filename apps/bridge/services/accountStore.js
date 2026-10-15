@@ -1,5 +1,6 @@
 import { createHash, createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import pg from 'pg';
+import { isIP } from 'node:net';
 
 const { Pool } = pg;
 const connectionString = process.env.SWARM_DATABASE_URL || '';
@@ -273,11 +274,13 @@ export async function saveApiKeys(userId, entries) {
       try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL del proveedor de la API ${slot} no es válida.`); }
       const hostname = parsedUrl.hostname.toLowerCase();
       const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
-      // Legacy endpoints came from the administrator's trusted server environment.
-      // They remain editable in-place, but users cannot introduce new arbitrary hosts.
+      // Existing custom providers stay editable; new custom endpoints must be public HTTPS domains.
       const legacyExistingHost = Boolean(previous && previousHost === hostname && !allowedHosts.has(hostname));
-      if (parsedUrl.protocol !== 'https:' || (!allowedHosts.has(hostname) && !legacyExistingHost) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
-        throw new Error(`El proveedor de la API ${slot} no está permitido por la política de seguridad.`);
+      const customHostAllowed = hostname.includes('.') && !isIP(hostname) &&
+        !/(?:^|\.)(?:localhost|local|internal|test|invalid|example)$/i.test(hostname) &&
+        !hostname.endsWith('.') && (!parsedUrl.port || parsedUrl.port === '443');
+      if (parsedUrl.protocol !== 'https:' || (!allowedHosts.has(hostname) && !legacyExistingHost && !customHostAllowed) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
+        throw new Error(`El proveedor de la API ${slot} debe ser HTTPS y usar un dominio público válido, sin credenciales, parámetros ni puertos no estándar.`);
       }
       const canonicalBaseUrl = legacyExistingHost ? String(previous.base_url)
         : hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
@@ -286,9 +289,19 @@ export async function saveApiKeys(userId, entries) {
       if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
+      const isCustomProvider = !allowedHosts.has(hostname);
+      const customModel = modelReasoning || modelCoding || modelValidation || legacyModel || String(previous?.model_reasoning || '').trim();
+      if (isCustomProvider && !customModel) {
+        throw new Error(`Ingresá al menos un ID de modelo compatible con OpenAI para la API personalizada ${slot}.`);
+      }
+      if (isCustomProvider) {
+        modelReasoning = modelReasoning || customModel;
+        modelCoding = modelCoding || customModel;
+        modelValidation = modelValidation || customModel;
+      }
       const legacyDefaultModel = String(previous?.model_reasoning || legacyModel || 'modelo').trim();
       const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname] || [
-        previous?.label || `Proveedor heredado · ${hostname}`,
+        previous?.label || (isCustomProvider ? `API personalizada · ${hostname}` : `Proveedor heredado · ${hostname}`),
         legacyDefaultModel,
         previous?.model_coding || legacyDefaultModel,
         previous?.model_validation || legacyDefaultModel
