@@ -159,7 +159,7 @@ export async function testUserProvider(userId, slot) {
   }
   if (!pool) throw Object.assign(new Error('La base de datos de APIs no está configurada.'), { status: 503 });
   const { rows } = await pool.query(
-    'SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 AND slot=$2',
+    'SELECT k.label,k.base_url,k.model_reasoning,k.model_coding,k.model_validation,k.encrypted_api_key FROM user_api_keys k JOIN app_users u ON u.id=k.user_id AND u.disabled_at IS NULL WHERE k.user_id=$1 AND k.slot=$2',
     [userId, normalizedSlot]
   );
   const row = rows[0];
