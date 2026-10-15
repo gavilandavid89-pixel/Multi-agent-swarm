@@ -61,7 +61,7 @@ test('cuenta llamadas sin usage de tokens reportado sin inventar consumo', () =>
 });
 
 
-test('una nueva tanda de 100k conserva contexto y archivos pero reinicia el contador de tanda', () => {
+test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contador de tanda', () => {
   const timestamp = '2026-10-14T01:00:00.000Z';
   const source = {
     objective: 'Construir una app',
@@ -80,7 +80,7 @@ test('una nueva tanda de 100k conserva contexto y archivos pero reinicia el cont
     transcript: [{ agent: 'Arquitecto', type: 'message', content: 'decisión guardada' }]
   };
   const next = prepareContinuationPayload(source, { id: 'old-job', stage: 'Pausada por presupuesto de tokens' }, timestamp);
-  assert.equal(next.tokenBudget, 100000);
+  assert.equal(next.tokenBudget, 1000000);
   assert.equal(next.tokenUsage.totalTokens, 0);
   assert.equal(next.tokenUsage.calls, 0);
   assert.deepEqual(next.usageEventIds, []);
@@ -147,10 +147,12 @@ test('una segunda tanda conserva el historial de tandas y registra el consumo pr
 });
 
 
-test('el presupuesto aumenta automáticamente en pasos de 25k hasta el máximo de 100k', () => {
+test('el presupuesto aumenta automáticamente en pasos de 25k hasta el máximo de 1M', () => {
   assert.equal(nextAutomaticTokenBudget(50000), 75000);
   assert.equal(nextAutomaticTokenBudget(75000), 100000);
-  assert.equal(nextAutomaticTokenBudget(100000), null);
+  assert.equal(nextAutomaticTokenBudget(100000), 125000);
+  assert.equal(nextAutomaticTokenBudget(975000), 1000000);
+  assert.equal(nextAutomaticTokenBudget(1000000), null);
   assert.equal(nextAutomaticTokenBudget(25000), 50000);
 });
 
