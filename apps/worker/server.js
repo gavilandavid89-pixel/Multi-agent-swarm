@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders, importLegacyProvidersForUser } from './services/userProviders.js';
+import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -24,7 +24,22 @@ function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.
 async function runJobWithAccountProviders(id) {
   const record = await getPayload(id);
   const userId = record?.payload?.userId || null;
-  return withUserProviders(userId, () => processJob(id));
+  return withUserProviders(userId, async () => {
+    if (userId) {
+      try { await registerJobOwnership(userId, id); }
+      catch (error) {
+        console.warn('[worker][job_ownership_sync_deferred]', JSON.stringify({ jobId: id, reason: error?.code || 'database' }));
+      }
+    }
+    const result = await processJob(id);
+    if (userId && result?.continuationJobId) {
+      try { await registerJobOwnership(userId, result.continuationJobId); }
+      catch (error) {
+        console.warn('[worker][continuation_ownership_sync_deferred]', JSON.stringify({ jobId: result.continuationJobId, sourceJobId: id, reason: error?.code || 'database' }));
+      }
+    }
+    return result;
+  });
 }
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
