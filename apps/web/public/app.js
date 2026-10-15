@@ -531,6 +531,17 @@ function apiFieldRow(api = {}) {
   main.append(providerLabel, keyLabel, modelLabels.reasoning, modelLabels.coding, modelLabels.validation, meta);
   const actions = document.createElement('div');
   if (api.saved) {
+    const test = document.createElement('button'); test.type = 'button'; test.className = 'button button-secondary'; test.textContent = 'Probar conexión';
+    test.addEventListener('click', async () => {
+      test.disabled = true; test.textContent = 'Probando…';
+      $('api-settings-status').textContent = `Verificando la API ${row.dataset.slot} sin generar una tarea…`;
+      try {
+        const result = await api(`/api/account/apis/${encodeURIComponent(row.dataset.slot)}/test`, { method: 'POST', body: '{}' });
+        $('api-settings-status').textContent = `API ${row.dataset.slot} · ${result.provider}: ${result.message} Modelo: ${result.model}.`;
+      } catch (error) { $('api-settings-status').textContent = `No se pudo validar la API ${row.dataset.slot}: ${error.message}`; }
+      finally { test.disabled = false; test.textContent = 'Probar conexión'; }
+    });
+    actions.append(test);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button-secondary'; remove.textContent = 'Quitar';
     remove.addEventListener('click', async () => {
       if (!confirm(`¿Quitar la API ${row.dataset.slot} de tu cuenta? Esta acción no se puede deshacer.`)) return;
