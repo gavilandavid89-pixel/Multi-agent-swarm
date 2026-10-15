@@ -47,6 +47,8 @@ function runSandbox(root, mode, paths) {
     const hasHtml = [...paths].some(p => /(^|\/)index\.html?$/i.test(p) || /\.html?$/i.test(p));
     const testFiles = [...paths].filter(p => /(?:^|\/)[^/]*\.test\.(?:mjs|cjs|js)$/i.test(p));
     const jsFiles = [...paths].filter(p => /\.(?:mjs|cjs|js)$/i.test(p) && !/\.test\.(?:mjs|cjs|js)$/i.test(p));
+    const pythonFiles = [...paths].filter(p => /\.py$/i.test(p));
+    const pythonTests = pythonFiles.filter(p => /(?:^|\/)test[^/]*\.py$/i.test(p));
     let command, args, testMode = mode;
     if (mode === 'browser' || (mode === 'auto' && hasHtml)) {
       const html = [...paths].find(p => /(^|\/)index\.html?$/i.test(p)) || [...paths].find(p => /\.html?$/i.test(p));
@@ -62,6 +64,17 @@ function runSandbox(root, mode, paths) {
         let entry = ['index.js','index.mjs','main.js','main.mjs','app.js','app.mjs','server.js'].find(p => paths.includes(p)) || (jsFiles.length === 1 ? jsFiles[0] : null);
         if (!entry) return resolve({ status: 'skipped', reason: 'No hay pruebas automatizadas ni punto de entrada inequívoco; no se ejecuta un archivo arbitrario por suposición.', exitCode: null, stdout: '', stderr: '' });
         inner = ['/usr/local/bin/node', '--disable-proto=throw', entry];
+      }
+      command = 'bwrap';
+      args = sandboxArgs(root, inner);
+    } else if (mode === 'auto' && pythonFiles.length) {
+      testMode = 'python';
+      let inner;
+      if (pythonTests.length) inner = ['/usr/bin/python3', '-m', 'unittest', 'discover', '-s', '.', '-p', 'test*.py'];
+      else {
+        const entry = ['main.py','app.py','index.py'].find(p => paths.includes(p)) || (pythonFiles.length === 1 ? pythonFiles[0] : null);
+        if (!entry) return resolve({ status: 'skipped', reason: 'No hay pruebas Python ni punto de entrada inequívoco.', exitCode: null, stdout: '', stderr: '' });
+        inner = ['/usr/bin/python3', '-I', entry];
       }
       command = 'bwrap';
       args = sandboxArgs(root, inner);
