@@ -169,7 +169,7 @@ export async function saveApiKeys(userId, entries) {
       const canonicalBaseUrl = legacyExistingHost ? String(previous.base_url)
         : hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
         : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
-        : `https://${hostname}${parsedUrl.pathname.replace(/\\/+$/, '')}`;
+        : `https://${hostname}${parsedUrl.pathname.replace(/\/+$/, '')}`;
       if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
