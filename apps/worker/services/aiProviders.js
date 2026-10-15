@@ -86,7 +86,9 @@ export async function consultarModelo(options) {
 
 export async function consultarWithProviderContext(options, userContext = null, env = process.env) {
   const { model, maxTokens = 1200 } = options;
-  if (userContext?.userId) await assertUserAccountActive(userContext.userId);
+  const beforeProviderRequest = userContext?.userId
+    ? () => assertUserAccountActive(userContext.userId)
+    : undefined;
   const providers = userContext
     ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
     : configuredOpenAIProviders(model, maxTokens, env);
@@ -109,6 +111,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
         ...options,
         model: providerModelForSlot(gemini, model, maxTokens),
         apiKey: gemini.apiKey,
+        beforeProviderRequest,
         failoverOnRetryable: hasNext
       });
     } catch (error) {
@@ -131,6 +134,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
       return await consultarOpenAICompatible({
         ...options, model: provider.model, apiKey: provider.apiKey,
         baseUrl: provider.baseUrl, providerName: provider.name,
+        beforeProviderRequest,
         failoverAvailable: index < providers.length - 1
       });
     } catch (error) {
