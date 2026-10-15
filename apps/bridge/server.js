@@ -28,6 +28,16 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
+app.get('/readyz', async (_req, res) => {
+  const workerConfigured = Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET);
+  try {
+    await pool.query('SELECT 1');
+    const ok = workerConfigured;
+    res.status(ok ? 200 : 503).json({ ok, role: 'bridge', database: 'ready', workerConfigured });
+  } catch {
+    res.status(503).json({ ok: false, role: 'bridge', database: 'unavailable', workerConfigured });
+  }
+});
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
   if (!map.has(key) && map.size >= 5000) {
