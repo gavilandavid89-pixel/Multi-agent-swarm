@@ -309,7 +309,8 @@ function renderAgentMemory(data) {
   const individual = $('agent-memory-content');
   const shared = $('shared-memory-content');
   if (!select || !individual || !shared) return;
-  state.agentDocuments = data.agentDocuments || {};\n  const docs = Object.values(state.agentDocuments);
+  state.agentDocuments = data.agentDocuments || {};
+  const docs = Object.values(state.agentDocuments);
   const previous = select.value;
   select.replaceChildren();
   for (const doc of docs) {
