@@ -223,3 +223,6 @@ footer{margin-top:30px;border-color:#ffffff12;color:#92989e}
  .files-drawer-actions{flex-direction:column}
  .files-drawer-actions .button{width:100%}
 }
+
+/* Keep the main workspace focused on the conversation rather than the marketing hero. */
+.hero{display:none!important}
