@@ -10,7 +10,7 @@
 - Los resultados son evidencia de ejecución acotada, no garantía universal de corrección.
 
 ## Configuración Render
-Crear un servicio separado a partir de `apps/runner/Dockerfile` (contexto raíz del repositorio), preferentemente privado. Configurar:
+Crear un servicio separado con el Blueprint `render-runner.yaml` después de revisar el coste del plan privado. El Blueprint principal `render.yaml` permanece intacto para no modificar servicios existentes. Configurar:
 - `RUNNER_SHARED_SECRET`: secreto aleatorio de al menos 32 caracteres; debe coincidir con `SANDBOX_RUNNER_SECRET` en Worker.
 - `PORT=10000`
 - `RUNNER_XVFB_ENABLED=true`
