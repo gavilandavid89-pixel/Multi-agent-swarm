@@ -102,7 +102,7 @@ async function removeTree(root) {
   await rm(root, { recursive: true, force: true, maxRetries: 2 }).catch(() => {});
 }
 app.get('/healthz', (_req, res) => {
-  const probe = spawnSync('bwrap', ['--version'], { encoding: 'utf8', timeout: 1500 });
+  const probe = spawnSync('bwrap', ['--unshare-all', '--ro-bind', '/usr', '/usr', '--proc', '/proc', '--dev', '/dev', '--', '/usr/bin/true'], { encoding: 'utf8', timeout: 1500 });
   res.status(probe.status === 0 ? 200 : 503).json({ ok: probe.status === 0, role: 'isolated-runner', sandbox: probe.status === 0 ? 'bubblewrap-present' : 'unavailable', xvfb: Boolean(process.env.RUNNER_XVFB_ENABLED === 'true') });
 });
 app.use('/v1', (req, res, next) => {
