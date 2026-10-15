@@ -61,8 +61,8 @@ test('errores de proveedor se excluyen del recuento y no cuentan como abstencion
 });
 
 test('exige que el voto esté en la primera línea no vacía y no acepta texto ambiguo', () => {
-  assert.equal(parseImprovementVote('VOTO: RECHAZAR\\nJUSTIFICACIÓN: No es seguro.').vote, 'RECHAZAR');
-  assert.equal(parseImprovementVote('Mi análisis:\\nVOTO: APOYAR\\nJUSTIFICACIÓN: Parece útil.').validFormat, false);
+  assert.equal(parseImprovementVote('VOTO: RECHAZAR\nJUSTIFICACIÓN: No es seguro.').vote, 'RECHAZAR');
+  assert.equal(parseImprovementVote('Mi análisis:\nVOTO: APOYAR\nJUSTIFICACIÓN: Parece útil.').validFormat, false);
   assert.equal(parseImprovementVote('VOTO: APOYAR porque sí').validFormat, false);
 });
 
