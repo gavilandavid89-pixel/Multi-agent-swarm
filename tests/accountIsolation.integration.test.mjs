@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   pool, initAccountStore, hashPassword, createInvite, registerFromInvite,
-  saveApiKeys, listApiKeys, createSession, findSession, revokeSession, decryptSecret,
-  changePassword, verifyPassword
+  saveApiKeys, listApiKeys, createSession, findSession, decryptSecret,
+  changePassword, verifyPassword, listManagedUsers, setManagedUserDisabled
 } from '../apps/bridge/services/accountStore.js';
+import { withUserProviders, currentUserProviders, closeUserProvidersStore } from '../apps/worker/services/userProviders.js';
 
 test('isolates account APIs, protects saved keys, and enforces single-use invites', async t => {
-  t.after(async () => { await pool.end(); });
+  t.after(async () => { await closeUserProvidersStore(); await pool.end(); });
   await initAccountStore();
 
   const suffix = randomUUID().slice(0, 8);
@@ -47,6 +48,27 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   assert.deepEqual(apisB.map(api => api.label), ['Test provider B']);
   assert.equal(JSON.stringify(apisA).includes('test-key-alpha'), false);
   assert.equal(JSON.stringify(apisB).includes('test-key-beta'), false);
+
+  const managedUsers = await listManagedUsers();
+  assert.equal(managedUsers.some(user => user.id === userA.id), true);
+  assert.equal(managedUsers.some(user => user.id === userB.id), true);
+  assert.equal(managedUsers.some(user => Object.hasOwn(user, 'password_hash')), false);
+  await assert.rejects(setManagedUserDisabled(adminId, true), /cuentas administradoras/i);
+
+  const userBToken = await createSession(userB.id);
+  const activeProviderContext = await withUserProviders(userB.id, () => currentUserProviders());
+  assert.equal(activeProviderContext.providers.length, 1);
+  const disabledUser = await setManagedUserDisabled(userB.id, true);
+  assert.ok(disabledUser.disabledAt);
+  assert.equal(await findSession(userBToken), null, 'disabling a user must revoke existing sessions');
+  const disabledProviderContext = await withUserProviders(userB.id, () => currentUserProviders());
+  assert.equal(disabledProviderContext.providers.length, 0, 'disabled accounts must not load saved providers');
+  assert.equal((await listApiKeys(userB.id)).length, 1, 'disabling must preserve saved API data');
+  const reenabledUser = await setManagedUserDisabled(userB.id, false);
+  assert.equal(reenabledUser.disabledAt, null);
+  assert.equal(await findSession(userBToken), null, 'reactivation must not resurrect revoked sessions');
+  const reenabledProviderContext = await withUserProviders(userB.id, () => currentUserProviders());
+  assert.equal(reenabledProviderContext.providers.length, 1, 'saved providers can load again after reactivation');
 
   const encrypted = await pool.query('SELECT encrypted_api_key FROM user_api_keys WHERE user_id=$1 AND slot=1', [userA.id]);
   assert.equal(encrypted.rows.length, 1);

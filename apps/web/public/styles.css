@@ -114,6 +114,6 @@
 .api-field-row .button{white-space:nowrap}
 .api-settings-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between}
 .api-field-status{font-size:.78rem;color:#9bd8b1}
-.invite-admin-panel{margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1)}
+.invite-admin-panel{margin-top:28px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1)}.managed-users-panel{margin-top:24px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1)}.managed-users-panel .section-head{align-items:flex-start}.managed-user-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--line);border-radius:13px;background:#ffffff04}.managed-user-row .job-main{min-width:0}.managed-user-status{display:inline-flex;align-items:center;gap:6px;font-size:10px;color:var(--muted)}.managed-user-status.active{color:var(--green)}.managed-user-status.disabled{color:var(--red)}
 .invite-code{display:block;margin-top:10px;padding:12px;border-radius:10px;background:rgba(255,255,255,.06);overflow-wrap:anywhere;user-select:all}
 @media(max-width:600px){.api-field-row{grid-template-columns:minmax(0,1fr)}.api-field-row .button{justify-self:start}.auth-form{display:grid;grid-template-columns:1fr}.auth-form button{width:100%}}

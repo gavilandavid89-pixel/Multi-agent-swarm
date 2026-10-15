@@ -114,7 +114,7 @@ export async function registerJobOwnership(userId, jobId, createdAt = null) {
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
   if (!pool) throw new Error('User API database is not configured.');
-  const { rows } = await pool.query('SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
+  const { rows } = await pool.query("SELECT k.label,k.base_url,k.model_reasoning,k.model_coding,k.model_validation,k.encrypted_api_key FROM user_api_keys k JOIN app_users u ON u.id=k.user_id AND u.disabled_at IS NULL WHERE k.user_id=$1 ORDER BY k.slot", [userId]);
   const providers = [];
   const geminiProviders = [];
   let gemini = null;
@@ -213,4 +213,11 @@ export async function testUserProvider(userId, slot) {
         ? 'La clave funciona, pero el modelo no aparece en el catálogo del proveedor.'
         : 'La conexión fue autenticada; el proveedor no expone un catálogo de modelos verificable.'
   };
+}
+
+let closeUserProvidersStorePromise;
+export function closeUserProvidersStore() {
+  if (!pool) return Promise.resolve();
+  if (!closeUserProvidersStorePromise) closeUserProvidersStorePromise = pool.end();
+  return closeUserProvidersStorePromise;
 }
