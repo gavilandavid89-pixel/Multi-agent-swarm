@@ -135,3 +135,78 @@ export async function withUserProviders(userId, operation) {
   }
   return context.run({ userId, providers, gemini, geminiProviders }, operation);
 }
+
+/** Return whether a model appears in an OpenAI-compatible model catalog, or null if no catalog is exposed. */
+export function modelCatalogStatus(payload, model) {
+  const catalog = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : null;
+  if (!catalog) return null;
+  const target = String(model || '').trim();
+  return catalog.some(item => {
+    const id = String(item?.id || item?.name || '').trim();
+    return id === target || id === `models/${target}` || id.endsWith(`/${target}`);
+  });
+}
+
+/** Verify a saved user's API key against a metadata endpoint; this does not generate model tokens. */
+export async function testUserProvider(userId, slot) {
+  const normalizedSlot = Number(slot);
+  if (!/^[0-9a-f-]{36}$/i.test(String(userId || '')) || !Number.isInteger(normalizedSlot) || normalizedSlot < 1 || normalizedSlot > 10) {
+    throw Object.assign(new Error('La cuenta o el campo de API no es válido.'), { status: 400 });
+  }
+  if (!pool) throw Object.assign(new Error('La base de datos de APIs no está configurada.'), { status: 503 });
+  const { rows } = await pool.query(
+    'SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 AND slot=$2',
+    [userId, normalizedSlot]
+  );
+  const row = rows[0];
+  if (!row) throw Object.assign(new Error('No existe una API guardada en ese campo.'), { status: 404 });
+  let apiKey;
+  try { apiKey = decrypt(row.encrypted_api_key); }
+  catch { throw Object.assign(new Error('No se pudo descifrar la clave guardada.'), { status: 503 }); }
+  const baseUrl = String(row.base_url || '').replace(/\\/+$/, '');
+  const model = String(row.model_coding || row.model_reasoning || row.model_validation || '').trim();
+  if (!model) throw Object.assign(new Error('Configurá un modelo antes de probar la API.'), { status: 400 });
+  let parsedBase;
+  try { parsedBase = new URL(baseUrl); }
+  catch { throw Object.assign(new Error('La URL guardada del proveedor no es válida.'), { status: 400 }); }
+  if (parsedBase.protocol !== 'https:') throw Object.assign(new Error('La URL del proveedor debe usar HTTPS.'), { status: 400 });
+  const isGemini = parsedBase.hostname.toLowerCase() === 'generativelanguage.googleapis.com';
+  const endpoint = isGemini
+    ? new URL(`/v1beta/models/${encodeURIComponent(model)}`, parsedBase.origin)
+    : new URL('models', `${baseUrl}/`);
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'GET',
+      headers: isGemini ? { 'x-goog-api-key': apiKey } : { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch (error) {
+    const message = error?.name === 'TimeoutError' ? 'La verificación del proveedor agotó el tiempo.' : 'No se pudo conectar con el proveedor.';
+    throw Object.assign(new Error(message), { status: 502 });
+  }
+  if (!response.ok) {
+    const message = response.status === 401 || response.status === 403
+      ? 'El proveedor rechazó la clave API.'
+      : response.status === 404
+        ? 'El proveedor no encontró el modelo o no admite esta consulta de verificación.'
+        : response.status === 429
+          ? 'El proveedor limitó temporalmente la verificación.'
+          : `El proveedor respondió HTTP ${response.status}.`;
+    const status = response.status === 429 ? 429 : response.status >= 500 ? 502 : 422;
+    throw Object.assign(new Error(message), { status });
+  }
+  const payload = await response.json().catch(() => null);
+  const modelAvailable = isGemini ? true : modelCatalogStatus(payload, model);
+  return {
+    ok: true,
+    provider: String(row.label || 'API guardada').slice(0, 80),
+    model,
+    modelAvailable,
+    message: modelAvailable === true
+      ? 'Conexión autenticada y modelo reconocido.'
+      : modelAvailable === false
+        ? 'La clave funciona, pero el modelo no aparece en el catálogo del proveedor.'
+        : 'La conexión fue autenticada; el proveedor no expone un catálogo de modelos verificable.'
+  };
+}
