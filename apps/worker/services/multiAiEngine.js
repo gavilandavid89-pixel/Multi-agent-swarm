@@ -1,6 +1,7 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { validateDeliverableIntegrity } from './deliverableValidation.js';
 import { runSandboxTests } from './sandboxRunner.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
@@ -208,6 +209,15 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
+        const integrity = validateDeliverableIntegrity({ objective, delivery, validation, syntax });
+        if (!integrity.ok) {
+          validation = {
+            ...validation,
+            verdict: 'NEEDS_CHANGES',
+            findings: [...(validation.findings || []), ...integrity.findings].slice(0, 30),
+            summary: 'La puerta determinista de integridad encontró problemas en la entrega. ' + String(validation.summary || '').slice(0, 3000)
+          };
+        }
         const hasRunnableCode = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:\s*[^\n]+\.(?:js|mjs|cjs|html?|py)\s*$/im.test(String(delivery || ''));
         if (hasRunnableCode) {
           const runtimeAgent = /\.html?\b/im.test(String(delivery || '')) ? 'Especialista gráfico · Xvfb/Chromium' : 'Especialista de ejecución aislada · Node/Python';
