@@ -90,6 +90,23 @@ export async function importLegacyProvidersForUser(userId) {
 
 export function currentUserProviders() { return context.getStore() || null; }
 
+/** Re-check account state before every model request, even when a task cached providers before an admin disabled the account. */
+export async function assertUserAccountActive(userId) {
+  if (!userId) return true;
+  if (!pool) throw Object.assign(new Error('La base de datos de cuentas no está disponible.'), { code: 'ACCOUNT_STATUS_UNAVAILABLE' });
+  const { rows } = await pool.query(
+    'SELECT 1 FROM app_users WHERE id=$1 AND disabled_at IS NULL',
+    [userId]
+  );
+  if (!rows.length) {
+    throw Object.assign(new Error('La cuenta está desactivada; se bloquearon las nuevas llamadas a proveedores.'), {
+      code: 'ACCOUNT_DISABLED',
+      status: 403
+    });
+  }
+  return true;
+}
+
 /** Ensure a job (including automatic continuation batches) stays owned by its originating account. */
 export async function registerJobOwnership(userId, jobId, createdAt = null) {
   if (!userId || !pool) return false;
