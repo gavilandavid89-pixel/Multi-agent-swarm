@@ -3,7 +3,7 @@ import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, cr
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
-import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
+import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';\nimport { recordAgentCheckpoint } from './agentMemory.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
