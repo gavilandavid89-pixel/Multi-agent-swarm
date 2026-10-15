@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
+import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -136,6 +136,21 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
 });
+app.post('/api/auth/key-login', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const accountCode = typeof req.body?.accountCode === 'string' ? req.body.accountCode.trim() : '';
+  const limitKey = `key-login:${ip}:${accountCode}`;
+  const limit = windowLimit(failedAuth, limitKey, 8, 15 * 60 * 1000);
+  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
+  const accessKey = typeof req.body?.accessKey === 'string' ? req.body.accessKey : '';
+  try {
+    const user = await loginWithAccountKey(accountCode, accessKey);
+    if (!user) return res.status(401).json({ error: 'Identificador o clave incorrectos.' });
+    failedAuth.delete(limitKey);
+    const token = await createSession(user.id);
+    res.set('Cache-Control', 'no-store').json({ token, user });
+  } catch { res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
+});
 app.post('/api/auth/register', async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -145,14 +160,14 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const user = await registerFromInvite(username, password, invite);
     const token = await createSession(user.id);
-    res.status(201).json({ token, user });
+    res.set('Cache-Control', 'no-store').status(201).json({ token, user: { id: user.id, username: user.username, role: user.role, accountCode: user.accountCode }, accountKey: user.accessKey });
   } catch (error) {
     const message = String(error?.message || '');
     res.status(message.includes('invitación') ? 400 : message.includes('duplicate') ? 409 : 400).json({ error: message.includes('invitación') ? message : 'No se pudo crear la cuenta. Revisá el usuario o la invitación.' });
   }
 });
 app.use('/api', async (req, res, next) => {
-  if (['/auth/login','/auth/register','/auth/validate-invite','/auth/bootstrap-status'].includes(req.path)) return next();
+  if (['/auth/login','/auth/key-login','/auth/register','/auth/validate-invite','/auth/bootstrap-status'].includes(req.path)) return next();
   const auth = req.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   try {
@@ -164,6 +179,10 @@ app.use('/api', async (req, res, next) => {
 });
 app.post('/api/auth/logout', async (req, res) => { try { await revokeSession(req.sessionToken); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo cerrar la sesión.' }); } });
 app.get('/api/account', (req, res) => res.json({ user: req.user }));
+app.get('/api/account/key', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json(await ensureAccountKey(req.user.id)); }
+  catch (error) { res.status(error.status || 503).json({ error: 'No se pudo cargar la clave de la cuenta.' }); }
+});
 app.patch('/api/account/password', async (req, res) => {
   const limitKey = `password:${req.user.id}`;
   const passwordLimit = windowLimit(failedAuth, limitKey, 6, 15 * 60 * 1000);

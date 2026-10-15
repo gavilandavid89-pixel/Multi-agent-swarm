@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {
   pool, initAccountStore, hashPassword, createInvite, registerFromInvite,
   saveApiKeys, listApiKeys, createSession, findSession, decryptSecret,
-  changePassword, verifyPassword, listManagedUsers, setManagedUserDisabled
+  changePassword, verifyPassword, listManagedUsers, setManagedUserDisabled, ensureAccountKey, loginWithAccountKey
 } from '../apps/bridge/services/accountStore.js';
 import { withUserProviders, currentUserProviders, closeUserProvidersStore, testUserProvider } from '../apps/worker/services/userProviders.js';
 import { consultarWithProviderContext } from '../apps/worker/services/aiProviders.js';
@@ -38,6 +38,13 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   ]);
   assert.equal(raceResults.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(raceResults.filter(result => result.status === 'rejected').length, 1);
+
+  const accountKey = await ensureAccountKey(userA.id);
+  assert.match(accountKey.accountCode, /^\\d{6}$/);
+  assert.match(accountKey.accessKey, /^\\d{15}$/);
+  assert.deepEqual(await loginWithAccountKey(accountKey.accountCode, accountKey.accessKey), { id: userA.id, username: userA.username, role: 'user' });
+  assert.equal(await loginWithAccountKey(accountKey.accountCode, '000000000000000'), null);
+  assert.deepEqual(await ensureAccountKey(userA.id), accountKey, 'account key remains stable and recoverable for the account owner');
 
   const models = { reasoning: 'gpt-4o-mini', coding: 'gpt-4o-mini', validation: 'gpt-4o-mini' };
   await saveApiKeys(userA.id, [{ slot: 1, label: 'Test provider A', baseUrl: 'https://api.openai.com/v1', models, apiKey: 'test-key-alpha' }]);

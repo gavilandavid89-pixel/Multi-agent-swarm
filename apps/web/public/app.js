@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {} };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {} };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -476,6 +476,24 @@ $('access-form').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 
+$('key-access-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const accountCode = $('key-access-code').value.trim(), accessKey = $('key-access-secret').value.trim();
+  const button = $('key-access-form').querySelector('button[type="submit"]'); button.disabled = true;
+  $('key-access-status').textContent = 'Verificando tu clave…';
+  try {
+    const response = await fetch('/api/auth/key-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accountCode, accessKey }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'No se pudo iniciar sesión.');
+    state.accessKey = data.token; state.user = data.user; sessionStorage.setItem('swarm-session-token', state.accessKey); $('key-access-secret').value = '';
+    await enterApp();
+  } catch (error) { $('key-access-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('show-key-login').addEventListener('click', () => { $('invite-gate-form')?.classList.add('hidden'); $('register-form')?.classList.add('hidden'); $('access-form')?.classList.add('hidden'); $('key-access-form').classList.remove('hidden'); $('show-login')?.classList.add('hidden'); $('show-key-login').classList.add('hidden'); });
+$('back-to-password-login').addEventListener('click', () => { $('key-access-form').classList.add('hidden'); $('access-form').classList.remove('hidden'); });
+$('toggle-login-key').addEventListener('click', () => { const input = $('key-access-secret'); input.type = input.type === 'password' ? 'text' : 'password'; $('toggle-login-key').setAttribute('aria-label', input.type === 'password' ? 'Mostrar clave' : 'Ocultar clave'); });
+
 // Account menu and compact, dynamically-added API fields.
 const CUSTOM_PROVIDER_VALUE = '__custom_openai_compatible__';
 const API_PROVIDERS = [
@@ -697,6 +715,16 @@ async function loadManagedUsers() {
   }
 }
 $('account-menu-toggle').addEventListener('click', () => $('account-menu-items').classList.toggle('hidden'));
+$('open-account-key').addEventListener('click', async event => {
+  event.stopPropagation(); const panel = $('account-key-panel'); const opening = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !opening); $('open-account-key').setAttribute('aria-expanded', String(opening)); if (!opening) return;
+  $('account-key-status').textContent = 'Cargando clave…';
+  try { const data = await api('/api/account/key'); state.accountKey = data; $('account-code-value').value = data.accountCode; $('account-key-value').value = data.accessKey; $('account-key-value').type = state.accountKeyVisible ? 'text' : 'password'; $('account-key-status').textContent = 'Guardá tu identificador y tu clave en un lugar seguro.'; }
+  catch (error) { $('account-key-status').textContent = error.message || 'No se pudo cargar la clave.'; }
+});
+$('toggle-account-key').addEventListener('click', event => { event.stopPropagation(); state.accountKeyVisible = !state.accountKeyVisible; $('account-key-value').type = state.accountKeyVisible ? 'text' : 'password'; $('toggle-account-key').setAttribute('aria-label', state.accountKeyVisible ? 'Ocultar clave' : 'Mostrar clave'); $('toggle-account-key').textContent = state.accountKeyVisible ? '◎' : '◉'; });
+$('copy-account-key').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-key-value').value); $('account-key-status').textContent = 'Clave copiada al portapapeles.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Podés revelarla y copiarla manualmente.'; } });
+$('show-key-login').classList.remove('hidden');
 $('open-api-settings').addEventListener('click', async () => {
   $('account-menu-items').classList.add('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.remove('hidden');
   $('api-settings-status').textContent = 'Cargando tus APIs…';
@@ -998,7 +1026,7 @@ $('account-menu-toggle').addEventListener('click', event => {
   $('account-menu-toggle').setAttribute('aria-expanded', String(opening));
 });
 $('account-menu-items').addEventListener('click', event => {
-  if (event.target.closest('button')) {
+  if (event.target.closest('button') && !event.target.closest('#open-account-key, #toggle-account-key, #copy-account-key')) {
     $('account-menu-items').classList.add('hidden');
     $('account-menu-toggle').setAttribute('aria-expanded', 'false');
   }
