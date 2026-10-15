@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeOpenAICompatibleResponse, parseProviderResponseBody, validateGeminiResponse } from '../apps/worker/services/providerResponse.js';
+import { normalizeOpenAICompatibleResponse, normalizeProviderResponse, parseProviderResponseBody, validateGeminiResponse } from '../apps/worker/services/providerResponse.js';
 test('parsea una respuesta válida de proveedor', () => {
   assert.deepEqual(parseProviderResponseBody('{"choices":[{"message":{"content":"ok"}}]}'), { choices: [{ message: { content: 'ok' } }] });
 });
@@ -36,4 +36,49 @@ test('valida estructura Gemini y reconoce respuestas bloqueadas', () => {
   assert.deepEqual(validateGeminiResponse({ candidates: [] }), { candidates: [] });
   assert.deepEqual(validateGeminiResponse({ promptFeedback: { blockReason: 'SAFETY' } }), { promptFeedback: { blockReason: 'SAFETY' } });
   assert.throws(() => validateGeminiResponse({ data: [] }), error => error.code === 'PROVIDER_UNSUPPORTED_RESPONSE');
+});
+
+test('traduce respuestas nativas de Anthropic al contrato canónico sin perder uso ni fin', () => {
+  const result = normalizeProviderResponse({
+    id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-test',
+    content: [{ type: 'text', text: 'Hola desde Anthropic.' }],
+    stop_reason: 'end_turn', usage: { input_tokens: 12, output_tokens: 7 }
+  });
+  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.status, 'success');
+  assert.equal(result.provider, 'Anthropic');
+  assert.equal(result.model, 'claude-test');
+  assert.equal(result.content, 'Hola desde Anthropic.');
+  assert.equal(result.finishReason, 'stop');
+  assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 7, totalTokens: 19 });
+});
+
+test('normaliza respuesta Gemini al mismo contrato y marca bloqueos de seguridad', () => {
+  const result = normalizeProviderResponse({
+    candidates: [{ content: { parts: [{ text: 'Gemini listo' }] }, finishReason: 'MAX_TOKENS' }],
+    usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 6, totalTokenCount: 10 }
+  });
+  assert.equal(result.content, 'Gemini listo');
+  assert.equal(result.finishReason, 'length');
+  assert.deepEqual(result.usage, { inputTokens: 4, outputTokens: 6, totalTokens: 10 });
+  const blocked = normalizeProviderResponse({ promptFeedback: { blockReason: 'SAFETY' } });
+  assert.equal(blocked.status, 'blocked');
+  assert.equal(blocked.finishReason, 'content_filter');
+  assert.ok(blocked.warnings.includes('GEMINI_PROMPT_BLOCKED'));
+});
+
+test('preserva llamadas a herramientas en metadatos y no las confunde con texto', () => {
+  const result = normalizeProviderResponse({
+    choices: [{ message: { content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'search', arguments: '{"q":"x"}' } }] }, finish_reason: 'tool_calls' }]
+  });
+  assert.equal(result.content, '');
+  assert.equal(result.finishReason, 'tool_calls');
+  assert.deepEqual(result.toolCalls, [{ id: 'call-1', name: 'search', arguments: '{"q":"x"}' }]);
+});
+
+test('adapta Responses API y conserva estado incompleto como truncamiento', () => {
+  const result = normalizeProviderResponse({ output: [{ content: [{ type: 'output_text', text: 'parcial' }] }], status: 'incomplete', usage: { input_tokens: 2, output_tokens: 3 } });
+  assert.equal(result.content, 'parcial');
+  assert.equal(result.finishReason, 'length');
+  assert.equal(result.usage.totalTokens, 5);
 });
