@@ -133,7 +133,7 @@ export async function saveApiKeys(userId, entries) {
   };
   try {
     await client.query('BEGIN');
-    const existing = await client.query('SELECT slot,base_url,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
+    const existing = await client.query('SELECT slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
     const bySlot = new Map(existing.rows.map(row => [Number(row.slot), row]));
     const seen = new Set();
     for (const item of entries) {
@@ -173,7 +173,13 @@ export async function saveApiKeys(userId, entries) {
       if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
-      const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
+      const legacyDefaultModel = String(previous?.model_reasoning || legacyModel || 'modelo').trim();
+      const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname] || [
+        previous?.label || `Proveedor heredado · ${hostname}`,
+        legacyDefaultModel,
+        previous?.model_coding || legacyDefaultModel,
+        previous?.model_validation || legacyDefaultModel
+      ];
       const label = String(item.label || defaultLabel).trim().slice(0,80) || defaultLabel;
       modelReasoning = modelReasoning || defaultReasoning;
       modelCoding = modelCoding || defaultCoding;
