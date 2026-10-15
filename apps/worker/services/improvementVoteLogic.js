@@ -2,7 +2,8 @@ export const IMPROVEMENT_VOTES = Object.freeze(['APOYAR', 'RECHAZAR', 'ABSTENERS
 
 export function parseImprovementVote(value) {
   const text = String(value || '');
-  const match = text.match(/\bVOTO\s*[:：-]\s*(APOYAR|RECHAZAR|ABSTENERSE)\b/i);
+  const firstLine = text.replace(/\r/g, '').split('\n').find(line => line.trim())?.trim() || '';
+  const match = firstLine.match(/^VOTO\s*[:：-]\s*(APOYAR|RECHAZAR|ABSTENERSE)\s*$/i);
   const vote = match ? match[1].toUpperCase() : 'ABSTENERSE';
   const rationale = text
     .replace(/\r/g, '')
