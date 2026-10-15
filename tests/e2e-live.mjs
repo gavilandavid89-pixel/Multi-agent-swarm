@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { createZip } from '../apps/bridge/services/zipBundle.js';
 
 const base = (process.env.SWARM_BRIDGE_URL || 'https://swarm-bridge.onrender.com').replace(/\/$/, '');
-const adminPassword = process.env.SWARM_ADMIN_PASSWORD || process.env.SWARM_APP_ACCESS_KEY || '';
+const adminPasswords = [...new Set([process.env.SWARM_ADMIN_PASSWORD, process.env.SWARM_APP_ACCESS_KEY].filter(value => typeof value === 'string' && value.length >= 12))];
 let sessionToken = '';
 const timeoutMs = Math.max(60000, Number(process.env.SWARM_E2E_TIMEOUT_MS) || 1500000);
 const startedAt = new Date().toISOString();
@@ -34,15 +34,23 @@ async function json(response, label) {
 }
 
 try {
-  if (!adminPassword || adminPassword.length < 12) fail('Falta SWARM_ADMIN_PASSWORD (recomendado) o SWARM_APP_ACCESS_KEY como contraseña del administrador; no se imprime su valor.');
+  if (!adminPasswords.length) fail('Falta SWARM_ADMIN_PASSWORD (recomendado) o SWARM_APP_ACCESS_KEY como contraseña del administrador; no se imprime su valor.');
   const bridgeHealth = await fetch(base + '/healthz', { signal: AbortSignal.timeout(20000) });
   const healthData = await json(bridgeHealth, 'Salud del puente');
   if (healthData.ok !== true || healthData.role !== 'bridge') fail('El endpoint de salud no identifica un bridge operativo.');
   check('bridge-health', 'El puente responde /healthz.');
   if (!healthData.workerConfigured) fail('El puente no confirma la configuración del worker.');
 
-  const login = await json(await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password: adminPassword }) }), 'Inicio de sesión del administrador');
-  if (!login.token || login.user?.role !== 'admin') fail('El inicio de sesión no devolvió una sesión válida de administrador.');
+  let login = null;
+  for (const password of adminPasswords) {
+    const response = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: 'admin', password }) });
+    if (response.ok) {
+      login = await json(response, 'Inicio de sesión del administrador');
+      break;
+    }
+    if (response.status !== 401) await json(response, 'Inicio de sesión del administrador');
+  }
+  if (!login?.token || login.user?.role !== 'admin') fail('Ninguna de las contraseñas configuradas permitió iniciar sesión como administrador. Configurá SWARM_ADMIN_PASSWORD con la contraseña actual o SWARM_APP_ACCESS_KEY si sigue siendo la contraseña inicial.');
   sessionToken = login.token;
   check('login', 'El administrador inició sesión y se recibió un token de sesión; no se registra ni se muestra.');
 
