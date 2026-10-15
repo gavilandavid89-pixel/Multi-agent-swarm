@@ -21,12 +21,12 @@
     </section>
     <section id="access-panel" class="panel access-panel hidden">
       <div><p class="panel-kicker">ACCESO PRIVADO</p><h2>Entrá a tu espacio</h2><p class="muted">La clave se conserva solo en esta sesión del navegador.</p></div>
-      <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña (o clave actual la primera vez)" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Primera entrada: usuario admin y tu clave de acceso actual. Se convertirá en contraseña de administrador.</p>
-      <button id="show-register" class="button button-secondary" type="button">Tengo una invitación · Crear cuenta</button>
+      <form id="access-form" class="inline-form auth-form"><label><span class="muted tiny">Usuario</span><input id="access-username" autocomplete="username" value="admin" minlength="3" maxlength="32" required></label><label><span class="muted tiny">Contraseña</span><input id="access-key" type="password" autocomplete="current-password" placeholder="Tu contraseña" required></label><button class="button button-primary" type="submit">Entrar <span>↗</span></button></form><p id="access-status" class="muted tiny" role="status" aria-live="polite">Iniciá sesión con tu cuenta. Las cuentas nuevas requieren una invitación y siempre se crean con rol Usuario.</p>
+      <button id="show-register" class="button button-secondary" type="button">Tengo una invitación · Crear cuenta de usuario</button>
       <form id="register-form" class="auth-form hidden">
-        <label><span class="muted tiny">Código de invitación</span><input id="register-invite" autocomplete="off" required></label>
+        <label><span class="muted tiny">Código de invitación</span><input id="register-invite" autocomplete="off" minlength="20" maxlength="200" required></label>
         <label><span class="muted tiny">Nuevo usuario</span><input id="register-username" autocomplete="username" minlength="3" maxlength="32" required></label>
-        <label><span class="muted tiny">Contraseña (mínimo 12 caracteres)</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label>
+        <label><span class="muted tiny">Contraseña (mínimo 12 caracteres)</span><input id="register-password" type="password" autocomplete="new-password" minlength="12" maxlength="512" required></label><p class="muted tiny">La contraseña pertenece a tu cuenta de Usuario. No concede acceso de administrador; sin una invitación válida, el servidor rechaza el registro.</p>
         <button class="button button-primary" type="submit">Crear cuenta <span>↗</span></button>
       </form>
       <p id="register-status" class="muted tiny" role="status" aria-live="polite"></p>
@@ -47,7 +47,7 @@
         <p id="password-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
       </section>
       <section id="invite-admin-panel" class="invite-admin-panel hidden"><div class="section-head"><div><p class="panel-kicker">ACCESO DE AMIGOS</p><h3>Invitación privada</h3><p class="muted tiny">Cada invitación sirve para crear una cuenta y se puede usar una sola vez.</p></div></div><button id="create-invite" class="button button-secondary" type="button">Crear invitación ↗</button><p id="invite-status" class="muted tiny" role="status" aria-live="polite"></p><div id="invite-result" class="hidden"></div></section>
-      <section id="managed-users-panel" class="managed-users-panel">
+      <section id="managed-users-panel" class="managed-users-panel hidden">
         <div class="section-head"><div><p class="panel-kicker">ADMINISTRACIÓN</p><h3>Cuentas registradas</h3><p class="muted tiny">Desactivar una cuenta revoca sus sesiones. Sus claves y tareas se conservan, pero no podrá acceder hasta reactivarla.</p></div><button id="refresh-managed-users" class="button button-secondary" type="button">Actualizar</button></div>
         <div id="managed-users-list" class="jobs-list"><p class="muted tiny">Cargando cuentas…</p></div>
         <p id="managed-users-status" class="muted tiny" role="status" aria-live="polite"></p>
