@@ -62,7 +62,7 @@ export async function importLegacyProvidersForUser(userId) {
 export function currentUserProviders() { return context.getStore() || null; }
 
 /** Ensure a job (including automatic continuation batches) stays owned by its originating account. */
-export async function registerJobOwnership(userId, jobId) {
+export async function registerJobOwnership(userId, jobId, createdAt = null) {
   if (!userId || !pool) return false;
   const owner = String(userId);
   const id = String(jobId || '');
@@ -70,8 +70,8 @@ export async function registerJobOwnership(userId, jobId) {
     throw new Error('Invalid job ownership reference.');
   }
   await pool.query(
-    'INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING',
-    [id, owner]
+    'INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING',
+    [id, owner, createdAt && Number.isFinite(Date.parse(createdAt)) ? new Date(createdAt).toISOString() : null]
   );
   const { rows } = await pool.query('SELECT user_id FROM user_job_ownership WHERE job_id=$1', [id]);
   if (!rows[0] || rows[0].user_id !== owner) {
