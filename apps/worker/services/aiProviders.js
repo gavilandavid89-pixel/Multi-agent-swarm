@@ -176,8 +176,8 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
   let target;
   try { target = new URL(baseUrl); } catch { throw new Error('La URL base del proveedor no es válida.'); }
   if (target.hostname.toLowerCase() === 'api.anthropic.com') {
-    const root = String(baseUrl).replace(/\\/+$/, '');
-    const endpoint = /\\/v\\d+(?:beta)?$/i.test(root) ? `${root}/messages` : `${root}/v1/messages`;
+    const root = String(baseUrl).replace(/\/+$/, '');
+    const endpoint = /\/v\d+(?:beta)?$/i.test(root) ? `${root}/messages` : `${root}/v1/messages`;
     const systemText = (Array.isArray(messages) ? messages : [])
       .filter(item => item?.role === 'system')
       .map(item => String(item.content ?? ''))
@@ -190,15 +190,15 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
       const content = String(item?.content ?? '');
       if (!content) continue;
       const previous = converted[converted.length - 1];
-      if (previous?.role === role) previous.content += `\\n\\n${content}`;
+      if (previous?.role === role) previous.content += `\n\n${content}`;
       else converted.push({ role, content });
     }
     if (!converted.length) throw new Error('Anthropic recibió una conversación vacía.');
-    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\\n\\n') } : {}) };
+    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}) };
     return { url: endpoint, options: { method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) } };
   }
   return {
-    url: `${String(baseUrl).replace(/\\/+$/, '')}/chat/completions`,
+    url: `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`,
     options: {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
