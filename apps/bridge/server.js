@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
+import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -179,6 +179,17 @@ app.post('/api/admin/invites', async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede crear invitaciones.' });
   try { const invite = await createInvite(req.user.id, req.body?.hours); res.status(201).json(invite); }
   catch { res.status(503).json({ error: 'No se pudo crear la invitación.' }); }
+});
+app.get('/api/admin/users', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede gestionar cuentas.' });
+  try { res.json({ users: await listManagedUsers() }); }
+  catch { res.status(503).json({ error: 'No se pudieron cargar las cuentas.' }); }
+});
+app.patch('/api/admin/users/:userId/status', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede gestionar cuentas.' });
+  if (typeof req.body?.disabled !== 'boolean') return res.status(400).json({ error: 'El estado de la cuenta no es válido.' });
+  try { res.json({ user: await setManagedUserDisabled(req.params.userId, req.body.disabled) }); }
+  catch (error) { res.status(error.status || 503).json({ error: error.message || 'No se pudo actualizar la cuenta.' }); }
 });
 app.param('id', async (req, res, next, id) => {
   try {
