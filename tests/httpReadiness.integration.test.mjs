@@ -203,6 +203,19 @@ test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness Postgr
   const userApis = await apiJson(bridgeUrl, '/api/account/apis', { token: originalUserToken });
   assert.equal(userApis.response.status, 200);
   assert.deepEqual(userApis.payload.apis, []);
+
+  // Connection checks are metadata-only, and abuse is throttled before forwarding to the worker.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const check = await apiJson(bridgeUrl, '/api/account/apis/1/test', {
+      method: 'POST', token: originalUserToken, body: {}
+    });
+    assert.equal(check.response.status, 404, 'an empty API slot should fail without contacting a provider');
+  }
+  const throttledCheck = await apiJson(bridgeUrl, '/api/account/apis/1/test', {
+    method: 'POST', token: originalUserToken, body: {}
+  });
+  assert.equal(throttledCheck.response.status, 429, 'provider connection checks must be rate limited per account');
+  assert.ok(Number(throttledCheck.response.headers.get('retry-after')) > 0);
   const forbiddenAdminList = await apiJson(bridgeUrl, '/api/admin/users', { token: originalUserToken });
   assert.equal(forbiddenAdminList.response.status, 403);
 
