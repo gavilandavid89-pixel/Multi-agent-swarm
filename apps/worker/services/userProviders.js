@@ -214,3 +214,10 @@ export async function testUserProvider(userId, slot) {
         : 'La conexión fue autenticada; el proveedor no expone un catálogo de modelos verificable.'
   };
 }
+
+let closeUserProvidersStorePromise;
+export function closeUserProvidersStore() {
+  if (!pool) return Promise.resolve();
+  if (!closeUserProvidersStorePromise) closeUserProvidersStorePromise = pool.end();
+  return closeUserProvidersStorePromise;
+}
