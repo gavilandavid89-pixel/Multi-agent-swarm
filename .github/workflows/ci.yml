@@ -28,9 +28,9 @@ jobs:
         with:
           node-version: 22
       - name: Install worker dependencies
-        run: npm --prefix apps/worker install --no-audit --no-fund
+        run: npm --prefix apps/worker ci --no-audit --no-fund
       - name: Install bridge dependencies
-        run: npm --prefix apps/bridge install --no-audit --no-fund
+        run: npm --prefix apps/bridge ci --no-audit --no-fund
       - name: Check JavaScript syntax and unit tests
         run: npm run check
       - name: Audit direct and transitive dependencies
