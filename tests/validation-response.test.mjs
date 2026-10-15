@@ -30,7 +30,7 @@ test('validation parser never approves malformed or schema-invalid output', () =
 });
 
 test('validation parser normalizes HTML bracket entities and escaped underscores', () => {
-  const raw = '{"verdict":"NEEDS\\\\_CHANGES","findings":&#91;"src/player.gd: EventBus no registrado"&#93;,"summary":"Hay un bloqueo"}';
+  const raw = '{"verdict":"NEEDS\_CHANGES","findings":&#91;"src/player.gd: EventBus no registrado"&#93;,"summary":"Hay un bloqueo"}';
   const result = parseValidationResponse(raw);
   assert.equal(result.verdict, 'NEEDS_CHANGES');
   assert.deepEqual(result.findings, ['src/player.gd: EventBus no registrado']);
