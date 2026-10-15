@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000, jobStatuses: new Map() };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map() };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -135,8 +135,8 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
   $('artifacts-count').textContent = `${items.length} archivo${items.length === 1 ? '' : 's'}`;
   const bundleReady = jobStatus === 'completed' && validation?.verdict !== 'NEEDS_CHANGES' && syntax?.ok !== false;
   $('artifacts-kicker').textContent = bundleReady ? 'ENTREGA VALIDADA' : jobStatus === 'needs_review' ? 'ARCHIVOS · REQUIEREN CORRECCIÓN' : 'ARCHIVOS GENERADOS · EN PROCESO';
-  $('download-bundle').disabled = items.length === 0 || !bundleReady;
-  $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' ? 'ZIP bloqueado · falta corregir' : 'ZIP disponible al completar la validación';
+  $('download-bundle').disabled = items.length === 0;
+  $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' || jobStatus === 'failed' ? 'Descargar ZIP · revisión pendiente ↓' : 'Descargar ZIP · entrega sin validar ↓';
   list.innerHTML = items.map(file => {
     const ext = String(file.path || '').split('.').pop().toLowerCase();
     const kind = ext === 'html' ? 'HTML · vista previa disponible' : ext === 'apk' ? 'APK · requiere ser un binario Android válido' : ext === 'zip' ? 'ZIP · archivo proporcionado por la tarea' : 'Archivo del proyecto';
@@ -945,7 +945,32 @@ async function boot() {
 const artifactsPanel = $('artifacts-panel');
 if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
-$('account-menu-toggle').addEventListener('click', () => $('account-menu-toggle').setAttribute('aria-expanded', String(!$('account-menu-items').classList.contains('hidden'))));
+$('account-menu-toggle').addEventListener('click', event => {
+  event.stopPropagation();
+  const items = $('account-menu-items');
+  const opening = items.classList.contains('hidden');
+  items.classList.toggle('hidden', !opening);
+  $('account-menu-toggle').setAttribute('aria-expanded', String(opening));
+});
+$('account-menu-items').addEventListener('click', event => {
+  if (event.target.closest('button')) {
+    $('account-menu-items').classList.add('hidden');
+    $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('click', event => {
+  if (!$('account-menu')?.contains(event.target)) {
+    $('account-menu-items')?.classList.add('hidden');
+    $('account-menu-toggle')?.setAttribute('aria-expanded', 'false');
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    $('account-menu-items')?.classList.add('hidden');
+    $('account-menu-toggle')?.setAttribute('aria-expanded', 'false');
+    $('files-drawer')?.classList.add('hidden');
+  }
+});
 $('open-technical-diagnostic').addEventListener('click', () => {
   $('account-menu-items').classList.add('hidden');
   if (!state.currentDetailId) { $('job-submit-status').textContent = 'Abrí una tarea para consultar su diagnóstico técnico.'; return; }
@@ -962,7 +987,7 @@ $('files-menu-toggle').addEventListener('click', () => {
 $('close-files-drawer').addEventListener('click', () => $('files-drawer').classList.add('hidden'));
 $('files-download-button').addEventListener('click', () => {
   const button = $('download-bundle');
-  if (!button || button.disabled) { $('files-drawer-status').textContent = 'El ZIP estará disponible cuando la entrega esté validada.'; return; }
+  if (!button || button.disabled) { $('files-drawer-status').textContent = 'Todavía no hay archivos guardados para empaquetar.'; return; }
   button.click();
 });
 $('files-preview-button').addEventListener('click', () => {
