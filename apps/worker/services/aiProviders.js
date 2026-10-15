@@ -2,8 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { safeProviderFetch } from './safeProviderFetch.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+const KNOWN_PROVIDER_HOSTS = new Set([
+  'api.openai.com', 'api.groq.com', 'openrouter.ai', 'generativelanguage.googleapis.com',
+  'api.together.xyz', 'api.deepseek.com', 'api.mistral.ai', 'api.fireworks.ai',
+  'api.perplexity.ai', 'api.cohere.com'
+]);
+async function fetchProviderEndpoint(url, options, baseUrl) {
+  const target = new URL(url);
+  const localDevelopmentEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(String(baseUrl || ''));
+  if (KNOWN_PROVIDER_HOSTS.has(target.hostname.toLowerCase()) || localDevelopmentEndpoint) {
+    return fetch(url, { ...options, redirect: 'error' });
+  }
+  return safeProviderFetch(url, options);
+}
 // Feature branch: bounded continuation support.
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const retryableStatus = status => status === 408 || status === 425 || status === 429 || status >= 500;
@@ -186,7 +200,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
+    try { response = await fetchProviderEndpoint(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
