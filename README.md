@@ -14,7 +14,7 @@
 
 ## Desarrollo local
 
-Requiere Node.js 20 o posterior.
+Requiere Node.js 22.x (coincide con el runtime de Render y CI).
 
 1. Copiá `apps/bridge/.env.example` a `apps/bridge/.env` y `apps/worker/.env.example` a `apps/worker/.env`.
 2. Creá las bases PostgreSQL locales `swarm_accounts` y `swarm_history` (o ajustá las URLs de los ejemplos a las bases que uses).
@@ -24,6 +24,12 @@ Requiere Node.js 20 o posterior.
 6. Iniciá el worker y el puente en terminales separadas con `npm --prefix apps/worker start` y `npm --prefix apps/bridge start`.
 
 Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
+
+## Salud y configuración de proveedores
+
+- `GET /healthz` es una comprobación de vida del proceso; no confirma que PostgreSQL esté disponible.
+- `GET /readyz` comprueba la conexión a PostgreSQL y, en el puente, que el worker esté configurado. Devuelve HTTP `503` si no está listo.
+- En el panel de APIs, guardá primero una clave y luego usá **Probar conexión**. La verificación consulta metadatos del proveedor sin crear tareas ni generar tokens de modelo; cuando el proveedor publica un catálogo, también indica si reconoce el modelo de desarrollo configurado.
 
 ## Variables esenciales
 
