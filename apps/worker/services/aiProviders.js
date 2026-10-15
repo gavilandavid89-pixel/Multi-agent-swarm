@@ -9,7 +9,7 @@ const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 const KNOWN_PROVIDER_HOSTS = new Set([
   'api.openai.com', 'api.groq.com', 'openrouter.ai', 'generativelanguage.googleapis.com',
   'api.together.xyz', 'api.deepseek.com', 'api.mistral.ai', 'api.fireworks.ai',
-  'api.perplexity.ai', 'api.cohere.com'
+  'api.perplexity.ai', 'api.cohere.com', 'api.anthropic.com'
 ]);
 async function fetchProviderEndpoint(url, options, baseUrl) {
   const target = new URL(url);
@@ -172,6 +172,41 @@ export async function consultarWithProviderContext(options, userContext = null, 
   throw error;
 }
 
+function buildProviderRequest({ model, messages, temperature, maxTokens, reasoningEffort, responseFormat, apiKey, baseUrl, providerName }) {
+  let target;
+  try { target = new URL(baseUrl); } catch { throw new Error('La URL base del proveedor no es válida.'); }
+  if (target.hostname.toLowerCase() === 'api.anthropic.com') {
+    const root = String(baseUrl).replace(/\\/+$/, '');
+    const endpoint = /\\/v\\d+(?:beta)?$/i.test(root) ? `${root}/messages` : `${root}/v1/messages`;
+    const systemText = (Array.isArray(messages) ? messages : [])
+      .filter(item => item?.role === 'system')
+      .map(item => String(item.content ?? ''))
+      .filter(Boolean);
+    if (responseFormat) systemText.push('Devolvé únicamente JSON válido, sin bloques Markdown ni texto adicional.');
+    const converted = [];
+    for (const item of Array.isArray(messages) ? messages : []) {
+      if (item?.role === 'system') continue;
+      const role = item?.role === 'assistant' ? 'assistant' : 'user';
+      const content = String(item?.content ?? '');
+      if (!content) continue;
+      const previous = converted[converted.length - 1];
+      if (previous?.role === role) previous.content += `\\n\\n${content}`;
+      else converted.push({ role, content });
+    }
+    if (!converted.length) throw new Error('Anthropic recibió una conversación vacía.');
+    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\\n\\n') } : {}) };
+    return { url: endpoint, options: { method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) } };
+  }
+  return {
+    url: `${String(baseUrl).replace(/\\/+$/, '')}/chat/completions`,
+    options: {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) })
+    }
+  };
+}
+
 async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
@@ -203,7 +238,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { response = await fetchProviderEndpoint(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat && jsonFormatFallbacks === 0 ? { response_format: responseFormat } : {}) }) }, baseUrl); }
+    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -234,6 +269,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         continue;
       }
       const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) { const toolError = deferredProviderError(model, retry + 1, retryDelay(retry + 1), 'la respuesta requiere llamadas a herramientas que el motor aún no ejecuta', providerName); toolError.code = 'PROVIDER_UNSUPPORTED_TOOL_CALLS'; throw toolError; }
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
