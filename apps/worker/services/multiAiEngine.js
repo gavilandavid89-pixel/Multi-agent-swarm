@@ -225,8 +225,8 @@ async function runJob(jobId) {
             validation = {
               ...validation,
               verdict: 'NEEDS_CHANGES',
-              findings: [...(validation.findings || []), 'Prueba de ejecución (' + runtime.status + '): ' + String(runtime.reason || 'La prueba no fue aprobada.')].slice(0, 30),
-              summary: 'La prueba de ejecución no fue aprobada. ' + String(validation.summary || '').slice(0, 3000)
+              findings: [...(validation.findings || []), (runtime.status === 'blocked' ? 'ERROR_DE_INFRAESTRUCTURA: no se pudo ejecutar la prueba; no atribuir el fallo al código. ' : 'Prueba de ejecución (' + runtime.status + '): ') + String(runtime.reason || 'La prueba no fue aprobada.')].slice(0, 30),
+              summary: (runtime.status === 'blocked' ? 'No se pudo verificar la ejecución por un problema de infraestructura; se conserva la entrega sin gastar otra ronda de corrección automática. ' : 'La prueba de ejecución no fue aprobada. ') + String(validation.summary || '').slice(0, 3000)
             };
           }
         }
