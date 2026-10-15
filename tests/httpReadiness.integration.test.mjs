@@ -206,6 +206,25 @@ test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness Postgr
   });
   assert.equal(duplicateInvite.response.status, 400, 'an invite must not be reusable');
 
+  // Invalid ZIPs are rejected cheaply, and upload throttling runs before buffering/parsing.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const preview = await fetch(`${bridgeUrl}/api/preview-zip`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${originalUserToken}`, 'content-type': 'application/zip' },
+      body: 'not-a-zip',
+      signal: AbortSignal.timeout(5000)
+    });
+    assert.equal(preview.status, 422, 'malformed ZIPs should be rejected without creating a preview');
+  }
+  const throttledPreview = await fetch(`${bridgeUrl}/api/preview-zip`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${originalUserToken}`, 'content-type': 'application/zip' },
+    body: 'not-a-zip',
+    signal: AbortSignal.timeout(5000)
+  });
+  assert.equal(throttledPreview.status, 429, 'ZIP preview uploads must be rate limited per account');
+  assert.ok(Number(throttledPreview.headers.get('retry-after')) > 0);
+
   const userApis = await apiJson(bridgeUrl, '/api/account/apis', { token: originalUserToken });
   assert.equal(userApis.response.status, 200);
   assert.deepEqual(userApis.payload.apis, []);
