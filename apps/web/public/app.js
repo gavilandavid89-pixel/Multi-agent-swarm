@@ -11,8 +11,8 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
-function showApp() { $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
+function showAccess() { $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
+function showApp() { $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
