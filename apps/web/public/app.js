@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 50000, jobStatuses: new Map() };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
-const agentIcons = { Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
+const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
 function authHeaders(json = true) { return { ...(json ? { 'content-type': 'application/json' } : {}), ...(state.accessKey ? { authorization: `Bearer ${state.accessKey}` } : {}) }; }
 async function api(url, options = {}) {
@@ -11,8 +11,8 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
-function showApp() { $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
+function showAccess() { $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = state.accessKey ? '' : (sessionStorage.getItem('swarm-access-key') || ''); }
+function showApp() { $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('invite-admin-panel').classList.toggle('hidden', state.user?.role !== 'admin'); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -81,7 +81,8 @@ async function loadJobs({ append = false } = {}) {
 }
 function renderConversation(data) {
   const conversation = $('conversation');
-  const entries = Array.isArray(data.history) ? data.history : [];
+  const historyEntries = Array.isArray(data.history) ? data.history : [];
+  const entries = data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }, ...historyEntries] : historyEntries;
   const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
   const existing = new Map([...conversation.querySelectorAll('[data-message-key]')].map(node => [node.dataset.messageKey, node]));
   if (!entries.length) {
@@ -412,6 +413,7 @@ async function showDetail(id) {
   }
   if (state.currentDetailId !== id) hideTaskNotice();
   state.currentDetailId = id;
+  $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
@@ -793,12 +795,29 @@ if (new URLSearchParams(location.search).has('invite')) {
 }
 
 $('job-form').addEventListener('submit', async event => {
-  event.preventDefault(); const objective = $('objective').value.trim(); if (!objective) return;
-  const button = $('submit-job'); button.disabled = true; button.textContent = 'Enviando…';
-  $('job-submit-status').textContent = 'Enviando la orden al motor…';
-  try { const tokenBudget = Number($('new-task-budget')?.value) || 50000; const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget }) }); $('objective').value = ''; $('job-submit-status').textContent = 'Orden recibida. Abriendo la tarea…'; await showDetail(job.id); await refresh(); }
-  catch (error) { $('job-submit-status').textContent = `No se pudo iniciar: ${error.message}`; }
-  finally { button.disabled = false; button.innerHTML = 'Iniciar comité <span>↗</span>'; }
+  event.preventDefault();
+  const message = $('objective').value.trim();
+  if (!message) return;
+  const button = $('submit-job');
+  const target = $('chat-target')?.value || 'global';
+  button.disabled = true; button.textContent = 'Enviando…';
+  try {
+    if (target !== 'global') {
+      if (!state.currentDetailId) throw new Error('Primero iniciá o abrí una tarea global; después podés hablar directamente con un agente.');
+      const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: target, message }) });
+      $('objective').value = '';
+      $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || target}; la respuesta aparecerá en esta conversación.`;
+      await updateSelectedDetail();
+    } else {
+      $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
+      const tokenBudget = Number($('new-task-budget')?.value) || 50000;
+      const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
+      $('objective').value = '';
+      $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
+      await showDetail(job.id); await refresh();
+    }
+  } catch (error) { $('job-submit-status').textContent = `No se pudo enviar: ${error.message}`; }
+  finally { button.disabled = false; button.textContent = 'Enviar ↗'; }
 });
 $('extend-task-budget').addEventListener('click', async () => {
   if (!state.currentDetailId) return;
@@ -915,11 +934,40 @@ $('agent-reply-form').addEventListener('submit', async event => {
     button.disabled = false; button.textContent = 'Enviar al agente ↗';
   }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }
   if (!state.accessKey) { showAccess(); return; }
   try { await enterApp(); } catch (error) { showAccess(); $('access-status').textContent = error.message; }
 }
+// Unificamos los archivos en el cajón inferior sin duplicar ni reconstruir el contenido.
+const artifactsPanel = $('artifacts-panel');
+if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
+$('account-menu-toggle').setAttribute('aria-expanded', 'false');
+$('account-menu-toggle').addEventListener('click', () => $('account-menu-toggle').setAttribute('aria-expanded', String(!$('account-menu-items').classList.contains('hidden'))));
+$('open-technical-diagnostic').addEventListener('click', () => {
+  $('account-menu-items').classList.add('hidden');
+  if (!state.currentDetailId) { $('job-submit-status').textContent = 'Abrí una tarea para consultar su diagnóstico técnico.'; return; }
+  const diagnostic = document.querySelector('.diagnostic');
+  if (diagnostic) { diagnostic.open = true; diagnostic.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+});
+$('files-menu-toggle').addEventListener('click', () => {
+  $('files-drawer').classList.toggle('hidden');
+  if (!$('files-drawer').classList.contains('hidden')) {
+    const count = $('artifacts-count')?.textContent || '0 archivos';
+    $('files-drawer-status').textContent = state.currentDetailId ? count + ' · pertenecen a la tarea abierta.' : 'Abrí una tarea para ver sus archivos.';
+  }
+});
+$('close-files-drawer').addEventListener('click', () => $('files-drawer').classList.add('hidden'));
+$('files-download-button').addEventListener('click', () => {
+  const button = $('download-bundle');
+  if (!button || button.disabled) { $('files-drawer-status').textContent = 'El ZIP estará disponible cuando la entrega esté validada.'; return; }
+  button.click();
+});
+$('files-preview-button').addEventListener('click', () => {
+  const preview = $('artifacts-list')?.querySelector('[data-preview-index]');
+  if (!preview) { $('files-drawer-status').textContent = 'Todavía no hay un HTML listo para previsualizar.'; return; }
+  preview.click();
+});
 boot();

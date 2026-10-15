@@ -187,7 +187,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
   const apiKey = suppliedApiKey;
   if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
@@ -202,7 +202,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { response = await fetchProviderEndpoint(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }, baseUrl); }
+    try { response = await fetchProviderEndpoint(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat && jsonFormatFallbacks === 0 ? { response_format: responseFormat } : {}) }) }, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -262,7 +262,16 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       error.code = 'PROVIDER_INPUT_TOO_LARGE'; error.providerModel = model; error.providerStatus = 413;
       throw error;
     }
-    const incompleteJsonGeneration = response.status === 400 && /json_validate_failed/i.test(body) && /max completion tokens reached before generating a valid document/i.test(body);
+    const jsonFormatRejected = response.status === 400 && /json_validate_failed|failed to generate json/i.test(body);
+    const incompleteJsonGeneration = jsonFormatRejected && /max completion tokens reached before generating a valid document/i.test(body);
+    if (jsonFormatRejected && responseFormat && !incompleteJsonGeneration && jsonFormatFallbacks < 1) {
+      jsonFormatFallbacks++;
+      const reason = 'El proveedor rechazó el modo JSON estricto; se reintenta una sola vez con salida JSON validada por el motor.';
+      await onRetry({ retry: jsonFormatFallbacks, wait: 250, reason });
+      console.warn('[worker][provider_json_mode_fallback]', JSON.stringify({ provider: providerName, model, retry: jsonFormatFallbacks }));
+      await sleep(250);
+      continue;
+    }
     if (incompleteJsonGeneration && responseFormat && formatRetries < 2 && safeMaxTokens < maxSafeOutputTokens) {
       formatRetries++;
       const previousMaxTokens = safeMaxTokens;
@@ -378,23 +387,43 @@ export async function agenteDesarrollador(objetivo, estrategia, errores = '', on
 }
 export function parseValidationResponse(rawValue) {
   const raw = String(rawValue ?? '');
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) {
-    return { verdict: 'NEEDS_CHANGES', findings: ['El validador no devolvió JSON válido.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) };
+  const candidates = [];
+  // Find balanced JSON objects rather than concatenating unrelated braces from code fences,
+  // truncated prose, or multiple objects in a model response.
+  for (let start = 0; start < raw.length; start++) {
+    if (raw[start] !== '{') continue;
+    let depth = 0; let quoted = false; let escaped = false;
+    for (let end = start; end < raw.length; end++) {
+      const char = raw[end];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') quoted = true;
+      else if (char === '{') depth++;
+      else if (char === '}' && --depth === 0) { candidates.push(raw.slice(start, end + 1)); break; }
+    }
   }
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!['APPROVED', 'NEEDS_CHANGES'].includes(parsed.verdict) || !Array.isArray(parsed.findings) || typeof parsed.summary !== 'string') throw new Error('esquema inválido');
-    return {
-      verdict: parsed.verdict,
-      findings: parsed.findings.slice(0, 30).map(value => String(value).slice(0, 2000)),
-      summary: parsed.summary.slice(0, 5000),
-      raw: raw.slice(0, 12000)
-    };
-  } catch {
-    return { verdict: 'NEEDS_CHANGES', findings: ['El validador devolvió un formato inválido; no se aprueba automáticamente.'], summary: raw.slice(0, 1200), raw: raw.slice(0, 12000) };
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (!['APPROVED', 'NEEDS_CHANGES'].includes(parsed?.verdict) || !Array.isArray(parsed.findings) || typeof parsed.summary !== 'string') continue;
+      return {
+        verdict: parsed.verdict,
+        findings: parsed.findings.slice(0, 30).map(value => String(value).slice(0, 2000)),
+        summary: parsed.summary.slice(0, 5000),
+        raw: raw.slice(0, 12000)
+      };
+    } catch { /* Try the next balanced object; never approve malformed output. */ }
   }
+  return {
+    verdict: 'NEEDS_CHANGES',
+    findings: [candidates.length ? 'El validador devolvió JSON sin el esquema requerido; no se aprueba automáticamente.' : 'El validador no devolvió JSON válido.'],
+    summary: raw.slice(0, 1200),
+    raw: raw.slice(0, 12000)
+  };
 }
 export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   const source = String(entrega ?? '');
