@@ -93,7 +93,7 @@ test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contad
   assert.equal(next.tokenBatchHistory.length, 1);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.totalTokens, 50000);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.wastedTokens, 100);
-  assert.ok(next.transcript.some(item => /nueva tanda de 100.000/.test(item.content)));
+  assert.ok(next.transcript.some(item => /nueva tanda de 1.000.000/.test(item.content)));
 });
 
 
