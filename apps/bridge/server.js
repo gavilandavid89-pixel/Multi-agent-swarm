@@ -296,7 +296,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (!objective) return res.status(400).json({ error: 'Escribí un objetivo para el comité.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
-  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
+  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
   try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
@@ -304,7 +304,7 @@ app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerReques
 app.post('/api/jobs/:id/budget', async (req, res) => {
   const requested = Number(req.body?.tokenBudget);
   if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
-  const tokenBudget = Math.min(100000, Math.max(4000, Math.round(requested / 1000) * 1000));
+  const tokenBudget = Math.min(1000000, Math.max(4000, Math.round(requested / 1000) * 1000));
   try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget }) })); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
