@@ -149,7 +149,7 @@ app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
-  const job = await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { validation: null, syntax: null, validationRound: 0, result: null, lastCheckpoint: 'retry-requested' } });
+  const job = await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { validation: null, syntax: null, validationRound: 0, result: null, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: null, retryAt: null, providerBlock: null, providerFailureStreak: 0, lastCheckpoint: 'retry-requested' } });
   enqueue(req.params.id); res.status(202).json(job); } catch (error) { next(error); }
 });
 app.get('/internal/jobs/:id/files', async (req, res, next) => { try {
