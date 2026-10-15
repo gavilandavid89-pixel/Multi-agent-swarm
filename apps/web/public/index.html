@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#100b1b">
   <title>Swarm · Centro de mando</title>
-  <link rel="stylesheet" href="/styles.css?v=security-password-rotation-1">
+  <link rel="stylesheet" href="/styles.css?v=admin-accounts-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -47,6 +47,11 @@
         <p id="password-settings-status" class="muted tiny" role="status" aria-live="polite"></p>
       </section>
       <section id="invite-admin-panel" class="invite-admin-panel hidden"><div class="section-head"><div><p class="panel-kicker">ACCESO DE AMIGOS</p><h3>Invitación privada</h3><p class="muted tiny">Cada invitación sirve para crear una cuenta y se puede usar una sola vez.</p></div></div><button id="create-invite" class="button button-secondary" type="button">Crear invitación ↗</button><p id="invite-status" class="muted tiny" role="status" aria-live="polite"></p><div id="invite-result" class="hidden"></div></section>
+      <section id="managed-users-panel" class="managed-users-panel">
+        <div class="section-head"><div><p class="panel-kicker">ADMINISTRACIÓN</p><h3>Cuentas registradas</h3><p class="muted tiny">Desactivar una cuenta revoca sus sesiones. Sus claves y tareas se conservan, pero no podrá acceder hasta reactivarla.</p></div><button id="refresh-managed-users" class="button button-secondary" type="button">Actualizar</button></div>
+        <div id="managed-users-list" class="jobs-list"><p class="muted tiny">Cargando cuentas…</p></div>
+        <p id="managed-users-status" class="muted tiny" role="status" aria-live="polite"></p>
+      </section>
     </section>
     <section id="app-content" class="hidden">
       <section class="panel composer">
@@ -92,6 +97,6 @@
     </section>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
-  <script src="/app.js?v=security-password-rotation-1" defer></script>
+  <script src="/app.js?v=admin-accounts-1" defer></script>
 </body>
 </html>
