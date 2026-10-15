@@ -30,7 +30,11 @@ app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
-  if (map.size > 5000) for (const [itemKey, item] of map) if (item.until <= now) map.delete(itemKey);
+  if (!map.has(key) && map.size >= 5000) {
+    for (const [itemKey, item] of map) if (item.until <= now) map.delete(itemKey);
+    // Keep the in-process limiter bounded under high-cardinality IP/user traffic.
+    while (map.size >= 5000) map.delete(map.keys().next().value);
+  }
   let item = map.get(key);
   if (!item || item.until <= now) item = { count: 0, until: now + windowMs };
   item.count += 1; map.set(key, item);
@@ -57,9 +61,13 @@ app.get('/api/auth/bootstrap-status', async (_req, res) => {
 });
 app.post('/api/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(failedAuth, ip, 8, 15 * 60 * 1000);
-  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
   const username = String(req.body?.username || '').trim().toLowerCase();
+  const ipLimit = windowLimit(failedAuth, `ip:${ip}`, 8, 15 * 60 * 1000);
+  const usernameLimit = windowLimit(failedAuth, `user:${username}`, 8, 15 * 60 * 1000);
+  if (!ipLimit.allowed || !usernameLimit.allowed) {
+    res.set('Retry-After', String(Math.max(ipLimit.retryAfter, usernameLimit.retryAfter)));
+    return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' });
+  }
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512) return res.status(400).json({ error: 'Ingresá usuario y contraseña válidos.' });
   try {
@@ -93,7 +101,7 @@ app.post('/api/auth/login', async (req, res) => {
         } while (offset < total);
       } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
     }
-    failedAuth.delete(ip);
+    failedAuth.delete(`ip:${ip}`); failedAuth.delete(`user:${username}`);
     const token = await createSession(user.id);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
