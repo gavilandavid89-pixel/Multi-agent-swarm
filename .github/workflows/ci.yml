@@ -48,6 +48,7 @@ jobs:
           test "$ready" = "1"
           grep -q '"ok":true' /tmp/runner-health.json
           curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.js","content":"console.log(\"sandbox-node-ok\")"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-node.json
+          cat /tmp/runner-node.json
           grep -q '"status":"passed"' /tmp/runner-node.json
           curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.html","content":"<!doctype html><html><head><title>runner-smoke</title></head><body><main>browser-ok</main></body></html>"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-browser.json
           grep -q '"status":"passed"' /tmp/runner-browser.json
