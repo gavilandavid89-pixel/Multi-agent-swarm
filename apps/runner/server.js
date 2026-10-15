@@ -137,7 +137,9 @@ app.post('/v1/run', async (req, res) => {
     const result = await runSandbox(root, mode, inventory.paths);
     res.status(200).json({ ...result, filesReceived: inventory.count, bytesReceived: inventory.bytes, network: 'isolated', sandbox: 'bubblewrap' });
   } catch (error) {
-    res.status(400).json({ status: 'rejected', error: String(error?.message || 'Solicitud de ejecución inválida.').slice(0, 1000) });
+    const reason = String(error?.message || 'Solicitud de ejecución inválida.').slice(0, 1000);
+    console.warn('[runner][request_rejected]', JSON.stringify({ name: String(error?.name || 'Error').slice(0, 80), reason }));
+    res.status(400).json({ status: 'rejected', error: reason });
   } finally {
     await removeTree(root);
     activeRuns = Math.max(0, activeRuns - 1);
