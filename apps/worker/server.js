@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider } from './services/userProviders.js';
+import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider, closeUserProvidersStore } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -185,7 +185,7 @@ app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: canContinueBudgetTask(record.publicJob, record.payload), continuedByJobId: record.payload.continuedByJobId || null, improvementVotes: Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [], artifacts: await listArtifacts(req.params.id) });
 } catch (error) { next(error); } });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
-function maybeExit() { if (shuttingDown && active.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void closeStore().catch(error => console.error('[worker] error cerrando PostgreSQL', error?.message || error)).finally(() => process.exit(0)); } }
+function maybeExit() { if (shuttingDown && active.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void Promise.allSettled([closeStore(), closeUserProvidersStore()]).then(results => { for (const result of results) if (result.status === 'rejected') console.error('[worker] error cerrando PostgreSQL', result.reason?.message || result.reason); }).finally(() => process.exit(0)); } }
 function shutdown() {
   if (shuttingDown) return; shuttingDown = true;
   console.log('[worker] apagado solicitado; el trabajo activo tiene una ventana para guardar checkpoints.');
