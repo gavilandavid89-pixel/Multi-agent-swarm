@@ -28,6 +28,7 @@ async function runJobWithAccountProviders(id) {
     if (userId) {
       try { await registerJobOwnership(userId, id, record.publicJob.createdAt); }
       catch (error) {
+        if (error?.code === 'JOB_OWNERSHIP_CONFLICT') throw error;
         console.warn('[worker][job_ownership_sync_deferred]', JSON.stringify({ jobId: id, reason: error?.code || 'database' }));
       }
     }
@@ -38,6 +39,7 @@ async function runJobWithAccountProviders(id) {
         await registerJobOwnership(userId, result.continuationJobId, child?.createdAt || null);
       }
       catch (error) {
+        if (error?.code === 'JOB_OWNERSHIP_CONFLICT') throw error;
         console.warn('[worker][continuation_ownership_sync_deferred]', JSON.stringify({ jobId: result.continuationJobId, sourceJobId: id, reason: error?.code || 'database' }));
       }
     }
