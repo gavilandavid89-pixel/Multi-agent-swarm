@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readdir, lstat, chown, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import express from 'express';
@@ -59,15 +59,7 @@ function runSandbox(root, mode, paths) {
       let inner;
       if (testFiles.length) inner = ['/usr/local/bin/node', '--test', ...testFiles];
       else {
-        const packageFile = paths.includes('package.json');
-        let entry = null;
-        if (packageFile) {
-          try {
-            const pkg = JSON.parse(requireNotUsed);
-            entry = pkg.scripts?.test ? null : (pkg.exports || pkg.module || pkg.main || null);
-          } catch {}
-        }
-        entry = typeof entry === 'string' && paths.includes(entry) ? entry : ['index.js','index.mjs','main.js','main.mjs','app.js','app.mjs'].find(p => paths.includes(p)) || (jsFiles.length === 1 ? jsFiles[0] : null);
+        let entry = ['index.js','index.mjs','main.js','main.mjs','app.js','app.mjs','server.js'].find(p => paths.includes(p)) || (jsFiles.length === 1 ? jsFiles[0] : null);
         if (!entry) return resolve({ status: 'skipped', reason: 'No hay pruebas automatizadas ni punto de entrada inequívoco; no se ejecuta un archivo arbitrario por suposición.', exitCode: null, stdout: '', stderr: '' });
         inner = ['/usr/local/bin/node', '--disable-proto=throw', entry];
       }
