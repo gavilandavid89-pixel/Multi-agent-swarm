@@ -150,6 +150,13 @@ app.put('/api/account/apis', async (req, res) => {
     res.json({ apis });
   } catch (error) { res.status(400).json({ error: error?.message || 'No se pudieron guardar las APIs.' }); }
 });
+app.post('/api/account/apis/:slot/test', async (req, res) => {
+  const slot = Number(req.params.slot);
+  if (!Number.isInteger(slot) || slot < 1 || slot > 10) return res.status(400).json({ error: 'Campo de API inválido.' });
+  try {
+    res.json(await workerRequest(`/internal/account/apis/${encodeURIComponent(slot)}/test`, { method: 'POST', body: JSON.stringify({ userId: req.user.id }) }));
+  } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 app.delete('/api/account/apis/:slot', async (req, res) => {
   const slot = Number(req.params.slot);
   if (!Number.isInteger(slot) || slot < 1 || slot > 10) return res.status(400).json({ error: 'Campo de API inválido.' });
