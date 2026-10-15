@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { sanitizeProviderErrorBody } from './sanitizeProviderError.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 // Feature branch: bounded continuation support.
@@ -188,7 +189,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     let response;
     try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {
-      const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      const reason = `error de red: ${sanitizeProviderErrorBody(String(error?.message || error), apiKey, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
       retry++; const wait = retryDelay(retry); await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
@@ -267,7 +268,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       // by the worker scheduler so one blocked provider cannot occupy a worker slot.
       await sleep(wait); continue;
     }
-    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
+    throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${sanitizeProviderErrorBody(body, apiKey)}`);
   }
 }
 const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
