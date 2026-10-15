@@ -151,7 +151,8 @@ app.param('id', async (req, res, next, id) => {
 });
 function limitJobCreation(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(jobCreateWindows, ip, 5, 10 * 60 * 1000);
+  const limiterKey = req.user?.id ? `user:${req.user.id}` : `ip:${ip}`;
+  const limit = windowLimit(jobCreateWindows, limiterKey, 5, 10 * 60 * 1000);
   if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Alcanzaste el límite temporal de creación de tareas. Probá más tarde.' }); }
   next();
 }
