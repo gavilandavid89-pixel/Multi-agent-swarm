@@ -1,8 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import pg from 'pg';
+import { safeProviderFetch } from './safeProviderFetch.js';
 
 const { Pool } = pg;
+const KNOWN_PROVIDER_HOSTS = new Set([
+  'api.openai.com', 'api.groq.com', 'openrouter.ai', 'generativelanguage.googleapis.com',
+  'api.together.xyz', 'api.deepseek.com', 'api.mistral.ai', 'api.fireworks.ai',
+  'api.perplexity.ai', 'api.cohere.com'
+]);
 const context = new AsyncLocalStorage();
 const connectionString = process.env.SWARM_DATABASE_URL || '';
 // Upgrade PostgreSQL's weaker sslmode=require to hostname/certificate verification where supported.
@@ -197,11 +203,15 @@ export async function testUserProvider(userId, slot) {
     : new URL('models', `${baseUrl}/`);
   let response;
   try {
-    response = await fetch(endpoint, {
+    const requestOptions = {
       method: 'GET',
       headers: isGemini ? { 'x-goog-api-key': apiKey } : { authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000)
-    });
+      signal: AbortSignal.timeout(10000),
+      redirect: 'error'
+    };
+    response = isGemini || KNOWN_PROVIDER_HOSTS.has(parsedBase.hostname.toLowerCase())
+      ? await fetch(endpoint, requestOptions)
+      : await safeProviderFetch(endpoint, requestOptions);
   } catch (error) {
     const message = error?.name === 'TimeoutError' ? 'La verificación del proveedor agotó el tiempo.' : 'No se pudo conectar con el proveedor.';
     throw Object.assign(new Error(message), { status: 502 });
