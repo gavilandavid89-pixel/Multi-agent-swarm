@@ -283,6 +283,16 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       await sleep(wait);
       continue;
     }
+    // Algunos modelos/proveedores rechazan el JSON generado con HTTP 400 incluso después
+    // de desactivar response_format. En validación esto debe convertirse en una respuesta
+    // no aprobada que el motor pueda corregir, no en un fallo fatal que pierda la ejecución.
+    if (jsonFormatRejected && responseFormat && jsonFormatFallbacks >= 1) {
+      let failedGeneration = '';
+      try { failedGeneration = JSON.parse(body)?.error?.failed_generation || ''; } catch {}
+      const fallbackText = typeof failedGeneration === 'string' && failedGeneration.trim() ? failedGeneration : body;
+      console.warn('[worker][provider_json_generation_rejected]', JSON.stringify({ provider: providerName, model, recoveredGeneratedText: Boolean(failedGeneration), fallback: 'validator-parser' }));
+      return fallbackText;
+    }
     if (retryableStatus(response.status)) {
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
       if (failoverAvailable || wait > 5000) throw deferredProviderError(model, retry, wait, reason, providerName);
@@ -387,14 +397,18 @@ export async function agenteDesarrollador(objetivo, estrategia, errores = '', on
 }
 export function parseValidationResponse(rawValue) {
   const raw = String(rawValue ?? '');
+  // Algunos endpoints OpenAI-compatibles codifican corchetes como entidades HTML o
+  // escapan guiones bajos al degradar JSON estricto. Normalizamos solo estas variantes
+  // comunes antes de analizar; la respuesta original se conserva en el diagnóstico.
+  const normalizedRaw = raw.replace(/&#91;|&lbrack;/gi, '[').replace(/&#93;|&rbrack;/gi, ']').replace(/\\_/g, '_');
   const candidates = [];
   // Find balanced JSON objects rather than concatenating unrelated braces from code fences,
   // truncated prose, or multiple objects in a model response.
-  for (let start = 0; start < raw.length; start++) {
-    if (raw[start] !== '{') continue;
+  for (let start = 0; start < normalizedRaw.length; start++) {
+    if (normalizedRaw[start] !== '{') continue;
     let depth = 0; let quoted = false; let escaped = false;
-    for (let end = start; end < raw.length; end++) {
-      const char = raw[end];
+    for (let end = start; end < normalizedRaw.length; end++) {
+      const char = normalizedRaw[end];
       if (quoted) {
         if (escaped) escaped = false;
         else if (char === '\\') escaped = true;
@@ -403,7 +417,7 @@ export function parseValidationResponse(rawValue) {
       }
       if (char === '"') quoted = true;
       else if (char === '{') depth++;
-      else if (char === '}' && --depth === 0) { candidates.push(raw.slice(start, end + 1)); break; }
+      else if (char === '}' && --depth === 0) { candidates.push(normalizedRaw.slice(start, end + 1)); break; }
     }
   }
   for (const candidate of candidates) {
