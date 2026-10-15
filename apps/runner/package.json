@@ -1,0 +1,8 @@
+{
+  "name": "swarm-isolated-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "dependencies": { "express": "4.21.2", "playwright": "1.55.0" }
+}

@@ -1,0 +1,20 @@
+# Deploy this Blueprint separately only after reviewing Render plan/cost.
+# The Runner is intentionally not added to render.yaml so existing services are untouched.
+services:
+  - type: pserv
+    name: swarm-runner
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./apps/runner/Dockerfile
+    dockerContext: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: RUNNER_SHARED_SECRET
+        sync: false
+      - key: RUNNER_XVFB_ENABLED
+        value: "true"
+      - key: RUNNER_TIMEOUT_MS
+        value: "30000"

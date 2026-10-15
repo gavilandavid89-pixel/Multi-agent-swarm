@@ -1,6 +1,8 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { validateDeliverableIntegrity } from './deliverableValidation.js';
+import { runSandboxTests } from './sandboxRunner.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -186,6 +188,7 @@ async function runJob(jobId) {
     while (round <= MAX_ROUNDS) {
       const saved = resumeState.validationSaved;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
+      let runtimeInfrastructureBlocked = syntax?.runtime?.status === 'blocked';
       if (!saved) {
         let coherenceReview = resumeState.coherenceReview;
         if (!coherenceReview) {
@@ -206,6 +209,37 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
+        const integrity = validateDeliverableIntegrity({ objective, delivery, validation, syntax });
+        if (!integrity.ok) {
+          validation = {
+            ...validation,
+            verdict: 'NEEDS_CHANGES',
+            findings: [...(validation.findings || []), ...integrity.findings].slice(0, 30),
+            summary: 'La puerta determinista de integridad encontró problemas en la entrega. ' + String(validation.summary || '').slice(0, 3000)
+          };
+        }
+        const hasRunnableCode = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:\s*[^\n]+\.(?:js|mjs|cjs|html?|py)\s*$/im.test(String(delivery || ''));
+        if (hasRunnableCode) {
+          const runtimeAgent = /\.html?\b/im.test(String(delivery || '')) ? 'Especialista gráfico · Xvfb/Chromium' : 'Especialista de ejecución aislada · Node/Python';
+          await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, runtimeAgent, 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
+          const runtime = await runSandboxTests(delivery, objective);
+          syntax = { ...syntax, runtime };
+          runtimeInfrastructureBlocked = runtime.status === 'blocked';
+          const runtimeFailed = ['failed', 'timeout', 'blocked', 'rejected'].includes(runtime.status) || (runtime.required && runtime.status !== 'passed');
+          const runtimeTranscript = (await getPayload(jobId))?.payload?.transcript || [];
+          await updateJob(jobId, { payload: { transcript: appendEntries(runtimeTranscript, [{
+            at: new Date().toISOString(), agent: runtimeAgent, type: 'check',
+            content: JSON.stringify({ status: runtime.status, classification: runtime.status === 'passed' ? 'APROBADO' : runtime.status === 'skipped' ? 'NO_EJECUTADO' : runtime.status === 'blocked' ? 'ERROR_DE_INFRAESTRUCTURA' : 'FALLO', mode: runtime.mode, reason: runtime.reason, exitCode: runtime.exitCode ?? null, durationMs: runtime.durationMs ?? null, sandbox: runtime.sandbox ?? null, network: runtime.network ?? null, stdout: runtime.stdout || '', stderr: runtime.stderr || '' }).slice(0, 9000)
+          }]) } });
+          if (runtimeFailed) {
+            validation = {
+              ...validation,
+              verdict: 'NEEDS_CHANGES',
+              findings: [...(validation.findings || []), (runtime.status === 'blocked' ? 'ERROR_DE_INFRAESTRUCTURA: no se pudo ejecutar la prueba; no atribuir el fallo al código. ' : 'Prueba de ejecución (' + runtime.status + '): ') + String(runtime.reason || 'La prueba no fue aprobada.')].slice(0, 30),
+              summary: (runtime.status === 'blocked' ? 'No se pudo verificar la ejecución por un problema de infraestructura; se conserva la entrega sin gastar otra ronda de corrección automática. ' : 'La prueba de ejecución no fue aprobada. ') + String(validation.summary || '').slice(0, 3000)
+            };
+          }
+        }
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
         for (let i = transcript.length - 1; i >= 0; i--) {
@@ -223,16 +257,17 @@ async function runJob(jobId) {
         resumeState = getValidationResumeState(payload, round);
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
-        const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
+        const validationLevel = syntax.runtime?.status === 'passed' ? 'ai_syntax_runtime' : (syntax.checked ? 'ai_and_syntax' : 'ai_review_only');
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
         const latestPayload = (await getPayload(jobId))?.payload || {};
         const transcript = appendEntries(latestPayload.transcript, [{
           at: new Date().toISOString(), agent: 'sistema', type: 'check',
-          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA'}). El resultado está listo para revisar.`
+          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_syntax_runtime' ? 'revisión de IA, sintaxis y ejecución aislada' : (validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA')}). El resultado está listo para revisar.`
         }]);
-        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
+        await updateJob(jobId, { status: 'completed', stage: syntax.runtime?.status === 'passed' ? 'Completado · IA + sintaxis + ejecución' : (syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA'), progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
+      if (runtimeInfrastructureBlocked) break;
       if (round >= MAX_ROUNDS) break;
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');

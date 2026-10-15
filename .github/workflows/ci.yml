@@ -33,7 +33,40 @@ jobs:
         run: npm --prefix apps/bridge ci --no-audit --no-fund
       - name: Check JavaScript syntax and unit tests
         run: npm run check
+      - name: Build and smoke-test isolated runner (Node + Xvfb/Chromium)
+        run: |
+          set -euo pipefail
+          docker build -f apps/runner/Dockerfile -t swarm-runner-ci .
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap xvfb xauth iproute2 python3 ca-certificates
+          sudo mkdir -p /app /ms-playwright
+          sudo chown -R "$USER":"$USER" /app /ms-playwright
+          cp apps/runner/package.json apps/runner/server.js apps/runner/browser-harness.mjs apps/runner/sandbox-bootstrap.mjs /app/
+          npm --prefix /app install --omit=dev --no-audit --no-fund
+          cd /app
+          sudo env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright "$(command -v npx)" playwright install-deps chromium
+          PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npx playwright install chromium
+          RUNNER_SHARED_SECRET=swarm-ci-runner-secret-012345678901234567890123456789 RUNNER_XVFB_ENABLED=true PORT=10000 RUNNER_TIMEOUT_MS=30000 node /app/server.js >/tmp/runner.log 2>&1 &
+          runner_pid=$!
+          cleanup() { kill "$runner_pid" >/dev/null 2>&1 || true; wait "$runner_pid" >/dev/null 2>&1 || true; cat /tmp/runner.log || true; }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:10000/healthz >/tmp/runner-health.json; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = "1"
+          cat /tmp/runner-health.json
+          grep -q '"sandboxAvailable":true' /tmp/runner-health.json
+          curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.js","content":"console.log(\"sandbox-node-ok\")"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-node.json
+          cat /tmp/runner-node.json
+          grep -q '"status":"passed"' /tmp/runner-node.json
+          curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.html","content":"<!doctype html><html><head><title>runner-smoke</title></head><body><main>browser-ok</main></body></html>"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-browser.json
+          cat /tmp/runner-browser.json
+          grep -q '"status":"passed"' /tmp/runner-browser.json
       - name: Audit direct and transitive dependencies
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
           npm --prefix apps/worker audit --audit-level=high --no-fund
+          npm --prefix apps/runner install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm --prefix apps/runner audit --audit-level=high --no-fund
