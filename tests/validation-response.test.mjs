@@ -30,14 +30,14 @@ test('validation parser never approves malformed or schema-invalid output', () =
 });
 
 test('validation parser normalizes HTML bracket entities and escaped underscores', () => {
-  const raw = String.raw\`{"verdict":"NEEDS\\_CHANGES","findings":&#91;"src/player.gd: EventBus no registrado"&#93;,"summary":"Hay un bloqueo"}\`;
+  const raw = '{"verdict":"NEEDS\\\\_CHANGES","findings":&#91;"src/player.gd: EventBus no registrado"&#93;,"summary":"Hay un bloqueo"}';
   const result = parseValidationResponse(raw);
   assert.equal(result.verdict, 'NEEDS_CHANGES');
   assert.deepEqual(result.findings, ['src/player.gd: EventBus no registrado']);
 });
 
 test('validation parser salvages findings from a truncated NEEDS_CHANGES response', () => {
-  const raw = String.raw\`{"verdict":"NEEDS_CHANGES","findings":["src/player.tscn: Gradient inválido","src/enemy.gd: EventBus no registrado","src/crystal.gd: llamada truncada\`;
+  const raw = '{"verdict":"NEEDS_CHANGES","findings":["src/player.tscn: Gradient inválido","src/enemy.gd: EventBus no registrado","src/crystal.gd: llamada truncada';
   const result = parseValidationResponse(raw);
   assert.equal(result.verdict, 'NEEDS_CHANGES');
   assert.equal(result.findings.length, 3);
