@@ -8,6 +8,15 @@
 - `swarm_history` todavía no contiene tablas ni trabajos. El worker crea `jobs` e índices al iniciar mediante `initStore()`.
 - No se cambiaron variables de Render, no se copiaron filas y no se modificó ninguna base de Comité.
 
+
+## Ramas de Neon verificadas (2026-10-15)
+
+- La rama primaria `production` (`br-holy-feather-b5q9c9yd`) contiene las bases `swarm` y `swarm_history`.
+- La rama `mcp-migration-2026-10-14T20-25-19` (`br-sparkling-mode-b5yvhkhg`) contiene únicamente `swarm`; no tiene una base `swarm_history`.
+- La base `swarm_history` de producción está vacía de tablas en esta revisión. Por tanto, crear la base no equivale a haber migrado el historial.
+- No eliminar ni restablecer la rama de migración solo porque parezca una copia: antes hay que identificar qué datos contiene y qué propósito cumple.
+- La inspección de metadatos de Render confirma que ambos servicios de Swarm están configurados con plan gratuito y que el campo efectivo `healthCheckPath` está vacío, aunque este repositorio declara `/readyz` en `render.yaml`. Hay que corregir esa configuración en Render y verificarla por separado; no se debe intentar resolverlo modificando variables de entorno.
+
 ## Contrato de conexiones
 
 - `SWARM_DATABASE_URL`: base `swarm`; cuentas, sesiones, invitaciones, APIs cifradas y propiedad de tareas.
