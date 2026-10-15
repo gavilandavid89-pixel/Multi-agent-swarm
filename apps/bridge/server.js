@@ -147,6 +147,12 @@ app.use('/api', async (req, res, next) => {
 app.post('/api/auth/logout', async (req, res) => { try { await revokeSession(req.sessionToken); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo cerrar la sesión.' }); } });
 app.get('/api/account', (req, res) => res.json({ user: req.user }));
 app.patch('/api/account/password', async (req, res) => {
+  const limitKey = `password:${req.user.id}`;
+  const passwordLimit = windowLimit(failedAuth, limitKey, 6, 15 * 60 * 1000);
+  if (!passwordLimit.allowed) {
+    res.set('Retry-After', String(passwordLimit.retryAfter));
+    return res.status(429).json({ error: 'Demasiados intentos de cambio de contraseña. Probá más tarde.' });
+  }
   const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
   const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
   if (newPassword.length < 12 || newPassword.length > 512) {
@@ -154,6 +160,7 @@ app.patch('/api/account/password', async (req, res) => {
   }
   try {
     const token = await changePassword(req.user.id, currentPassword, newPassword, req.sessionToken);
+    failedAuth.delete(limitKey);
     res.json({ ok: true, token });
   } catch (error) {
     res.status(error.status || 503).json({ error: error.message || 'No se pudo cambiar la contraseña.' });
@@ -169,6 +176,12 @@ app.put('/api/account/apis', async (req, res) => {
 app.post('/api/account/apis/:slot/test', async (req, res) => {
   const slot = Number(req.params.slot);
   if (!Number.isInteger(slot) || slot < 1 || slot > 10) return res.status(400).json({ error: 'Campo de API inválido.' });
+  const limitKey = `provider-test:${req.user.id}`;
+  const testLimit = windowLimit(jobCreateWindows, limitKey, 20, 5 * 60 * 1000);
+  if (!testLimit.allowed) {
+    res.set('Retry-After', String(testLimit.retryAfter));
+    return res.status(429).json({ error: 'Demasiadas pruebas de conexión. Probá de nuevo en unos minutos.' });
+  }
   try {
     res.json(await workerRequest(`/internal/account/apis/${encodeURIComponent(slot)}/test`, { method: 'POST', body: JSON.stringify({ userId: req.user.id }) }));
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
