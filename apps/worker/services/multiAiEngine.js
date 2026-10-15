@@ -187,6 +187,7 @@ async function runJob(jobId) {
     while (round <= MAX_ROUNDS) {
       const saved = resumeState.validationSaved;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
+      let runtimeInfrastructureBlocked = syntax?.runtime?.status === 'blocked';
       if (!saved) {
         let coherenceReview = resumeState.coherenceReview;
         if (!coherenceReview) {
@@ -213,11 +214,12 @@ async function runJob(jobId) {
           await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, runtimeAgent, 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
           const runtime = await runSandboxTests(delivery, objective);
           syntax = { ...syntax, runtime };
+          runtimeInfrastructureBlocked = runtime.status === 'blocked';
           const runtimeFailed = ['failed', 'timeout', 'blocked', 'rejected'].includes(runtime.status) || (runtime.required && runtime.status !== 'passed');
           const runtimeTranscript = (await getPayload(jobId))?.payload?.transcript || [];
           await updateJob(jobId, { payload: { transcript: appendEntries(runtimeTranscript, [{
             at: new Date().toISOString(), agent: runtimeAgent, type: 'check',
-            content: JSON.stringify({ status: runtime.status, mode: runtime.mode, reason: runtime.reason, exitCode: runtime.exitCode ?? null, durationMs: runtime.durationMs ?? null, sandbox: runtime.sandbox ?? null, network: runtime.network ?? null, stdout: runtime.stdout || '', stderr: runtime.stderr || '' }).slice(0, 9000)
+            content: JSON.stringify({ status: runtime.status, classification: runtime.status === 'passed' ? 'APROBADO' : runtime.status === 'skipped' ? 'NO_EJECUTADO' : runtime.status === 'blocked' ? 'ERROR_DE_INFRAESTRUCTURA' : 'FALLO', mode: runtime.mode, reason: runtime.reason, exitCode: runtime.exitCode ?? null, durationMs: runtime.durationMs ?? null, sandbox: runtime.sandbox ?? null, network: runtime.network ?? null, stdout: runtime.stdout || '', stderr: runtime.stderr || '' }).slice(0, 9000)
           }]) } });
           if (runtimeFailed) {
             validation = {
@@ -255,6 +257,7 @@ async function runJob(jobId) {
         await updateJob(jobId, { status: 'completed', stage: syntax.runtime?.status === 'passed' ? 'Completado · IA + sintaxis + ejecución' : (syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA'), progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
+      if (runtimeInfrastructureBlocked) break;
       if (round >= MAX_ROUNDS) break;
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
