@@ -339,4 +339,13 @@ export async function recoverableJobs() {
   const { rows } = await pool.query("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY created_at ASC");
   return rows.map(row => { try { const payload = unseal(row.encrypted_payload); return { id: row.id, retryAt: payload.retryAt || null }; } catch { return { id: row.id, retryAt: null }; } });
 }
-export async function closeStore() { await pool.end(); }
+export async function checkStore() {
+  await pool.query('SELECT 1');
+  return true;
+}
+
+let closeStorePromise;
+export function closeStore() {
+  if (!closeStorePromise) closeStorePromise = pool.end();
+  return closeStorePromise;
+}
