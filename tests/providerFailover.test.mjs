@@ -123,3 +123,43 @@ test('cambia de proveedor cuando el primero devuelve JSON válido con formato de
     assert.match(calls[1], /provider-b\.example\.test/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test('usa el adaptador nativo de Anthropic y traduce su respuesta al contrato del motor', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify({
+      id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-test',
+      content: [{ type: 'text', text: 'Respuesta Anthropic normalizada' }],
+      stop_reason: 'end_turn', usage: { input_tokens: 9, output_tokens: 5 }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await consultarWithProviderContext({
+      model: 'claude-test', maxTokens: 512,
+      messages: [
+        { role: 'system', content: 'Sos un agente cuidadoso.' },
+        { role: 'user', content: 'Respondé hola.' }
+      ]
+    }, {
+      providers: [{
+        name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1',
+        apiKey: 'anthropic-test-key', model: 'claude-test'
+      }],
+      geminiProviders: []
+    }, {});
+    assert.equal(result, 'Respuesta Anthropic normalizada');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://api.anthropic.com/v1/messages');
+    assert.equal(calls[0].options.headers['x-api-key'], 'anthropic-test-key');
+    assert.equal(calls[0].options.headers['anthropic-version'], '2023-06-01');
+    const request = JSON.parse(calls[0].options.body);
+    assert.equal(request.max_tokens, 512);
+    assert.equal(request.system, 'Sos un agente cuidadoso.');
+    assert.deepEqual(request.messages, [{ role: 'user', content: 'Respondé hola.' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
