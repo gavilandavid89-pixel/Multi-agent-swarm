@@ -81,20 +81,23 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
  * AI_FALLBACK_PROVIDERS contains endpoint/key-env/model metadata only, never API secrets.
  */
 export async function consultarModelo(options) {
+  return consultarWithProviderContext(options, currentUserProviders(), process.env);
+}
+
+export async function consultarWithProviderContext(options, userContext = null, env = process.env) {
   const { model, maxTokens = 1200 } = options;
-  const userContext = currentUserProviders();
   const providers = userContext
     ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
-    : configuredOpenAIProviders(model, maxTokens, process.env);
+    : configuredOpenAIProviders(model, maxTokens, env);
   const geminiProviders = userContext
     ? (Array.isArray(userContext.geminiProviders) ? userContext.geminiProviders : (userContext.gemini ? [userContext.gemini] : []))
-    : (process.env.GEMINI_API_KEY ? [{
+    : (env.GEMINI_API_KEY ? [{
         name: 'Gemini',
-        apiKey: process.env.GEMINI_API_KEY,
+        apiKey: env.GEMINI_API_KEY,
         models: {
-          reasoning: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash',
-          coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash',
-          validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash'
+          reasoning: env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash',
+          coding: env.GEMINI_MODEL_CODING || 'gemini-3.8-flash',
+          validation: env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash'
         }
       }] : []);
   for (let index = 0; index < geminiProviders.length; index++) {
