@@ -176,7 +176,7 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
     at: timestamp,
     agent: 'sistema',
     type: 'budget',
-    content: 'Se abrió una nueva tanda de 100.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
+    content: 'Se abrió una nueva tanda de 1.000.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
   });
   return {
     ...sourcePayload,
