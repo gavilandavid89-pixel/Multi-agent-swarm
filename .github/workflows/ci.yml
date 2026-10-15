@@ -33,6 +33,24 @@ jobs:
         run: npm --prefix apps/bridge ci --no-audit --no-fund
       - name: Check JavaScript syntax and unit tests
         run: npm run check
+      - name: Build and smoke-test isolated runner (Node + Xvfb/Chromium)
+        run: |
+          set -euo pipefail
+          docker build -f apps/runner/Dockerfile -t swarm-runner-ci .
+          docker run -d --name swarm-runner-ci -e RUNNER_SHARED_SECRET=swarm-ci-runner-secret-012345678901234567890123456789 -e RUNNER_XVFB_ENABLED=true -p 10000:10000 swarm-runner-ci
+          cleanup() { docker logs swarm-runner-ci || true; docker rm -f swarm-runner-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:10000/healthz >/tmp/runner-health.json; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = "1"
+          grep -q '"ok":true' /tmp/runner-health.json
+          curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.js","content":"console.log(\"sandbox-node-ok\")"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-node.json
+          grep -q '"status":"passed"' /tmp/runner-node.json
+          curl -fsS -H 'content-type: application/json' -H 'x-swarm-runner-secret: swarm-ci-runner-secret-012345678901234567890123456789' -d '{"mode":"auto","files":[{"path":"index.html","content":"<!doctype html><html><head><title>runner-smoke</title></head><body><main>browser-ok</main></body></html>"}]}' http://127.0.0.1:10000/v1/run >/tmp/runner-browser.json
+          grep -q '"status":"passed"' /tmp/runner-browser.json
       - name: Audit direct and transitive dependencies
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
