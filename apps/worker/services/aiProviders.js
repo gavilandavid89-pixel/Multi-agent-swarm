@@ -212,10 +212,16 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       await sleep(wait); continue;
     }
     if (response.ok) {
-      const responseBody = await response.text().catch(() => '');
+      const hasTextReader = typeof response.text === 'function';
+      const responseBody = hasTextReader ? await response.text().catch(() => '') : '';
       let data;
       try {
-        data = parseProviderResponseBody(responseBody);
+        // Native Fetch responses expose text(); the json() fallback also supports
+        // older adapters and test doubles while preserving the same validation.
+        data = hasTextReader ? parseProviderResponseBody(responseBody) : await response.json();
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw Object.assign(new Error('Estructura JSON inesperada.'), { code: 'PROVIDER_INVALID_JSON' });
+        }
       } catch {
         retry++;
         const wait = retryDelay(retry);
