@@ -10,6 +10,8 @@ const PORT = Number(process.env.PORT || 10000);
 const RUNNER_SECRET = process.env.RUNNER_SHARED_SECRET || '';
 const MAX_FILES = 40, MAX_FILE_BYTES = 256_000, MAX_TOTAL_BYTES = 1_500_000;
 const MAX_RUN_MS = Math.min(60000, Math.max(3000, Number.parseInt(process.env.RUNNER_TIMEOUT_MS || '30000', 10) || 30000));
+const MAX_CONCURRENT_RUNS = 1;
+let activeRuns = 0;
 if (RUNNER_SECRET.length < 32) throw new Error('RUNNER_SHARED_SECRET debe tener al menos 32 caracteres aleatorios.');
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb', strict: true }));
@@ -103,10 +105,10 @@ function sandboxArgs(root, command) {
     '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chmod', '1777', '/tmp',
     '--bind', root, '/workspace', '--chdir', '/workspace',
     '--setenv', 'HOME', '/workspace/.home',
-    '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin',
+    '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
     '--setenv', 'PLAYWRIGHT_BROWSERS_PATH', '/ms-playwright',
     '--setenv', 'NODE_PATH', '/app/node_modules',
-    '--', ...command
+    '--', '/usr/bin/prlimit', '--cpu=30', '--nproc=128', '--fsize=10485760', '--nofile=256', '--', ...command
   ];
 }
 async function removeTree(root) {
@@ -123,6 +125,8 @@ app.use('/v1', (req, res, next) => {
   next();
 });
 app.post('/v1/run', async (req, res) => {
+  if (activeRuns >= MAX_CONCURRENT_RUNS) return res.status(429).json({ status: 'blocked', error: 'El ejecutor ya está procesando otra tarea; reintentá más tarde.' });
+  activeRuns++;
   const mode = ['auto', 'node', 'browser'].includes(req.body?.mode) ? req.body.mode : 'auto';
   let root = '';
   try {
@@ -134,6 +138,7 @@ app.post('/v1/run', async (req, res) => {
     res.status(400).json({ status: 'rejected', error: String(error?.message || 'Solicitud de ejecución inválida.').slice(0, 1000) });
   } finally {
     await removeTree(root);
+    activeRuns = Math.max(0, activeRuns - 1);
   }
 });
 app.listen(PORT, '0.0.0.0', () => console.log('[runner] isolated execution API listening on ' + PORT));
