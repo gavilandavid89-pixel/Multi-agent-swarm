@@ -26,6 +26,9 @@ export async function initAccountStore() {
   // CREATE TABLE IF NOT EXISTS does not evolve an already deployed schema.
   // This migration is required for databases created before account deactivation existed.
   await pool.query('ALTER TABLE app_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ');
+  // Enforce at the database level that there can be only one administrator.
+  // Registration from an invitation always assigns role='user'; this protects against future code paths accidentally creating a second admin.
+  await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS app_users_single_admin_idx ON app_users ((role)) WHERE role='admin'");
   await pool.query(`CREATE TABLE IF NOT EXISTS app_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
     token_hash TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
