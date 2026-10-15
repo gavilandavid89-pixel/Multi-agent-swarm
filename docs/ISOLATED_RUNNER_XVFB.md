@@ -24,7 +24,7 @@ En Worker:
 No añadas credenciales de proveedores ni variables de base de datos al Runner. No publiques el Runner abiertamente si puede configurarse como servicio privado.
 
 ## Modos
-- `auto`: Chromium/Xvfb para entregas HTML; tests Node para archivos `*.test.js/mjs/cjs`; o un entrypoint claro.
+- `auto`: Chromium/Xvfb para entregas HTML; tests Node para archivos `*.test.js/mjs/cjs`; ejecución de scripts Python estándar o `unittest`; o un entrypoint claro.
 - `node`: pruebas Node o entrypoint permitido por el selector determinista.
 - `browser`: carga el HTML local bajo Chromium/Xvfb y comprueba errores visibles.
 
