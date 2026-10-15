@@ -99,3 +99,27 @@ test('la migración de APIs reutiliza huecos y respeta el máximo de diez slots'
   assert.equal(firstAvailableApiSlot(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9])), 10);
   assert.equal(firstAvailableApiSlot(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])), null);
 });
+
+
+test('cambia de proveedor cuando el primero devuelve JSON válido con formato desconocido', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    const target = String(url); calls.push(target);
+    if (target.includes('provider-a.example.test')) return new Response(JSON.stringify({ unexpected: { nested: 'shape' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (target.includes('provider-b.example.test')) return new Response(JSON.stringify({ choices: [{ message: { content: 'respuesta normalizada' }, finish_reason: 'stop' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    throw new Error('Unexpected provider endpoint in test.');
+  };
+  try {
+    const result = await consultarWithProviderContext({ model: 'test-model', maxTokens: 512, messages: [{ role: 'user', content: 'test' }] }, {
+      providers: [
+        { name: 'Provider A', baseUrl: 'https://provider-a.example.test/v1', apiKey: 'key-a', model: 'model-a' },
+        { name: 'Provider B', baseUrl: 'https://provider-b.example.test/v1', apiKey: 'key-b', model: 'model-b' }
+      ], geminiProviders: []
+    }, {});
+    assert.equal(result, 'respuesta normalizada');
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /provider-a\.example\.test/);
+    assert.match(calls[1], /provider-b\.example\.test/);
+  } finally { globalThis.fetch = originalFetch; }
+});

@@ -3,7 +3,7 @@ import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 import { safeProviderFetch } from './safeProviderFetch.js';
-import { parseProviderResponseBody } from './providerResponse.js';
+import { normalizeOpenAICompatibleResponse, parseProviderResponseBody } from './providerResponse.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 const KNOWN_PROVIDER_HOSTS = new Set([
@@ -218,16 +218,14 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       try {
         // Native Fetch responses expose text(); the json() fallback also supports
         // older adapters and test doubles while preserving the same validation.
-        data = hasTextReader ? parseProviderResponseBody(responseBody) : await response.json();
-        if (!data || typeof data !== 'object' || Array.isArray(data)) {
-          throw Object.assign(new Error('Estructura JSON inesperada.'), { code: 'PROVIDER_INVALID_JSON' });
-        }
-      } catch {
+        const parsed = hasTextReader ? parseProviderResponseBody(responseBody) : await response.json();
+        data = normalizeOpenAICompatibleResponse(parsed);
+      } catch (parseError) {
         retry++;
         const wait = retryDelay(retry);
-        const reason = 'respuesta HTTP 200 con JSON inválido del proveedor';
+        const reason = parseError?.code === 'PROVIDER_UNSUPPORTED_RESPONSE' ? 'formato de respuesta no compatible del proveedor' : 'respuesta HTTP 200 con JSON inválido del proveedor';
         // Never log the body: a provider may echo prompts or sensitive context.
-        console.warn('[worker][provider_invalid_json]', JSON.stringify({ provider: providerName, model, attempt: retry, bodyLength: responseBody.length }));
+        console.warn('[worker][provider_invalid_response]', JSON.stringify({ provider: providerName, model, attempt: retry, code: parseError?.code || 'PROVIDER_INVALID_JSON', bodyLength: responseBody.length }));
         if (failoverAvailable || retry >= MAX_PROVIDER_RETRIES) {
           throw deferredProviderError(model, retry, wait, reason, providerName);
         }
