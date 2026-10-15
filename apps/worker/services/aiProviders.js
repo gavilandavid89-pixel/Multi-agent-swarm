@@ -13,7 +13,9 @@ const KNOWN_PROVIDER_HOSTS = new Set([
 async function fetchProviderEndpoint(url, options, baseUrl) {
   const target = new URL(url);
   const localDevelopmentEndpoint = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(String(baseUrl || ''));
-  if (KNOWN_PROVIDER_HOSTS.has(target.hostname.toLowerCase()) || localDevelopmentEndpoint) {
+  // The reserved .test TLD is used by mocked provider fixtures, never as a production custom host.
+  const testFixtureEndpoint = process.env.NODE_ENV !== 'production' && /\.test$/i.test(target.hostname);
+  if (KNOWN_PROVIDER_HOSTS.has(target.hostname.toLowerCase()) || localDevelopmentEndpoint || testFixtureEndpoint) {
     return fetch(url, { ...options, redirect: 'error' });
   }
   return safeProviderFetch(url, options);
