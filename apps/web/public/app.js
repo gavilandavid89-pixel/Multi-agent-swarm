@@ -135,8 +135,8 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
   $('artifacts-count').textContent = `${items.length} archivo${items.length === 1 ? '' : 's'}`;
   const bundleReady = jobStatus === 'completed' && validation?.verdict !== 'NEEDS_CHANGES' && syntax?.ok !== false;
   $('artifacts-kicker').textContent = bundleReady ? 'ENTREGA VALIDADA' : jobStatus === 'needs_review' ? 'ARCHIVOS · REQUIEREN CORRECCIÓN' : 'ARCHIVOS GENERADOS · EN PROCESO';
-  $('download-bundle').disabled = items.length === 0 || !bundleReady;
-  $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' ? 'ZIP bloqueado · falta corregir' : 'ZIP disponible al completar la validación';
+  $('download-bundle').disabled = items.length === 0;
+  $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' || jobStatus === 'failed' ? 'Descargar ZIP · revisión pendiente ↓' : 'Descargar ZIP · entrega sin validar ↓';
   list.innerHTML = items.map(file => {
     const ext = String(file.path || '').split('.').pop().toLowerCase();
     const kind = ext === 'html' ? 'HTML · vista previa disponible' : ext === 'apk' ? 'APK · requiere ser un binario Android válido' : ext === 'zip' ? 'ZIP · archivo proporcionado por la tarea' : 'Archivo del proyecto';
@@ -987,7 +987,7 @@ $('files-menu-toggle').addEventListener('click', () => {
 $('close-files-drawer').addEventListener('click', () => $('files-drawer').classList.add('hidden'));
 $('files-download-button').addEventListener('click', () => {
   const button = $('download-bundle');
-  if (!button || button.disabled) { $('files-drawer-status').textContent = 'El ZIP estará disponible cuando la entrega esté validada.'; return; }
+  if (!button || button.disabled) { $('files-drawer-status').textContent = 'Todavía no hay archivos guardados para empaquetar.'; return; }
   button.click();
 });
 $('files-preview-button').addEventListener('click', () => {
