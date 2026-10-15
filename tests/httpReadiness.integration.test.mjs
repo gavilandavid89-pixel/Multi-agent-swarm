@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { Pool } = require('../apps/bridge/node_modules/pg');
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -63,12 +68,40 @@ async function stopChild(child) {
   });
 }
 
-test('bridge y worker inician por HTTP y verifican PostgreSQL en /readyz', { timeout: 40000 }, async t => {
-  const databaseUrl = process.env.SWARM_DATABASE_URL;
-  assert.ok(databaseUrl, 'CI debe proporcionar PostgreSQL temporal');
+async function apiJson(base, path, { method = 'GET', token = '', body } = {}) {
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(token ? { authorization: `Bearer ${token}` } : {})
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(10000)
+  });
+  return { response, payload: await response.json().catch(() => ({})) };
+}
+
+test('smoke HTTP funcional de cuentas, sesiones, invitaciones y readiness PostgreSQL', { timeout: 90000 }, async t => {
+  const sourceDatabaseUrl = process.env.SWARM_DATABASE_URL;
+  assert.ok(sourceDatabaseUrl, 'CI debe proporcionar PostgreSQL temporal');
+  const schemaPool = new Pool({ connectionString: sourceDatabaseUrl, max: 1 });
+  const schemaName = `swarm_http_${randomUUID().replace(/-/g, '')}`;
+  let worker;
+  let bridge;
+  t.after(async () => {
+    await stopChild(bridge);
+    await stopChild(worker);
+    await schemaPool.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`).catch(() => {});
+    await schemaPool.end().catch(() => {});
+  });
+  await schemaPool.query(`CREATE SCHEMA "${schemaName}"`);
+  const isolatedUrl = new URL(sourceDatabaseUrl);
+  isolatedUrl.searchParams.set('options', `-c search_path=${schemaName}`);
+  const databaseUrl = isolatedUrl.toString();
   const bridgePort = await reservePort();
   const workerPort = await reservePort();
   const sharedSecret = 'swarm-http-smoke-secret-1234567890';
+  const bootstrapPassword = 'swarm-http-smoke-bootstrap-key-123456';
   const workerUrl = `http://127.0.0.1:${workerPort}`;
   const commonEnv = {
     NODE_ENV: 'test',
@@ -78,21 +111,17 @@ test('bridge y worker inician por HTTP y verifican PostgreSQL en /readyz', { tim
     HISTORY_ENCRYPTION_KEY: 'a'.repeat(64),
     WORKER_SHARED_SECRET: sharedSecret
   };
-  const worker = launch('apps/worker/server.js', {
+  worker = launch('apps/worker/server.js', {
     ...commonEnv,
     PORT: String(workerPort),
     DATABASE_PATH: './data/swarm-smoke-does-not-exist.sqlite',
     WORKER_CONCURRENCY: '1'
   });
-  const bridge = launch('apps/bridge/server.js', {
+  bridge = launch('apps/bridge/server.js', {
     ...commonEnv,
     PORT: String(bridgePort),
     WORKER_BASE_URL: workerUrl,
-    APP_ACCESS_KEY: 'swarm-http-smoke-bootstrap-key-123456'
-  });
-  t.after(async () => {
-    await stopChild(bridge);
-    await stopChild(worker);
+    APP_ACCESS_KEY: bootstrapPassword
   });
 
   const workerReady = await waitUntilReady(worker, workerUrl, 'Worker');
@@ -114,4 +143,104 @@ test('bridge y worker inician por HTTP y verifican PostgreSQL en /readyz', { tim
     assert.equal(body.ok, true);
     assert.equal(body.role, role);
   }
+
+  // First-admin bootstrap must work end-to-end against the isolated HTTP stack.
+  const beforeBootstrap = await apiJson(bridgeUrl, '/api/auth/bootstrap-status');
+  assert.equal(beforeBootstrap.response.status, 200);
+  assert.equal(beforeBootstrap.payload.initialized, false);
+  const adminLogin = await apiJson(bridgeUrl, '/api/auth/login', {
+    method: 'POST', body: { username: 'admin', password: bootstrapPassword }
+  });
+  assert.equal(adminLogin.response.status, 200, JSON.stringify(adminLogin.payload));
+  assert.equal(adminLogin.payload.user.role, 'admin');
+  const adminToken = adminLogin.payload.token;
+  const adminId = adminLogin.payload.user.id;
+  assert.ok(adminToken);
+
+  const afterBootstrap = await apiJson(bridgeUrl, '/api/auth/bootstrap-status');
+  assert.equal(afterBootstrap.payload.initialized, true);
+  const adminAccount = await apiJson(bridgeUrl, '/api/account', { token: adminToken });
+  assert.equal(adminAccount.response.status, 200);
+  assert.equal(adminAccount.payload.user.id, adminId);
+
+  const selfDisable = await apiJson(bridgeUrl, `/api/admin/users/${adminId}/status`, {
+    method: 'PATCH', token: adminToken, body: { disabled: true }
+  });
+  assert.equal(selfDisable.response.status, 403, 'admin accounts must not be disabled by the user-management endpoint');
+
+  const invite = await apiJson(bridgeUrl, '/api/admin/invites', {
+    method: 'POST', token: adminToken, body: { hours: 1 }
+  });
+  assert.equal(invite.response.status, 201, JSON.stringify(invite.payload));
+  assert.ok(invite.payload.code);
+  const suffix = Date.now().toString().slice(-7);
+  const username = `smoke-user-${suffix}`;
+  const oldPassword = 'old-http-smoke-password-123';
+  const newPassword = 'new-http-smoke-password-456';
+  const registration = await apiJson(bridgeUrl, '/api/auth/register', {
+    method: 'POST', body: { username, password: oldPassword, invite: invite.payload.code }
+  });
+  assert.equal(registration.response.status, 201, JSON.stringify(registration.payload));
+  assert.equal(registration.payload.user.role, 'user');
+  const originalUserToken = registration.payload.token;
+  const userId = registration.payload.user.id;
+
+  const duplicateInvite = await apiJson(bridgeUrl, '/api/auth/register', {
+    method: 'POST', body: { username: `reuse-${suffix}`, password: oldPassword, invite: invite.payload.code }
+  });
+  assert.equal(duplicateInvite.response.status, 400, 'an invite must not be reusable');
+
+  const userApis = await apiJson(bridgeUrl, '/api/account/apis', { token: originalUserToken });
+  assert.equal(userApis.response.status, 200);
+  assert.deepEqual(userApis.payload.apis, []);
+  const forbiddenAdminList = await apiJson(bridgeUrl, '/api/admin/users', { token: originalUserToken });
+  assert.equal(forbiddenAdminList.response.status, 403);
+
+  const passwordChange = await apiJson(bridgeUrl, '/api/account/password', {
+    method: 'PATCH', token: originalUserToken,
+    body: { currentPassword: oldPassword, newPassword }
+  });
+  assert.equal(passwordChange.response.status, 200, JSON.stringify(passwordChange.payload));
+  const rotatedToken = passwordChange.payload.token;
+  assert.ok(rotatedToken);
+  assert.notEqual(rotatedToken, originalUserToken);
+  const priorSession = await apiJson(bridgeUrl, '/api/account', { token: originalUserToken });
+  assert.equal(priorSession.response.status, 401, 'password changes must rotate the active session token');
+
+  const oldPasswordLogin = await apiJson(bridgeUrl, '/api/auth/login', {
+    method: 'POST', body: { username, password: oldPassword }
+  });
+  assert.equal(oldPasswordLogin.response.status, 401, 'the previous password must stop working');
+  const newPasswordLogin = await apiJson(bridgeUrl, '/api/auth/login', {
+    method: 'POST', body: { username, password: newPassword }
+  });
+  assert.equal(newPasswordLogin.response.status, 200, JSON.stringify(newPasswordLogin.payload));
+  const newLoginToken = newPasswordLogin.payload.token;
+
+  const managedUsers = await apiJson(bridgeUrl, '/api/admin/users', { token: adminToken });
+  assert.equal(managedUsers.response.status, 200);
+  const managedUser = managedUsers.payload.users.find(user => user.id === userId);
+  assert.ok(managedUser);
+  assert.equal(Object.hasOwn(managedUser, 'password_hash'), false);
+
+  const disable = await apiJson(bridgeUrl, `/api/admin/users/${userId}/status`, {
+    method: 'PATCH', token: adminToken, body: { disabled: true }
+  });
+  assert.equal(disable.response.status, 200, JSON.stringify(disable.payload));
+  assert.ok(disable.payload.user.disabledAt);
+  assert.equal((await apiJson(bridgeUrl, '/api/account', { token: rotatedToken })).response.status, 401);
+  assert.equal((await apiJson(bridgeUrl, '/api/account', { token: newLoginToken })).response.status, 401);
+
+  const reactivate = await apiJson(bridgeUrl, `/api/admin/users/${userId}/status`, {
+    method: 'PATCH', token: adminToken, body: { disabled: false }
+  });
+  assert.equal(reactivate.response.status, 200, JSON.stringify(reactivate.payload));
+  assert.equal(reactivate.payload.user.disabledAt, null);
+  assert.equal((await apiJson(bridgeUrl, '/api/account', { token: newLoginToken })).response.status, 401,
+    'reactivation must not revive revoked session tokens');
+  const finalLogin = await apiJson(bridgeUrl, '/api/auth/login', {
+    method: 'POST', body: { username, password: newPassword }
+  });
+  assert.equal(finalLogin.response.status, 200, JSON.stringify(finalLogin.payload));
+  assert.equal((await apiJson(bridgeUrl, '/api/account', { token: finalLogin.payload.token })).response.status, 200);
 });
