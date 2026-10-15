@@ -5,10 +5,12 @@ import pg from 'pg';
 const { Pool } = pg;
 const context = new AsyncLocalStorage();
 const connectionString = process.env.SWARM_DATABASE_URL || '';
+// Upgrade PostgreSQL's weaker sslmode=require to hostname/certificate verification where supported.
+const verifiedConnectionString = connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const keyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 let pool;
 if (connectionString && /^[a-f0-9]{64}$/i.test(keyHex)) {
-  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
+  pool = new Pool({ connectionString: verifiedConnectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
 }
 const key = /^[a-f0-9]{64}$/i.test(keyHex) ? Buffer.from(keyHex, 'hex') : null;
 function decrypt(value) {
