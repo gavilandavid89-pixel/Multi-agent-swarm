@@ -3,7 +3,7 @@ services:
     name: swarm-bridge
     runtime: node
     plan: free
-    buildCommand: npm --prefix apps/bridge install --no-audit --no-fund
+    buildCommand: npm --prefix apps/bridge ci --no-audit --no-fund
     startCommand: npm --prefix apps/bridge start
     healthCheckPath: /readyz
     envVars:
