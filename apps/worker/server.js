@@ -6,7 +6,7 @@ import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
-import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership } from './services/userProviders.js';
+import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider } from './services/userProviders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3100);
@@ -69,6 +69,11 @@ function pump() {
     }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
+app.post('/internal/account/apis/:slot/test', async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId : '';
+  try { res.json(await testUserProvider(userId, req.params.slot)); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message || 'No se pudo verificar la API.' }); }
+});
 app.post('/internal/admin/import-legacy-apis', async (req, res) => {
   const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : '';
   if (!userId) return res.status(400).json({ error: 'Cuenta de administrador inválida.' });
