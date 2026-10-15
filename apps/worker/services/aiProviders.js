@@ -187,8 +187,9 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     for (const item of Array.isArray(messages) ? messages : []) {
       if (item?.role === 'system') continue;
       const role = item?.role === 'assistant' ? 'assistant' : 'user';
-      const content = String(item?.content ?? '');
-      if (!content) continue;
+      const rawContent = String(item?.content ?? '');
+      if (!rawContent) continue;
+      const content = ['user', 'assistant'].includes(item?.role) ? rawContent : `Resultado de herramienta (${String(item?.name || item?.role || 'tool')}): ${rawContent}`;
       const previous = converted[converted.length - 1];
       if (previous?.role === role) previous.content += `\n\n${content}`;
       else converted.push({ role, content });
@@ -269,7 +270,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         continue;
       }
       const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
-      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) { const toolError = deferredProviderError(model, retry + 1, retryDelay(retry + 1), 'la respuesta requiere llamadas a herramientas que el motor aún no ejecuta', providerName); toolError.code = 'PROVIDER_UNSUPPORTED_TOOL_CALLS'; throw toolError; }
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) { const toolError = deferredProviderError(model, retry + 1, retryDelay(retry + 1), 'la respuesta requiere llamadas a herramientas que el motor aún no ejecuta', providerName); throw toolError; }
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
