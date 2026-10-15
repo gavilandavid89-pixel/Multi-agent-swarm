@@ -41,13 +41,20 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
 
   const models = { reasoning: 'gpt-4o-mini', coding: 'gpt-4o-mini', validation: 'gpt-4o-mini' };
   await saveApiKeys(userA.id, [{ slot: 1, label: 'Test provider A', baseUrl: 'https://api.openai.com/v1', models, apiKey: 'test-key-alpha' }]);
+  await saveApiKeys(userA.id, [{ slot: 2, label: 'Custom test API', baseUrl: 'https://api.custom-provider.example.com/v1', models: { reasoning: 'custom-model-v1' }, apiKey: 'custom-test-key' }]);
   await saveApiKeys(userB.id, [{ slot: 1, label: 'Test provider B', baseUrl: 'https://api.openai.com/v1', models, apiKey: 'test-key-beta' }]);
+  await assert.rejects(
+    saveApiKeys(userA.id, [{ slot: 3, label: 'Private endpoint', baseUrl: 'https://127.0.0.1/v1', models: { reasoning: 'private-model' }, apiKey: 'private-test-key' }]),
+    /dominio público válido|no está permitido/i
+  );
 
   const apisA = await listApiKeys(userA.id);
   const apisB = await listApiKeys(userB.id);
-  assert.deepEqual(apisA.map(api => api.label), ['Test provider A']);
+  assert.deepEqual(apisA.map(api => api.label), ['Test provider A', 'Custom test API']);
+  assert.equal(apisA[1].base_url, 'https://api.custom-provider.example.com/v1');
   assert.deepEqual(apisB.map(api => api.label), ['Test provider B']);
   assert.equal(JSON.stringify(apisA).includes('test-key-alpha'), false);
+  assert.equal(JSON.stringify(apisA).includes('custom-test-key'), false);
   assert.equal(JSON.stringify(apisB).includes('test-key-beta'), false);
 
   const actualFetch = globalThis.fetch;
