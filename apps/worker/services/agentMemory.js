@@ -1,6 +1,7 @@
 const MAX_AGENT_DOCUMENT_CHARS = 18000;
 const MAX_SHARED_DOCUMENT_CHARS = 24000;
 const MAX_AGENT_ENTRIES = 40;
+const MAX_SHARED_ENTRIES = 20;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 
 function agentKey(name) {
@@ -39,20 +40,39 @@ export function recordAgentCheckpoint(payload = {}, { at = new Date().toISOStrin
     markdown: appendDocument(prior.markdown, section, MAX_AGENT_DOCUMENT_CHARS)
   };
 
-  const sharedSection = [
-    '## ' + entry.stage + ' — ' + clip(agent || 'Agente', 80),
+  const sharedEntries = [...(Array.isArray(previous.sharedDocumentEntries) ? previous.sharedDocumentEntries : []), {
+    at,
+    agent: clip(agent || 'Agente', 80),
+    stage: entry.stage,
+    summary: clip(body || '_Sin resumen disponible._', 500)
+  }].slice(-MAX_SHARED_ENTRIES);
+  const context = [
+    '# SWARM-STATE — Memoria compartida',
     '',
-    '- Fecha: ' + at,
+    '## Objetivo original',
+    clip(previous.objective || 'Objetivo no disponible en este checkpoint.', 2500),
     '',
-    body || '_Sin resumen disponible._'
+    '## Plan / estrategia vigente',
+    clip(previous.strategy || previous.proposal || 'El plan todavía no está definido.', 3000),
+    '',
+    '## Contratos y coherencia',
+    clip(previous.coherence || 'Todavía no hay un mapa de coherencia guardado.', 2500),
+    '',
+    '## Estado de validación',
+    clip(previous.validation?.summary || 'Todavía no hay un resultado de validación guardado.', 1200),
+    '',
+    '## Checkpoints recientes'
   ].join('\n');
-  const sharedDocument = appendDocument(
-    previous.sharedDocument || '# SWARM-STATE — Memoria compartida\n\nEsta memoria resume checkpoints persistidos. Confirmá los resultados de pruebas por separado.',
-    sharedSection,
-    MAX_SHARED_DOCUMENT_CHARS
-  );
+  const history = sharedEntries.map(item => [
+    '### ' + item.stage + ' — ' + item.agent,
+    '- Fecha: ' + item.at,
+    '',
+    item.summary
+  ].join('\n')).join('\n\n---\n\n');
+  const sharedDocument = [context, history].filter(Boolean).join('\n\n').slice(0, MAX_SHARED_DOCUMENT_CHARS);
   return {
     agentDocuments: documents,
+    sharedDocumentEntries: sharedEntries,
     sharedDocument,
     memoryUpdatedAt: at,
     memoryLastCheckpoint: { at, agent: clip(agent || 'Agente', 80), stage: clip(stage || '', 160) }
