@@ -42,7 +42,7 @@ async function writeFiles(root, files) {
     await writeFile(destination, file.content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   }
   await mkdir(path.join(root, '.home'), { mode: 0o700 });
-  return { count: files.length, bytes: total, paths: seen };
+  return { count: files.length, bytes: total, paths: [...seen] };
 }
 function runSandbox(root, mode, paths) {
   return new Promise(resolve => {
