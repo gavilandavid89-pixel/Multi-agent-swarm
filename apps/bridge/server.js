@@ -333,12 +333,15 @@ app.get('/api/jobs/:id/bundle', async (req, res) => {
   try {
     const jobId = encodeURIComponent(req.params.id);
     const task = await workerRequest(`/internal/jobs/${jobId}/history`);
-    if (task.job?.status !== 'completed' || task.validation?.verdict === 'NEEDS_CHANGES' || task.syntax?.ok === false) {
-      return res.status(409).json({ error: 'El ZIP final se habilita cuando Swarm complete y valide la tarea. Los archivos individuales siguen disponibles para revisión técnica.' });
+    const taskStatus = String(task.job?.status || '');
+    const allowedBundleStatuses = new Set(['queued', 'running', 'completed', 'failed', 'needs_review']);
+    if (!allowedBundleStatuses.has(taskStatus)) {
+      return res.status(409).json({ error: 'El estado de la tarea no permite empaquetar sus archivos.' });
     }
+    const validated = taskStatus === 'completed' && task.validation?.verdict !== 'NEEDS_CHANGES' && task.syntax?.ok !== false;
     const listing = await workerRequest(`/internal/jobs/${jobId}/files`);
     const metadata = Array.isArray(listing.files) ? listing.files : [];
-    if (!metadata.length) return res.status(409).json({ error: 'La tarea terminó, pero no contiene archivos empaquetables. Pedile al Desarrollador que entregue los archivos completos.' });
+    if (!metadata.length) return res.status(409).json({ error: 'Todavía no hay archivos guardados para empaquetar.' });
     if (metadata.length > 40) return res.status(413).json({ error: 'La entrega supera el límite de 40 archivos por paquete.' });
     const contents = await Promise.all(metadata.map(async item => {
       const result = await workerRequest(`/internal/jobs/${jobId}/files/${encodeURIComponent(item.index)}`);
@@ -358,6 +361,19 @@ app.get('/api/jobs/:id/bundle', async (req, res) => {
         'Abrí el archivo HTML principal en un navegador para probar una web estática.',
         'Si el proyecto requiere dependencias o un servidor, consultá su README y ejecutá el comando de instalación en un entorno de desarrollo.'
       ].join('\n') + '\n' });
+    }
+    if (!validated) {
+      const statusPath = contents.some(file => file.path.toLowerCase() === 'swarm-estado-validacion.txt')
+        ? 'SWARM-ESTADO-VALIDACION-GENERADO.txt'
+        : 'SWARM-ESTADO-VALIDACION.txt';
+      contents.push({ path: statusPath, content: [
+        'BORRADOR SIN VALIDAR',
+        `Tarea: ${req.params.id}`,
+        `Estado actual: ${taskStatus}`,
+        '',
+        'Este paquete contiene archivos generados guardados, pero la tarea todavía no superó la validación final.',
+        'Revisá los archivos antes de ejecutar o publicar el proyecto.'
+      ].join('\\n') + '\\n' });
     }
     const archive = createZip(contents);
     const filename = `swarm-${String(req.params.id).slice(0, 8)}.zip`;
