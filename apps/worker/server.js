@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -19,6 +19,15 @@ app.use(express.json({ limit: '64kb' }));
 const queue = new Set(); const active = new Set(); let shuttingDown = false; let storeClosing = false; let server;
 const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '15000', 10) || 15000));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
+app.get('/readyz', async (_req, res) => {
+  if (shuttingDown) return res.status(503).json({ ok: false, role: 'worker', state: 'shutting_down' });
+  try {
+    await checkStore();
+    res.json({ ok: true, role: 'worker', database: 'ready', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY });
+  } catch {
+    res.status(503).json({ ok: false, role: 'worker', database: 'unavailable' });
+  }
+});
 app.use('/internal', (req, res, next) => { if (!safeEqual(req.get('x-swarm-bridge-secret') || '', SHARED_SECRET)) return res.status(401).json({ error: 'No autorizado.' }); next(); });
 function safeEqual(a, b) { const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b)); if (aa.length !== bb.length || aa.length === 0) return false; return timingSafeEqual(aa, bb); }
 async function runJobWithAccountProviders(id) {
