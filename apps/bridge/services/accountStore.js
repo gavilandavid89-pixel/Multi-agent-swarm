@@ -159,13 +159,17 @@ export async function saveApiKeys(userId, entries) {
       let parsedUrl;
       try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL del proveedor de la API ${slot} no es válida.`); }
       const hostname = parsedUrl.hostname.toLowerCase();
-      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(hostname) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
+      const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
+      // Legacy endpoints came from the administrator's trusted server environment.
+      // They remain editable in-place, but users cannot introduce new arbitrary hosts.
+      const legacyExistingHost = Boolean(previous && previousHost === hostname && !allowedHosts.has(hostname));
+      if (parsedUrl.protocol !== 'https:' || (!allowedHosts.has(hostname) && !legacyExistingHost) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
         throw new Error(`El proveedor de la API ${slot} no está permitido por la política de seguridad.`);
       }
-      const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
+      const canonicalBaseUrl = legacyExistingHost ? String(previous.base_url)
+        : hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
         : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
-        : `https://${hostname}${parsedUrl.pathname.replace(/\/+$/, '')}`;
-      const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
+        : `https://${hostname}${parsedUrl.pathname.replace(/\\/+$/, '')}`;
       if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
