@@ -207,7 +207,7 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
-        const hasRunnableCode = /^#{1,6}\\s+(?:Archivo|File|Ruta)\\s*:/im.test(String(delivery || ''));
+        const hasRunnableCode = /^#{1,6}\s+(?:Archivo|File|Ruta)\s*:\s*[^\n]+\.(?:js|mjs|cjs|html?|py)\s*$/im.test(String(delivery || ''));
         if (hasRunnableCode) {
           await startAgent(jobId, `Pruebas de ejecución ${round}`, progress + 3, 'Especialista de pruebas · Node/Xvfb', 'Estoy ejecutando la entrega en un entorno temporal sin acceso a las claves del enjambre ni a la red externa.');
           const runtime = await runSandboxTests(delivery, objective);
