@@ -84,7 +84,7 @@ function runSandbox(root, mode, paths) {
       return resolve({ status: 'skipped', reason: 'No se detectó una aplicación ejecutable compatible.', exitCode: null, stdout: '', stderr: '' });
     }
     const start = Date.now();
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' }, detached: true });
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'C.UTF-8' }, detached: true });
     let stdout = '', stderr = '', timedOut = false, settled = false;
     const cap = 12000;
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
