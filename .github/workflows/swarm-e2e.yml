@@ -58,7 +58,7 @@ jobs:
 
       - name: Report result back to triggering issue
         if: always() && github.event_name == 'issues'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
