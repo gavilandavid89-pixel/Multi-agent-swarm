@@ -3,10 +3,12 @@ import pg from 'pg';
 
 const { Pool } = pg;
 const connectionString = process.env.SWARM_DATABASE_URL || '';
+// Upgrade PostgreSQL's weaker sslmode=require to hostname/certificate verification where supported.
+const verifiedConnectionString = connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const encryptionKeyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 if (!connectionString) throw new Error('Falta SWARM_DATABASE_URL para la base de cuentas de Swarm.');
 if (!/^[a-f0-9]{64}$/i.test(encryptionKeyHex)) throw new Error('SWARM_API_ENCRYPTION_KEY debe ser una clave hexadecimal de 32 bytes.');
-export const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
+export const pool = new Pool({ connectionString: verifiedConnectionString, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
 const encryptionKey = Buffer.from(encryptionKeyHex, 'hex');
 const digest = value => createHash('sha256').update(String(value)).digest('hex');
 
