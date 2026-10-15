@@ -94,7 +94,7 @@ app.post('/internal/jobs', async (req, res) => {
   if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
-  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
+  const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
   try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
 });
@@ -102,12 +102,12 @@ app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = awai
 app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-  const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const fallback = Number.isFinite(configured) ? Math.min(100000, Math.max(4000, configured)) : 50000;
-  const currentBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || fallback));
+  const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+  const fallback = Number.isFinite(configured) ? Math.min(1000000, Math.max(4000, configured)) : 1000000;
+  const currentBudget = Math.min(1000000, Math.max(4000, Number(record.payload.tokenBudget) || fallback));
   const requested = Number(req.body?.tokenBudget);
   if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
-  const nextBudget = Math.min(100000, Math.max(4000, Math.round(requested / 1000) * 1000));
+  const nextBudget = Math.min(1000000, Math.max(4000, Math.round(requested / 1000) * 1000));
   if (nextBudget <= currentBudget) return res.status(400).json({ error: 'El nuevo límite debe superar el límite actual.' });
   const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
   if (budgetPaused) {
@@ -129,7 +129,7 @@ app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
     const result = await createContinuationJob(req.params.id);
     if (result.error) return res.status(result.status || 400).json({ error: result.error });
     enqueue(result.job.id);
-    console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 100000 }));
+    console.info('[worker][token_batch_continuation]', JSON.stringify({ sourceJobId: req.params.id, continuationJobId: result.job.id, created: result.created, tokenBudget: 1000000 }));
     res.status(202).json(result.job);
   } catch (error) { next(error); }
 });
@@ -149,7 +149,11 @@ app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
-  const job = await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { validation: null, syntax: null, validationRound: 0, result: null, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: null, retryAt: null, providerBlock: null, providerFailureStreak: 0, lastCheckpoint: 'retry-requested' } });
+  const transcript = [...(Array.isArray(record.payload.transcript) ? record.payload.transcript : []), {
+    at: new Date().toISOString(), agent: 'sistema', type: 'retry',
+    content: 'Reintento solicitado: se conserva la entrega y el checkpoint, se reinicia la auditoría pendiente y el presupuesto queda ampliado a 1.000.000 tokens. La recuperación del proveedor se gestiona automáticamente.'
+  }].slice(-150);
+  const job = await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento · presupuesto de 1.000.000', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { tokenBudget: 1000000, transcript, validation: null, syntax: null, validationRound: 0, result: null, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: null, retryAt: null, providerBlock: null, providerFailureStreak: 0, lastCheckpoint: 'retry-requested' } });
   enqueue(req.params.id); res.status(202).json(job); } catch (error) { next(error); }
 });
 app.get('/internal/jobs/:id/files', async (req, res, next) => { try {
@@ -175,9 +179,9 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
 });
 app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-  const rawBudget = Number.parseInt(process.env.MAX_TASK_TOKENS || '50000', 10);
-  const defaultBudget = Number.isFinite(rawBudget) ? Math.min(100000, Math.max(4000, rawBudget)) : 50000;
-  const tokenBudget = Math.min(100000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
+  const rawBudget = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
+  const defaultBudget = Number.isFinite(rawBudget) ? Math.min(1000000, Math.max(4000, rawBudget)) : 1000000;
+  const tokenBudget = Math.min(1000000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
   const tokenUsage = record.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
   const tokensUsed = Math.max(0, Number(tokenUsage.totalTokens) || 0);
   const tokenBatchHistory = Array.isArray(record.payload.tokenBatchHistory) ? record.payload.tokenBatchHistory : [];
