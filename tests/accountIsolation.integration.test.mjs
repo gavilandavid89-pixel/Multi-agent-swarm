@@ -6,7 +6,7 @@ import {
   saveApiKeys, listApiKeys, createSession, findSession, decryptSecret,
   changePassword, verifyPassword, listManagedUsers, setManagedUserDisabled
 } from '../apps/bridge/services/accountStore.js';
-import { withUserProviders, currentUserProviders, closeUserProvidersStore } from '../apps/worker/services/userProviders.js';
+import { withUserProviders, currentUserProviders, closeUserProvidersStore, testUserProvider } from '../apps/worker/services/userProviders.js';
 
 test('isolates account APIs, protects saved keys, and enforces single-use invites', async t => {
   t.after(async () => { await closeUserProvidersStore(); await pool.end(); });
@@ -49,6 +49,24 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   assert.equal(JSON.stringify(apisA).includes('test-key-alpha'), false);
   assert.equal(JSON.stringify(apisB).includes('test-key-beta'), false);
 
+  const actualFetch = globalThis.fetch;
+  let observedProviderRequest;
+  globalThis.fetch = async (url, options) => {
+    observedProviderRequest = { url: String(url), method: options?.method, authorization: options?.headers?.authorization };
+    return { ok: true, status: 200, json: async () => ({ data: [{ id: 'gpt-4o-mini' }] }) };
+  };
+  try {
+    const connection = await testUserProvider(userA.id, 1);
+    assert.equal(connection.ok, true);
+    assert.equal(connection.modelAvailable, true);
+    assert.equal(observedProviderRequest.url, 'https://api.openai.com/v1/models');
+    assert.equal(observedProviderRequest.method, 'GET');
+    assert.equal(observedProviderRequest.authorization, 'Bearer test-key-alpha');
+    assert.equal(JSON.stringify(connection).includes('test-key-alpha'), false, 'the response must never contain the API key');
+  } finally {
+    globalThis.fetch = actualFetch;
+  }
+
   const managedUsers = await listManagedUsers();
   assert.equal(managedUsers.some(user => user.id === userA.id), true);
   assert.equal(managedUsers.some(user => user.id === userB.id), true);
@@ -63,6 +81,14 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   assert.equal(await findSession(userBToken), null, 'disabling a user must revoke existing sessions');
   const disabledProviderContext = await withUserProviders(userB.id, () => currentUserProviders());
   assert.equal(disabledProviderContext.providers.length, 0, 'disabled accounts must not load saved providers');
+  let providerRequestWhileDisabled = false;
+  globalThis.fetch = async () => { providerRequestWhileDisabled = true; return { ok: true, status: 200, json: async () => ({ data: [] }) }; };
+  try {
+    await assert.rejects(testUserProvider(userB.id, 1), /no existe una api guardada/i);
+    assert.equal(providerRequestWhileDisabled, false, 'disabled accounts must not trigger provider connection requests');
+  } finally {
+    globalThis.fetch = actualFetch;
+  }
   assert.equal((await listApiKeys(userB.id)).length, 1, 'disabling must preserve saved API data');
   const reenabledUser = await setManagedUserDisabled(userB.id, false);
   assert.equal(reenabledUser.disabledAt, null);
