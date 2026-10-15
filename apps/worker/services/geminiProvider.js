@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { parseProviderResponseBody, validateGeminiResponse } from './providerResponse.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -118,7 +119,22 @@ export async function consultarGemini({
     }
 
     if (response.ok) {
-      const data = await response.json();
+      let data;
+      let responseBody = '';
+      try {
+        if (typeof response.text === 'function') {
+          responseBody = await response.text();
+          data = parseProviderResponseBody(responseBody);
+        } else data = await response.json();
+        data = validateGeminiResponse(data);
+      } catch (parseError) {
+        retry++;
+        const wait = retryDelay(retry);
+        const reason = parseError?.code === 'PROVIDER_UNSUPPORTED_RESPONSE' ? 'formato de respuesta Gemini no compatible' : 'respuesta Gemini con JSON inválido';
+        console.warn('[worker][gemini_invalid_response]', JSON.stringify({ model, attempt: retry, code: parseError?.code || 'PROVIDER_INVALID_JSON', bodyLength: responseBody.length }));
+        if (failoverOnRetryable || retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
+        await onRetry({ retry, wait, reason }); await sleep(wait); continue;
+      }
       const candidate = data?.candidates?.[0];
       const content = extractText(candidate);
       const usage = data?.usageMetadata || {};
