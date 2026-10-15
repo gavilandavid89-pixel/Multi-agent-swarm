@@ -1,7 +1,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
+import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, registerFromInvite } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
@@ -143,6 +143,19 @@ app.use('/api', async (req, res, next) => {
 });
 app.post('/api/auth/logout', async (req, res) => { try { await revokeSession(req.sessionToken); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo cerrar la sesión.' }); } });
 app.get('/api/account', (req, res) => res.json({ user: req.user }));
+app.patch('/api/account/password', async (req, res) => {
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  if (newPassword.length < 12 || newPassword.length > 512) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener entre 12 y 512 caracteres.' });
+  }
+  try {
+    const token = await changePassword(req.user.id, currentPassword, newPassword, req.sessionToken);
+    res.json({ ok: true, token });
+  } catch (error) {
+    res.status(error.status || 503).json({ error: error.message || 'No se pudo cambiar la contraseña.' });
+  }
+});
 app.get('/api/account/apis', async (req, res) => { try { res.json({ apis: await listApiKeys(req.user.id) }); } catch { res.status(503).json({ error: 'No se pudieron cargar las APIs.' }); } });
 app.put('/api/account/apis', async (req, res) => {
   try {

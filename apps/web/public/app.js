@@ -603,6 +603,41 @@ $('save-api-settings').addEventListener('click', async () => {
   } catch (error) { $('api-settings-status').textContent = error.message; }
   finally { button.disabled = false; }
 });
+$('change-password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const currentPassword = $('current-password').value;
+  const newPassword = $('new-password').value;
+  const confirmPassword = $('confirm-new-password').value;
+  const status = $('password-settings-status');
+  const button = $('change-password-submit');
+  if (newPassword !== confirmPassword) {
+    status.textContent = 'La nueva contraseña y su repetición no coinciden.';
+    $('confirm-new-password').focus();
+    return;
+  }
+  if (newPassword.length < 12 || newPassword.length > 512) {
+    status.textContent = 'La nueva contraseña debe tener entre 12 y 512 caracteres.';
+    return;
+  }
+  button.disabled = true;
+  status.textContent = 'Actualizando contraseña y revocando las demás sesiones…';
+  try {
+    const result = await api('/api/account/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    if (!result.token) throw new Error('El servidor no devolvió una sesión renovada.');
+    state.accessKey = result.token;
+    sessionStorage.setItem('swarm-session-token', result.token);
+    $('change-password-form').reset();
+    status.textContent = 'Contraseña actualizada. Las demás sesiones fueron cerradas y esta sesión sigue activa.';
+  } catch (error) {
+    status.textContent = error.message || 'No se pudo cambiar la contraseña.';
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $('logout-button').addEventListener('click', async () => {
   try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
   state.accessKey = ''; state.user = null; sessionStorage.removeItem('swarm-session-token'); showAccess();

@@ -91,6 +91,54 @@ export async function findSession(token) {
 export async function revokeSession(token) {
   if (token) await pool.query('UPDATE app_sessions SET revoked_at=now() WHERE token_hash=$1 AND revoked_at IS NULL', [digest(token)]);
 }
+
+export async function changePassword(userId, currentPassword, newPassword, currentToken) {
+  if (typeof currentPassword !== 'string' || !currentPassword.length || currentPassword.length > 512) {
+    throw Object.assign(new Error('Ingresá la contraseña actual.'), { status: 400 });
+  }
+  if (typeof newPassword !== 'string' || newPassword.length < 12 || newPassword.length > 512) {
+    throw Object.assign(new Error('La nueva contraseña debe tener entre 12 y 512 caracteres.'), { status: 400 });
+  }
+  if (!currentToken) throw Object.assign(new Error('La sesión venció. Volvé a iniciar sesión.'), { status: 401 });
+
+  const client = await pool.connect();
+  const replacementToken = randomBytes(32).toString('base64url');
+  try {
+    await client.query('BEGIN');
+    const account = await client.query(
+      'SELECT password_hash FROM app_users WHERE id=$1 AND disabled_at IS NULL FOR UPDATE',
+      [userId]
+    );
+    if (!account.rows.length) throw Object.assign(new Error('La cuenta no está disponible.'), { status: 404 });
+    if (!verifyPassword(currentPassword, account.rows[0].password_hash)) {
+      throw Object.assign(new Error('La contraseña actual no es correcta.'), { status: 403 });
+    }
+
+    const session = await client.query(
+      'SELECT id FROM app_sessions WHERE user_id=$1 AND token_hash=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE',
+      [userId, digest(currentToken)]
+    );
+    if (!session.rows.length) throw Object.assign(new Error('La sesión venció. Volvé a iniciar sesión.'), { status: 401 });
+
+    await client.query('UPDATE app_users SET password_hash=$2 WHERE id=$1', [userId, hashPassword(newPassword)]);
+    await client.query(
+      'UPDATE app_sessions SET revoked_at=now() WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL',
+      [userId, session.rows[0].id]
+    );
+    const rotated = await client.query(
+      "UPDATE app_sessions SET token_hash=$2, expires_at=now()+interval '7 days' WHERE id=$1 AND revoked_at IS NULL RETURNING id",
+      [session.rows[0].id, digest(replacementToken)]
+    );
+    if (!rotated.rows.length) throw Object.assign(new Error('La sesión venció. Volvé a iniciar sesión.'), { status: 401 });
+    await client.query('COMMIT');
+    return replacementToken;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 export async function importLegacyApiKeys(userId) {
   const candidates = [];
   if (process.env.GEMINI_API_KEY) candidates.push({ label: 'Gemini', key: process.env.GEMINI_API_KEY, baseUrl: 'https://generativelanguage.googleapis.com', model: process.env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash', coding: process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash', validation: process.env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash' });
