@@ -103,12 +103,14 @@ function sandboxArgs(root, command) {
     '--ro-bind', '/app', '/app',
     '--ro-bind', '/ms-playwright', '/ms-playwright',
     '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chmod', '1777', '/tmp',
-    '--bind', root, '/workspace', '--chdir', '/workspace',
+    '--ro-bind', root, '/input',
+    '--size', '67108864', '--tmpfs', '/workspace', '--chdir', '/workspace',
     '--setenv', 'HOME', '/workspace/.home',
     '--setenv', 'PATH', '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
     '--setenv', 'PLAYWRIGHT_BROWSERS_PATH', '/ms-playwright',
     '--setenv', 'NODE_PATH', '/app/node_modules',
-    '--', '/usr/bin/prlimit', '--cpu=30', '--nproc=128', '--fsize=10485760', '--nofile=256', '--', ...command
+    '--', '/usr/bin/prlimit', '--cpu=30', '--nproc=128', '--fsize=10485760', '--nofile=256', '--',
+    '/usr/local/bin/node', '/app/sandbox-bootstrap.mjs', '/input', '/workspace', '--', ...command
   ];
 }
 async function removeTree(root) {
