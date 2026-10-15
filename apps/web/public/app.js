@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map() };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {} };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -304,6 +304,29 @@ function renderTokenBudget(data) {
   if (unreportedCalls) accountingNotes.push(`${fmt(unreportedCalls)} llamadas sin tokens reportados; no se inventa consumo.`);
   $('token-budget-note').textContent = [baseNote, ...accountingNotes].join(' ');
 }
+function renderAgentMemory(data) {
+  const select = $('agent-memory-select');
+  const individual = $('agent-memory-content');
+  const shared = $('shared-memory-content');
+  if (!select || !individual || !shared) return;
+  state.agentDocuments = data.agentDocuments || {};
+  const docs = Object.values(state.agentDocuments);
+  const previous = select.value;
+  select.replaceChildren();
+  for (const doc of docs) {
+    const option = document.createElement('option');
+    option.value = String(doc.agent || '');
+    option.textContent = String(doc.agent || 'Agente');
+    select.append(option);
+  }
+  const selected = docs.find(doc => doc.agent === previous) || docs[docs.length - 1];
+  if (selected) select.value = selected.agent;
+  individual.textContent = selected?.markdown || 'Todavía no hay checkpoints registrados para agentes. Al completar su primera etapa aparecerá aquí su cuaderno persistente.';
+  shared.textContent = String(data.sharedDocument || 'La memoria compartida se creará con el primer checkpoint.');
+  const updated = data.memoryUpdatedAt ? new Date(data.memoryUpdatedAt).toLocaleString() : 'Todavía sin actualizaciones';
+  $('agent-memory-updated').textContent = 'Última actualización: ' + updated;
+}
+
 function renderImprovementVote(data) {
   const panel = $('improvement-vote-panel');
   if (!panel) return;
@@ -334,6 +357,7 @@ function renderImprovementVote(data) {
   status.textContent = latest.status !== 'completed' ? 'La última votación fue parcial o no obtuvo respuestas válidas; revisá los errores. La misma propuesta no se repetirá automáticamente para evitar consumo duplicado.' : 'Última votación guardada. Podés someter otra propuesta; repetir la misma no consume tokens nuevamente.';
 }
 function updateDetailView(data) {
+  renderAgentMemory(data);
   const job = data.job || {};
   const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
   const batchLabel = data.continuationOf ? ` · Tanda ${batchNumber}` : '';
@@ -888,6 +912,10 @@ $('copy-detail').addEventListener('click', async () => {
     else { const area = document.createElement('textarea'); area.value = content; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select(); const copied = document.execCommand('copy'); area.remove(); if (!copied) throw new Error('El navegador no permitió copiar.'); }
     $('copy-status').textContent = 'Diagnóstico copiado. No incluye claves secretas.'; button.textContent = 'Copiado ✓';
   } catch { $('copy-status').textContent = 'No se pudo copiar automáticamente. Mantené pulsado el texto del diagnóstico para seleccionarlo.'; }
+});
+$('agent-memory-select').addEventListener('change', () => {
+  const selected = Object.values(state.agentDocuments || {}).find(doc => doc.agent === $('agent-memory-select').value);
+  $('agent-memory-content').textContent = selected?.markdown || 'Todavía no hay checkpoints registrados para agentes.';
 });
 $('improvement-vote-form').addEventListener('submit', async event => {
   event.preventDefault();

@@ -2,7 +2,8 @@ export const IMPROVEMENT_VOTES = Object.freeze(['APOYAR', 'RECHAZAR', 'ABSTENERS
 
 export function parseImprovementVote(value) {
   const text = String(value || '');
-  const match = text.match(/\bVOTO\s*[:：-]\s*(APOYAR|RECHAZAR|ABSTENERSE)\b/i);
+  const firstLine = text.replace(/\r/g, '').split('\n').find(line => line.trim())?.trim() || '';
+  const match = firstLine.match(/^VOTO\s*[:：-]\s*(APOYAR|RECHAZAR|ABSTENERSE)\s*$/i);
   const vote = match ? match[1].toUpperCase() : 'ABSTENERSE';
   const rationale = text
     .replace(/\r/g, '')
@@ -16,7 +17,7 @@ export function parseImprovementVote(value) {
 export function summarizeImprovementVotes(votes = []) {
   const tally = { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 };
   for (const item of Array.isArray(votes) ? votes : []) {
-    if (item?.error != null || item?.responseReceived === false) continue;
+    if (item?.error != null || item?.responseReceived !== true) continue;
     const vote = String(item?.vote || '').toUpperCase();
     if (Object.hasOwn(tally, vote)) tally[vote] += 1;
     else tally.ABSTENERSE += 1;

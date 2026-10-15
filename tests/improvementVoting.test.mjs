@@ -59,3 +59,19 @@ test('errores de proveedor se excluyen del recuento y no cuentan como abstencion
   assert.equal(summary.answered, 2);
   assert.equal(summary.total, 4);
 });
+
+test('exige que el voto esté en la primera línea no vacía y no acepta texto ambiguo', () => {
+  assert.equal(parseImprovementVote('VOTO: RECHAZAR\nJUSTIFICACIÓN: No es seguro.').vote, 'RECHAZAR');
+  assert.equal(parseImprovementVote('Mi análisis:\nVOTO: APOYAR\nJUSTIFICACIÓN: Parece útil.').validFormat, false);
+  assert.equal(parseImprovementVote('VOTO: APOYAR porque sí').validFormat, false);
+});
+
+test('no suma entradas sin una respuesta de voto marcada como válida', () => {
+  const summary = summarizeImprovementVotes([
+    { vote: 'APOYAR' },
+    { vote: 'RECHAZAR', responseReceived: true },
+    { vote: 'APOYAR', responseReceived: false }
+  ]);
+  assert.deepEqual(summary.tally, { APOYAR: 0, RECHAZAR: 1, ABSTENERSE: 0 });
+  assert.equal(summary.answered, 1);
+});
