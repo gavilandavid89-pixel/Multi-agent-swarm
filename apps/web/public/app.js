@@ -824,7 +824,7 @@ $('register-form').addEventListener('submit', async event => {
     $('register-password').value = ''; $('access-status').textContent = '';
     await enterApp();
   } catch (error) { $('register-status').textContent = error.message; }
-  finally { button.disabled = false; }
+  finally { button.disabled = $('register-invite').value.trim().length < 20; }
 });
 fetch('/api/auth/bootstrap-status').then(response => response.json()).then(data => {
   if (data.initialized) $('access-status').textContent = 'Entrá con tu usuario y contraseña. El registro está disponible solo con invitación.';
