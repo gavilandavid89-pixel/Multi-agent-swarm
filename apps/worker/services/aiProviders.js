@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
-import { currentUserProviders } from './userProviders.js';
+import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -86,6 +86,7 @@ export async function consultarModelo(options) {
 
 export async function consultarWithProviderContext(options, userContext = null, env = process.env) {
   const { model, maxTokens = 1200 } = options;
+  if (userContext?.userId) await assertUserAccountActive(userContext.userId);
   const providers = userContext
     ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
     : configuredOpenAIProviders(model, maxTokens, env);
