@@ -77,7 +77,9 @@ export async function registerJobOwnership(userId, jobId, createdAt = null) {
   );
   const { rows } = await pool.query('SELECT user_id FROM user_job_ownership WHERE job_id=$1', [id]);
   if (!rows[0] || rows[0].user_id !== owner) {
-    throw new Error('Job ownership conflict detected.');
+    const error = new Error('Job ownership conflict detected.');
+    error.code = 'JOB_OWNERSHIP_CONFLICT';
+    throw error;
   }
   return true;
 }
