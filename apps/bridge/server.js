@@ -30,11 +30,30 @@ app.use(express.static(webDir, { etag: true, maxAge: IS_PROD ? '1h' : 0 }));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'bridge', workerConfigured: Boolean(WORKER_BASE_URL && WORKER_SHARED_SECRET) }));
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
-  if (map.size > 5000) for (const [itemKey, item] of map) if (item.until <= now) map.delete(itemKey);
+  if (!map.has(key) && map.size >= 5000) {
+    for (const [itemKey, item] of map) if (item.until <= now) map.delete(itemKey);
+    // Keep the in-process limiter bounded under high-cardinality IP/user traffic.
+    while (map.size >= 5000) map.delete(map.keys().next().value);
+  }
   let item = map.get(key);
   if (!item || item.until <= now) item = { count: 0, until: now + windowMs };
   item.count += 1; map.set(key, item);
   return { allowed: item.count <= limit, retryAfter: Math.max(1, Math.ceil((item.until - now) / 1000)) };
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Math.min(items.length, Math.max(1, concurrency));
+  await Promise.all(Array.from({ length: workers }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      try { results[index] = await mapper(items[index], index); }
+      catch { results[index] = null; }
+    }
+  }));
+  return results;
 }
 app.get('/api/auth/bootstrap-status', async (_req, res) => {
   try { const { rows } = await pool.query('SELECT EXISTS(SELECT 1 FROM app_users) AS initialized'); res.json({ initialized: rows[0].initialized }); }
@@ -42,9 +61,13 @@ app.get('/api/auth/bootstrap-status', async (_req, res) => {
 });
 app.post('/api/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(failedAuth, ip, 8, 15 * 60 * 1000);
-  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
   const username = String(req.body?.username || '').trim().toLowerCase();
+  const ipLimit = windowLimit(failedAuth, `ip:${ip}`, 8, 15 * 60 * 1000);
+  const usernameLimit = windowLimit(failedAuth, `user:${username}`, 8, 15 * 60 * 1000);
+  if (!ipLimit.allowed || !usernameLimit.allowed) {
+    res.set('Retry-After', String(Math.max(ipLimit.retryAfter, usernameLimit.retryAfter)));
+    return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' });
+  }
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!/^[a-z0-9][a-z0-9_.-]{2,31}$/.test(username) || password.length < 12 || password.length > 512) return res.status(400).json({ error: 'Ingresá usuario y contraseña válidos.' });
   try {
@@ -72,13 +95,13 @@ app.post('/api/auth/login', async (req, res) => {
           const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
           const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
           total = Number(legacy?.total) || jobs.length;
-          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id]);
+          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id, job.createdAt || null]);
           offset += jobs.length;
           if (!jobs.length) break;
         } while (offset < total);
       } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
     }
-    failedAuth.delete(ip);
+    failedAuth.delete(`ip:${ip}`); failedAuth.delete(`user:${username}`);
     const token = await createSession(user.id);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (error) { console.error('[bridge][login_error]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudo iniciar sesión. Revisá la conexión de la base de datos.' }); }
@@ -136,7 +159,8 @@ app.param('id', async (req, res, next, id) => {
 });
 function limitJobCreation(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const limit = windowLimit(jobCreateWindows, ip, 5, 10 * 60 * 1000);
+  const limiterKey = req.user?.id ? `user:${req.user.id}` : `ip:${ip}`;
+  const limit = windowLimit(jobCreateWindows, limiterKey, 5, 10 * 60 * 1000);
   if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Alcanzaste el límite temporal de creación de tareas. Probá más tarde.' }); }
   next();
 }
@@ -188,12 +212,26 @@ app.get('/api/jobs', async (req, res) => {
   const requestedStatus = String(req.query.status || '');
   if (requestedStatus && !['all','queued','running','completed','failed','needs_review'].includes(requestedStatus)) return res.status(400).json({ error: 'Filtro de estado inválido.' });
   try {
-    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
-    const jobs = (await Promise.all(owned.rows.map(async row => {
-      try { return await workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`); } catch { return null; }
-    }))).filter(Boolean).filter(job => !requestedStatus || requestedStatus === 'all' || job.status === requestedStatus);
+    if (!requestedStatus || requestedStatus === 'all') {
+      const [countResult, pageResult] = await Promise.all([
+        pool.query('SELECT count(*)::int AS total FROM user_job_ownership WHERE user_id=$1', [req.user.id]),
+        pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC, job_id DESC LIMIT $2 OFFSET $3', [req.user.id, limit, offset])
+      ]);
+      const jobs = (await mapWithConcurrency(pageResult.rows, 8, row =>
+        workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`)
+      )).filter(Boolean);
+      jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const total = countResult.rows[0]?.total || 0;
+      return res.json({ jobs, total, limit, offset, hasMore: offset + limit < total, status: 'all' });
+    }
+    // Status filtering still needs worker status, but concurrent requests are bounded to avoid
+    // flooding the worker when an account has a long history.
+    const owned = await pool.query('SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC, job_id DESC', [req.user.id]);
+    const jobs = (await mapWithConcurrency(owned.rows, 8, row =>
+      workerRequest(`/internal/jobs/${encodeURIComponent(row.job_id)}`)
+    )).filter(Boolean).filter(job => job.status === requestedStatus);
     jobs.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus || 'all' });
+    res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
@@ -202,7 +240,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(100000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id]); res.status(202).json(result); }
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
@@ -217,7 +255,7 @@ app.post('/api/jobs/:id/continue-budget', async (req, res) => {
   try {
     const result = await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}/continue-budget`, { method: 'POST', body: '{}' });
     const childId = String(result?.job?.id || result?.id || '');
-    if (childId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id) VALUES($1,$2) ON CONFLICT(job_id) DO NOTHING', [childId, req.user.id]);
+    if (childId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [childId, req.user.id, result?.createdAt || result?.job?.createdAt || null]);
     res.status(202).json(result);
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });

@@ -3,10 +3,12 @@ import pg from 'pg';
 
 const { Pool } = pg;
 const connectionString = process.env.SWARM_DATABASE_URL || '';
+// Upgrade PostgreSQL's weaker sslmode=require to hostname/certificate verification where supported.
+const verifiedConnectionString = connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const encryptionKeyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 if (!connectionString) throw new Error('Falta SWARM_DATABASE_URL para la base de cuentas de Swarm.');
 if (!/^[a-f0-9]{64}$/i.test(encryptionKeyHex)) throw new Error('SWARM_API_ENCRYPTION_KEY debe ser una clave hexadecimal de 32 bytes.');
-export const pool = new Pool({ connectionString, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: false } });
+export const pool = new Pool({ connectionString: verifiedConnectionString, max: 5, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
 const encryptionKey = Buffer.from(encryptionKeyHex, 'hex');
 const digest = value => createHash('sha256').update(String(value)).digest('hex');
 
@@ -131,7 +133,7 @@ export async function saveApiKeys(userId, entries) {
   };
   try {
     await client.query('BEGIN');
-    const existing = await client.query('SELECT slot,base_url,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
+    const existing = await client.query('SELECT slot,label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1', [userId]);
     const bySlot = new Map(existing.rows.map(row => [Number(row.slot), row]));
     const seen = new Set();
     for (const item of entries) {
@@ -157,17 +159,27 @@ export async function saveApiKeys(userId, entries) {
       let parsedUrl;
       try { parsedUrl = new URL(baseUrl); } catch { throw new Error(`La URL del proveedor de la API ${slot} no es válida.`); }
       const hostname = parsedUrl.hostname.toLowerCase();
-      if (parsedUrl.protocol !== 'https:' || !allowedHosts.has(hostname) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
+      const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
+      // Legacy endpoints came from the administrator's trusted server environment.
+      // They remain editable in-place, but users cannot introduce new arbitrary hosts.
+      const legacyExistingHost = Boolean(previous && previousHost === hostname && !allowedHosts.has(hostname));
+      if (parsedUrl.protocol !== 'https:' || (!allowedHosts.has(hostname) && !legacyExistingHost) || parsedUrl.username || parsedUrl.password || parsedUrl.hash || parsedUrl.search) {
         throw new Error(`El proveedor de la API ${slot} no está permitido por la política de seguridad.`);
       }
-      const canonicalBaseUrl = hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
+      const canonicalBaseUrl = legacyExistingHost ? String(previous.base_url)
+        : hostname === 'openrouter.ai' ? 'https://openrouter.ai/api/v1'
         : hostname === 'generativelanguage.googleapis.com' ? 'https://generativelanguage.googleapis.com'
         : `https://${hostname}${parsedUrl.pathname.replace(/\/+$/, '')}`;
-      const previousHost = (() => { try { return new URL(String(previous?.base_url || '')).hostname.toLowerCase(); } catch { return ''; } })();
       if (!apiKey && previous && previousHost !== hostname) {
         throw new Error(`Para cambiar el proveedor de la API ${slot}, pegá también la nueva clave. La clave anterior se conserva únicamente para su proveedor original.`);
       }
-      const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname];
+      const legacyDefaultModel = String(previous?.model_reasoning || legacyModel || 'modelo').trim();
+      const [defaultLabel, defaultReasoning, defaultCoding, defaultValidation] = defaults[hostname] || [
+        previous?.label || `Proveedor heredado · ${hostname}`,
+        legacyDefaultModel,
+        previous?.model_coding || legacyDefaultModel,
+        previous?.model_validation || legacyDefaultModel
+      ];
       const label = String(item.label || defaultLabel).trim().slice(0,80) || defaultLabel;
       modelReasoning = modelReasoning || defaultReasoning;
       modelCoding = modelCoding || defaultCoding;

@@ -5,10 +5,12 @@ import pg from 'pg';
 const { Pool } = pg;
 const context = new AsyncLocalStorage();
 const connectionString = process.env.SWARM_DATABASE_URL || '';
+// Upgrade PostgreSQL's weaker sslmode=require to hostname/certificate verification where supported.
+const verifiedConnectionString = connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const keyHex = process.env.SWARM_API_ENCRYPTION_KEY || '';
 let pool;
 if (connectionString && /^[a-f0-9]{64}$/i.test(keyHex)) {
-  pool = new Pool({ connectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: false } });
+  pool = new Pool({ connectionString: verifiedConnectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: { rejectUnauthorized: true } });
 }
 const key = /^[a-f0-9]{64}$/i.test(keyHex) ? Buffer.from(keyHex, 'hex') : null;
 function decrypt(value) {
@@ -60,11 +62,34 @@ export async function importLegacyProvidersForUser(userId) {
 }
 
 export function currentUserProviders() { return context.getStore() || null; }
+
+/** Ensure a job (including automatic continuation batches) stays owned by its originating account. */
+export async function registerJobOwnership(userId, jobId, createdAt = null) {
+  if (!userId || !pool) return false;
+  const owner = String(userId);
+  const id = String(jobId || '');
+  if (!/^[0-9a-f-]{36}$/i.test(owner) || !id || id.length > 128) {
+    throw new Error('Invalid job ownership reference.');
+  }
+  await pool.query(
+    'INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING',
+    [id, owner, createdAt && Number.isFinite(Date.parse(createdAt)) ? new Date(createdAt).toISOString() : null]
+  );
+  const { rows } = await pool.query('SELECT user_id FROM user_job_ownership WHERE job_id=$1', [id]);
+  if (!rows[0] || rows[0].user_id !== owner) {
+    const error = new Error('Job ownership conflict detected.');
+    error.code = 'JOB_OWNERSHIP_CONFLICT';
+    throw error;
+  }
+  return true;
+}
+
 export async function withUserProviders(userId, operation) {
   if (!userId) return context.run(null, operation);
   if (!pool) throw new Error('User API database is not configured.');
   const { rows } = await pool.query('SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
   const providers = [];
+  const geminiProviders = [];
   let gemini = null;
   for (const row of rows) {
     let apiKey;
@@ -80,8 +105,10 @@ export async function withUserProviders(userId, operation) {
       }
     };
     if (/generativelanguage\.googleapis\.com/i.test(provider.baseUrl)) {
-      if (!gemini) gemini = { apiKey, models: provider.models, name: provider.name };
+      const geminiProvider = { apiKey, models: provider.models, name: provider.name, baseUrl: provider.baseUrl };
+      geminiProviders.push(geminiProvider);
+      if (!gemini) gemini = geminiProvider;
     } else if (/^https:\/\//i.test(provider.baseUrl)) providers.push(provider);
   }
-  return context.run({ userId, providers, gemini }, operation);
+  return context.run({ userId, providers, gemini, geminiProviders }, operation);
 }

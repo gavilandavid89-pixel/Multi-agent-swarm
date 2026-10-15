@@ -81,20 +81,44 @@ export function configuredOpenAIProviders(requestedModel, maxTokens, env = proce
  * AI_FALLBACK_PROVIDERS contains endpoint/key-env/model metadata only, never API secrets.
  */
 export async function consultarModelo(options) {
-  const { model, maxTokens = 1200, messages } = options;
-  const userContext = currentUserProviders();
+  return consultarWithProviderContext(options, currentUserProviders(), process.env);
+}
+
+export async function consultarWithProviderContext(options, userContext = null, env = process.env) {
+  const { model, maxTokens = 1200 } = options;
   const providers = userContext
     ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
-    : configuredOpenAIProviders(model, maxTokens, process.env);
-  const gemini = userContext ? userContext.gemini : (process.env.GEMINI_API_KEY ? { apiKey: process.env.GEMINI_API_KEY } : null);
-  if (gemini?.apiKey) {
+    : configuredOpenAIProviders(model, maxTokens, env);
+  const geminiProviders = userContext
+    ? (Array.isArray(userContext.geminiProviders) ? userContext.geminiProviders : (userContext.gemini ? [userContext.gemini] : []))
+    : (env.GEMINI_API_KEY ? [{
+        name: 'Gemini',
+        apiKey: env.GEMINI_API_KEY,
+        models: {
+          reasoning: env.GEMINI_MODEL_REASONING || 'gemini-3.8-flash',
+          coding: env.GEMINI_MODEL_CODING || 'gemini-3.8-flash',
+          validation: env.GEMINI_MODEL_VALIDATION || 'gemini-3.8-flash'
+        }
+      }] : []);
+  for (let index = 0; index < geminiProviders.length; index++) {
+    const gemini = geminiProviders[index];
+    const hasNext = index < geminiProviders.length - 1 || providers.length > 0;
     try {
-      return await consultarGemini({ ...options, ...(gemini.models?.reasoning ? { model: providerModelForSlot(gemini, model, maxTokens) } : {}), apiKey: gemini.apiKey, failoverOnRetryable: providers.length > 0 });
+      return await consultarGemini({
+        ...options,
+        model: providerModelForSlot(gemini, model, maxTokens),
+        apiKey: gemini.apiKey,
+        failoverOnRetryable: hasNext
+      });
     } catch (error) {
-      if (!isFailoverEligible(error) || !providers.length) throw error;
+      if (!isFailoverEligible(error) || !hasNext) throw error;
+      const nextGemini = geminiProviders[index + 1];
+      const next = nextGemini
+        ? { name: nextGemini.name || 'Gemini', model: providerModelForSlot(nextGemini, model, maxTokens) }
+        : providers[0];
       console.warn('[worker][provider_failover]', JSON.stringify({
-        from: gemini.name || 'Gemini', to: providers[0].name, reason: error.code || 'provider unavailable',
-        model: providers[0].model
+        from: gemini.name || 'Gemini', to: next.name,
+        reason: error.code || 'provider unavailable', model: next.model
       }));
     }
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { configuredOpenAIProviders } from '../apps/worker/services/aiProviders.js';
+import { configuredOpenAIProviders, consultarWithProviderContext } from '../apps/worker/services/aiProviders.js';
 
 test('uses Groq first and then configured OpenAI-compatible APIs in order', () => {
   const env = {
@@ -48,4 +48,46 @@ test('ignores malformed provider configuration without exposing API keys', () =>
   const providers = configuredOpenAIProviders('gemini-flash', 1200, env);
   assert.deepEqual(providers, []);
   assert.equal(JSON.stringify(providers).includes('secret-must-not-appear'), false);
+});
+
+
+test('falls through every configured Gemini key in order before giving up', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    const target = String(url);
+    calls.push(target);
+    if (target.includes('key=gemini-key-1')) {
+      return new Response(JSON.stringify({ error: { message: 'quota exceeded' } }), {
+        status: 429, headers: { 'content-type': 'application/json', 'retry-after': '0' }
+      });
+    }
+    if (target.includes('key=gemini-key-2')) {
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'respuesta de la segunda clave' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 5, totalTokenCount: 8 }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error('Unexpected provider endpoint in test.');
+  };
+  try {
+    const geminiModels = { reasoning: 'gemini-3.8-flash', coding: 'gemini-3.8-flash', validation: 'gemini-3.8-flash' };
+    const result = await consultarWithProviderContext({
+      model: 'gemini-3.8-flash', maxTokens: 1200,
+      messages: [{ role: 'user', content: 'test failover' }]
+    }, {
+      providers: [],
+      gemini: { name: 'Gemini A', apiKey: 'gemini-key-1', models: geminiModels },
+      geminiProviders: [
+        { name: 'Gemini A', apiKey: 'gemini-key-1', models: geminiModels },
+        { name: 'Gemini B', apiKey: 'gemini-key-2', models: geminiModels }
+      ]
+    }, {});
+    assert.equal(result, 'respuesta de la segunda clave');
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /key=gemini-key-1/);
+    assert.match(calls[1], /key=gemini-key-2/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

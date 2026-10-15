@@ -32,10 +32,11 @@ jobs:
 
       - name: Verify required configuration
         env:
+          SWARM_ADMIN_PASSWORD: ${{ secrets.SWARM_ADMIN_PASSWORD }}
           SWARM_APP_ACCESS_KEY: ${{ secrets.SWARM_APP_ACCESS_KEY }}
         run: |
-          if [ -z "$SWARM_APP_ACCESS_KEY" ]; then
-            echo "::error::Falta el secreto SWARM_APP_ACCESS_KEY en Settings > Secrets and variables > Actions."
+          if [ -z "$SWARM_ADMIN_PASSWORD" ] && [ -z "$SWARM_APP_ACCESS_KEY" ]; then
+            echo "::error::Configura SWARM_ADMIN_PASSWORD (preferido) o SWARM_APP_ACCESS_KEY como contraseña actual del administrador en Settings > Secrets and variables > Actions."
             exit 1
           fi
 

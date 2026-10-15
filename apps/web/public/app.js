@@ -465,14 +465,16 @@ const API_PROVIDERS = [
 ];
 function providerForUrl(url) {
   const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  return API_PROVIDERS.find(provider => { try { return new URL(provider.baseUrl).hostname.toLowerCase() === host; } catch { return false; } }) || API_PROVIDERS[0];
+  return API_PROVIDERS.find(provider => { try { return new URL(provider.baseUrl).hostname.toLowerCase() === host; } catch { return false; } }) || null;
 }
 function apiFieldRow(api = {}) {
   const row = document.createElement('div');
   row.className = 'api-field-row';
   row.dataset.slot = String(api.slot || state.apiFields.length + 1);
   row.dataset.saved = api.saved ? 'true' : 'false';
-  const initialProvider = providerForUrl(api.base_url || '');
+  const matchedProvider = providerForUrl(api.base_url || '');
+  const initialProvider = matchedProvider || API_PROVIDERS[0];
+  const legacyProvider = Boolean(api.saved && api.base_url && !matchedProvider);
   const initialModels = {
     reasoning: api.model_reasoning || initialProvider.reasoning,
     coding: api.model_coding || initialProvider.coding,
@@ -483,7 +485,15 @@ function apiFieldRow(api = {}) {
   const provider = document.createElement('select'); provider.className = 'api-provider-select';
   provider.setAttribute('aria-label', `Proveedor API ${row.dataset.slot}`);
   API_PROVIDERS.forEach(item => { const option = document.createElement('option'); option.value = item.baseUrl; option.textContent = item.label; provider.append(option); });
-  provider.value = initialProvider.baseUrl;
+  if (legacyProvider) {
+    const legacyOption = document.createElement('option');
+    legacyOption.value = api.base_url;
+    let legacyHost = 'proveedor heredado';
+    try { legacyHost = new URL(api.base_url).hostname; } catch {}
+    legacyOption.textContent = `${api.label || 'Proveedor heredado'} · ${legacyHost} (legado)`;
+    provider.append(legacyOption);
+  }
+  provider.value = legacyProvider ? api.base_url : initialProvider.baseUrl;
   const keyLabel = document.createElement('label'); keyLabel.textContent = 'Clave API privada';
   const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
   input.placeholder = api.saved ? 'Clave guardada (oculta; dejá vacío para conservarla)' : 'Pegá tu clave del proveedor elegido';
@@ -515,8 +525,8 @@ function apiFieldRow(api = {}) {
       ? 'La clave guardada se conserva. Para cambiar de proveedor, pegá una clave nueva del proveedor elegido.'
       : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
   });
-  row.dataset.baseUrl = initialProvider.baseUrl;
-  row.dataset.label = initialProvider.label;
+  row.dataset.baseUrl = legacyProvider ? api.base_url : initialProvider.baseUrl;
+  row.dataset.label = legacyProvider ? (api.label || 'Proveedor heredado') : initialProvider.label;
   providerLabel.append(provider); keyLabel.append(input);
   main.append(providerLabel, keyLabel, modelLabels.reasoning, modelLabels.coding, modelLabels.validation, meta);
   const actions = document.createElement('div');
