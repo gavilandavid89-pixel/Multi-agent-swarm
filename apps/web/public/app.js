@@ -304,7 +304,28 @@ function renderTokenBudget(data) {
   if (unreportedCalls) accountingNotes.push(`${fmt(unreportedCalls)} llamadas sin tokens reportados; no se inventa consumo.`);
   $('token-budget-note').textContent = [baseNote, ...accountingNotes].join(' ');
 }
-function renderImprovementVote(data) {
+function renderAgentMemory(data) {
+  const select = $('agent-memory-select');
+  const individual = $('agent-memory-content');
+  const shared = $('shared-memory-content');
+  if (!select || !individual || !shared) return;
+  const docs = Object.values(data.agentDocuments || {});
+  const previous = select.value;
+  select.replaceChildren();
+  for (const doc of docs) {
+    const option = document.createElement('option');
+    option.value = String(doc.agent || '');
+    option.textContent = String(doc.agent || 'Agente');
+    select.append(option);
+  }
+  const selected = docs.find(doc => doc.agent === previous) || docs[docs.length - 1];
+  if (selected) select.value = selected.agent;
+  individual.textContent = selected?.markdown || 'Todavía no hay checkpoints registrados para agentes. Al completar su primera etapa aparecerá aquí su cuaderno persistente.';
+  shared.textContent = String(data.sharedDocument || 'La memoria compartida se creará con el primer checkpoint.');
+  const updated = data.memoryUpdatedAt ? new Date(data.memoryUpdatedAt).toLocaleString() : 'Todavía sin actualizaciones';
+  $('agent-memory-updated').textContent = 'Última actualización: ' + updated;
+}
+\nfunction renderImprovementVote(data) {
   const panel = $('improvement-vote-panel');
   if (!panel) return;
   const job = data.job || {};
@@ -333,7 +354,7 @@ function renderImprovementVote(data) {
   result.innerHTML = `<div class="vote-result-head"><div><p class="panel-kicker">RESULTADO ${escapeHtml(latest.status !== 'completed' ? 'INCOMPLETO' : 'REGISTRADO')}</p><h4>${escapeHtml(title)}</h4></div><span class="vote-outcome ${badgeClass}">${escapeHtml(latest.answered ?? 0)}/${escapeHtml(latest.total ?? ballots.length)} votos válidos</span></div><p class="vote-proposal">${escapeHtml(latest.proposal || '')}</p><p class="vote-summary">${escapeHtml(latest.summary || 'Sin resumen disponible.')}</p><div class="vote-tally"><span>A favor <strong>${Number(tally.APOYAR) || 0}</strong></span><span>En contra <strong>${Number(tally.RECHAZAR) || 0}</strong></span><span>Abstenciones <strong>${Number(tally.ABSTENERSE) || 0}</strong></span></div><div class="vote-ballots">${ballots.map(ballot => { const kind = ballot.vote === 'APOYAR' ? 'vote-support' : ballot.vote === 'RECHAZAR' ? 'vote-oppose' : 'vote-neutral'; return `<article class="vote-ballot"><div class="vote-ballot-head"><strong>${escapeHtml(ballot.agent || 'Agente')}</strong><span class="vote-choice ${kind}">${escapeHtml(ballot.vote || 'ABSTENERSE')}</span></div><p>${escapeHtml(ballot.rationale || 'Sin justificación.')}</p>${ballot.error ? `<p class="vote-error">No respondió el proveedor: ${escapeHtml(ballot.error)}</p>` : ''}</article>`; }).join('')}</div><p class="muted tiny">La votación es orientativa: no aplica ni confirma cambios. Tokens registrados en la etapa “Votación de mejora”.</p>`;
   status.textContent = latest.status !== 'completed' ? 'La última votación fue parcial o no obtuvo respuestas válidas; revisá los errores. La misma propuesta no se repetirá automáticamente para evitar consumo duplicado.' : 'Última votación guardada. Podés someter otra propuesta; repetir la misma no consume tokens nuevamente.';
 }
-function updateDetailView(data) {
+function updateDetailView(data) {\n  renderAgentMemory(data);
   const job = data.job || {};
   const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
   const batchLabel = data.continuationOf ? ` · Tanda ${batchNumber}` : '';
