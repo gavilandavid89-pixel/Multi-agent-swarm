@@ -163,7 +163,7 @@ export async function testUserProvider(userId, slot) {
   let apiKey;
   try { apiKey = decrypt(row.encrypted_api_key); }
   catch { throw Object.assign(new Error('No se pudo descifrar la clave guardada.'), { status: 503 }); }
-  const baseUrl = String(row.base_url || '').replace(/\\/+$/, '');
+  const baseUrl = String(row.base_url || '').replace(/\/+$/, '');
   const model = String(row.model_coding || row.model_reasoning || row.model_validation || '').trim();
   if (!model) throw Object.assign(new Error('Configurá un modelo antes de probar la API.'), { status: 400 });
   let parsedBase;
