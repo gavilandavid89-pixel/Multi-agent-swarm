@@ -89,7 +89,11 @@ export function decryptSecret(value) {
   decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
   return Buffer.concat([decipher.update(Buffer.from(encryptedHex, 'hex')), decipher.final()]).toString('utf8');
 }
-function randomDigits(length) { return String(randomInt(0, 10 ** length)).padStart(length, '0'); }
+function randomDigits(length) {
+  let value = '';
+  while (value.length < length) value += String(randomInt(0, 100000)).padStart(5, '0');
+  return value.slice(0, length);
+}
 async function uniqueAccountCode(client) {
   for (let attempt = 0; attempt < 30; attempt++) {
     const code = randomDigits(6);

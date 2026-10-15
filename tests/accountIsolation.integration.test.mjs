@@ -40,8 +40,8 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   assert.equal(raceResults.filter(result => result.status === 'rejected').length, 1);
 
   const accountKey = await ensureAccountKey(userA.id);
-  assert.match(accountKey.accountCode, /^\\d{6}$/);
-  assert.match(accountKey.accessKey, /^\\d{15}$/);
+  assert.match(accountKey.accountCode, /^\d{6}$/);
+  assert.match(accountKey.accessKey, /^\d{15}$/);
   assert.deepEqual(await loginWithAccountKey(accountKey.accountCode, accountKey.accessKey), { id: userA.id, username: userA.username, role: 'user' });
   assert.equal(await loginWithAccountKey(accountKey.accountCode, '000000000000000'), null);
   assert.deepEqual(await ensureAccountKey(userA.id), accountKey, 'account key remains stable and recoverable for the account owner');

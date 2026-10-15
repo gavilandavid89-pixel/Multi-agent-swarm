@@ -139,9 +139,10 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/key-login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const accountCode = typeof req.body?.accountCode === 'string' ? req.body.accountCode.trim() : '';
+  const ipLimit = windowLimit(failedAuth, `key-login-ip:${ip}`, 20, 15 * 60 * 1000);
   const limitKey = `key-login:${ip}:${accountCode}`;
-  const limit = windowLimit(failedAuth, limitKey, 8, 15 * 60 * 1000);
-  if (!limit.allowed) { res.set('Retry-After', String(limit.retryAfter)); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
+  const accountLimit = windowLimit(failedAuth, limitKey, 8, 15 * 60 * 1000);
+  if (!ipLimit.allowed || !accountLimit.allowed) { res.set('Retry-After', String(Math.max(ipLimit.retryAfter, accountLimit.retryAfter))); return res.status(429).json({ error: 'Demasiados intentos. Probá más tarde.' }); }
   const accessKey = typeof req.body?.accessKey === 'string' ? req.body.accessKey : '';
   try {
     const user = await loginWithAccountKey(accountCode, accessKey);
