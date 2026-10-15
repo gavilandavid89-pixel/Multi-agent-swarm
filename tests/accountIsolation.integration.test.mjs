@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   pool, initAccountStore, hashPassword, createInvite, registerFromInvite,
-  saveApiKeys, listApiKeys, createSession, findSession, revokeSession, decryptSecret
+  saveApiKeys, listApiKeys, createSession, findSession, revokeSession, decryptSecret,
+  changePassword, verifyPassword
 } from '../apps/bridge/services/accountStore.js';
 
 test('isolates account APIs, protects saved keys, and enforces single-use invites', async t => {
@@ -53,7 +54,21 @@ test('isolates account APIs, protects saved keys, and enforces single-use invite
   assert.equal(decryptSecret(encrypted.rows[0].encrypted_api_key), 'test-key-alpha');
 
   const token = await createSession(userA.id);
+  const otherToken = await createSession(userA.id);
   assert.equal((await findSession(token)).id, userA.id);
-  await revokeSession(token);
-  assert.equal(await findSession(token), null);
+  await assert.rejects(
+    changePassword(userA.id, 'incorrect-password', 'new-integration-password-a', token),
+    /contraseña actual/i
+  );
+  assert.equal((await findSession(token)).id, userA.id, 'a failed password change must not revoke the current session');
+
+  const rotatedToken = await changePassword(
+    userA.id, 'integration-password-a', 'new-integration-password-a', token
+  );
+  assert.equal(await findSession(token), null, 'the previous session token must stop working');
+  assert.equal(await findSession(otherToken), null, 'other sessions must be revoked after a password change');
+  assert.equal((await findSession(rotatedToken)).id, userA.id, 'the returned token must remain active');
+  const newPasswordHash = await pool.query('SELECT password_hash FROM app_users WHERE id=$1', [userA.id]);
+  assert.equal(verifyPassword('new-integration-password-a', newPasswordHash.rows[0].password_hash), true);
+  assert.equal(verifyPassword('integration-password-a', newPasswordHash.rows[0].password_hash), false);
 });
