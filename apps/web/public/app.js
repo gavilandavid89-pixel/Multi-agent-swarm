@@ -451,6 +451,7 @@ $('access-form').addEventListener('submit', async event => {
 });
 
 // Account menu and compact, dynamically-added API fields.
+const CUSTOM_PROVIDER_VALUE = '__custom_openai_compatible__';
 const API_PROVIDERS = [
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', reasoning: 'gpt-4o-mini', coding: 'gpt-4o-mini', validation: 'gpt-4o-mini' },
   { label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com', reasoning: 'gemini-3.8-flash', coding: 'gemini-3.8-flash', validation: 'gemini-3.8-flash' },
@@ -473,29 +474,38 @@ function apiFieldRow(api = {}) {
   row.dataset.slot = String(api.slot || state.apiFields.length + 1);
   row.dataset.saved = api.saved ? 'true' : 'false';
   const matchedProvider = providerForUrl(api.base_url || '');
+  const customProvider = Boolean(api.base_url && !matchedProvider);
   const initialProvider = matchedProvider || API_PROVIDERS[0];
-  const legacyProvider = Boolean(api.saved && api.base_url && !matchedProvider);
   const initialModels = {
-    reasoning: api.model_reasoning || initialProvider.reasoning,
-    coding: api.model_coding || initialProvider.coding,
-    validation: api.model_validation || initialProvider.validation
+    reasoning: api.model_reasoning || (customProvider ? '' : initialProvider.reasoning),
+    coding: api.model_coding || (customProvider ? '' : initialProvider.coding),
+    validation: api.model_validation || (customProvider ? '' : initialProvider.validation)
   };
   const main = document.createElement('div'); main.className = 'api-field-main';
   const providerLabel = document.createElement('label'); providerLabel.textContent = `API ${row.dataset.slot} · Proveedor`;
   const provider = document.createElement('select'); provider.className = 'api-provider-select';
   provider.setAttribute('aria-label', `Proveedor API ${row.dataset.slot}`);
   API_PROVIDERS.forEach(item => { const option = document.createElement('option'); option.value = item.baseUrl; option.textContent = item.label; provider.append(option); });
-  if (legacyProvider) {
-    const legacyOption = document.createElement('option');
-    legacyOption.value = api.base_url;
-    let legacyHost = 'proveedor heredado';
-    try { legacyHost = new URL(api.base_url).hostname; } catch {}
-    legacyOption.textContent = `${api.label || 'Proveedor heredado'} · ${legacyHost} (legado)`;
-    provider.append(legacyOption);
-  }
-  provider.value = legacyProvider ? api.base_url : initialProvider.baseUrl;
+  const customOption = document.createElement('option');
+  customOption.value = CUSTOM_PROVIDER_VALUE;
+  customOption.textContent = 'Otra API compatible con OpenAI';
+  provider.append(customOption);
+  provider.value = customProvider ? CUSTOM_PROVIDER_VALUE : initialProvider.baseUrl;
+
+  const customUrlLabel = document.createElement('label');
+  customUrlLabel.textContent = 'URL base de la API personalizada (HTTPS público)';
+  const customUrlInput = document.createElement('input');
+  customUrlInput.type = 'url'; customUrlInput.autocomplete = 'off'; customUrlInput.spellcheck = false;
+  customUrlInput.className = 'api-custom-url-input';
+  customUrlInput.value = customProvider ? api.base_url : '';
+  customUrlInput.placeholder = 'https://api.tu-proveedor.com/v1';
+  customUrlInput.setAttribute('aria-label', `URL base API personalizada ${row.dataset.slot}`);
+  customUrlLabel.append(customUrlInput);
+  customUrlLabel.classList.toggle('hidden', !customProvider);
+
   const keyLabel = document.createElement('label'); keyLabel.textContent = 'Clave API privada';
   const input = document.createElement('input'); input.type = 'password'; input.autocomplete = 'off'; input.spellcheck = false;
+  input.className = 'api-key-input';
   input.placeholder = api.saved ? 'Clave guardada (oculta; dejá vacío para conservarla)' : 'Pegá tu clave del proveedor elegido';
   input.setAttribute('aria-label', `Clave API ${row.dataset.slot}`);
   const modelInputs = {};
@@ -505,30 +515,50 @@ function apiFieldRow(api = {}) {
     modelLabels[role].textContent = ({ reasoning: 'Modelo de razonamiento', coding: 'Modelo de desarrollo', validation: 'Modelo de validación' })[role];
     modelInputs[role] = document.createElement('input');
     modelInputs[role].type = 'text'; modelInputs[role].autocomplete = 'off'; modelInputs[role].spellcheck = false;
+    modelInputs[role].className = 'api-model-input';
+    modelInputs[role].dataset.modelRole = role;
     modelInputs[role].value = initialModels[role];
-    modelInputs[role].placeholder = initialProvider[role];
+    modelInputs[role].placeholder = customProvider ? 'ID de modelo compatible con OpenAI' : initialProvider[role];
     modelInputs[role].setAttribute('aria-label', `Modelo ${role} API ${row.dataset.slot}`);
     modelLabels[role].append(modelInputs[role]);
   }
   const meta = document.createElement('div'); meta.className = 'api-field-meta';
-  meta.textContent = api.saved ? 'Clave cifrada guardada. Los modelos se pueden cambiar sin volver a pegar la clave.' : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
+  meta.textContent = customProvider
+    ? 'La API personalizada debe ser compatible con OpenAI Chat Completions y usar HTTPS público. No se admiten direcciones privadas.'
+    : api.saved ? 'Clave cifrada guardada. Los modelos se pueden cambiar sin volver a pegar la clave.' : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
   provider.addEventListener('change', () => {
-    const next = API_PROVIDERS.find(item => item.baseUrl === provider.value) || API_PROVIDERS[0];
+    const isCustom = provider.value === CUSTOM_PROVIDER_VALUE;
+    const next = API_PROVIDERS.find(item => item.baseUrl === provider.value) || null;
     const previous = API_PROVIDERS.find(item => item.baseUrl === row.dataset.baseUrl) || initialProvider;
-    for (const role of ['reasoning','coding','validation']) {
-      if (!modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = next[role];
-      modelInputs[role].placeholder = next[role];
+    if (isCustom) {
+      for (const role of ['reasoning','coding','validation']) {
+        if (!modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = '';
+        modelInputs[role].placeholder = 'ID de modelo compatible con OpenAI';
+      }
+      customUrlLabel.classList.remove('hidden');
+      row.dataset.baseUrl = customUrlInput.value.trim();
+      row.dataset.label = api.label || 'API personalizada';
+      meta.textContent = 'La API personalizada debe ser compatible con OpenAI Chat Completions y usar HTTPS público. No se admiten direcciones privadas.';
+    } else {
+      for (const role of ['reasoning','coding','validation']) {
+        if (!modelInputs[role].value.trim() || modelInputs[role].value.trim() === previous[role]) modelInputs[role].value = next[role];
+        modelInputs[role].placeholder = next[role];
+      }
+      customUrlLabel.classList.add('hidden');
+      row.dataset.baseUrl = next.baseUrl;
+      row.dataset.label = next.label;
+      meta.textContent = api.saved && !input.value.trim()
+        ? 'La clave guardada se conserva. Para cambiar de proveedor, pegá una clave nueva del proveedor elegido.'
+        : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
     }
-    row.dataset.baseUrl = next.baseUrl;
-    row.dataset.label = next.label;
-    meta.textContent = api.saved && !input.value.trim()
-      ? 'La clave guardada se conserva. Para cambiar de proveedor, pegá una clave nueva del proveedor elegido.'
-      : 'La clave la proporcionás vos; se cifra en el servidor y nunca se devuelve al navegador.';
   });
-  row.dataset.baseUrl = legacyProvider ? api.base_url : initialProvider.baseUrl;
-  row.dataset.label = legacyProvider ? (api.label || 'Proveedor heredado') : initialProvider.label;
+  customUrlInput.addEventListener('input', () => {
+    if (provider.value === CUSTOM_PROVIDER_VALUE) row.dataset.baseUrl = customUrlInput.value.trim();
+  });
+  row.dataset.baseUrl = customProvider ? api.base_url : initialProvider.baseUrl;
+  row.dataset.label = customProvider ? (api.label || 'API personalizada') : initialProvider.label;
   providerLabel.append(provider); keyLabel.append(input);
-  main.append(providerLabel, keyLabel, modelLabels.reasoning, modelLabels.coding, modelLabels.validation, meta);
+  main.append(providerLabel, customUrlLabel, keyLabel, modelLabels.reasoning, modelLabels.coding, modelLabels.validation, meta);
   const actions = document.createElement('div');
   if (api.saved) {
     const test = document.createElement('button'); test.type = 'button'; test.className = 'button button-secondary'; test.textContent = 'Probar conexión';
@@ -658,12 +688,17 @@ $('save-api-settings').addEventListener('click', async () => {
   const button = $('save-api-settings'); button.disabled = true; $('api-settings-status').textContent = 'Guardando claves cifradas…';
   try {
     const apis = Array.from($('api-fields').children).map(row => {
-      const inputs = row.querySelectorAll('input');
+      const providerValue = row.querySelector('.api-provider-select').value;
+      const customUrl = row.querySelector('.api-custom-url-input').value.trim();
       return {
         slot: Number(row.dataset.slot), label: row.dataset.label || `API ${row.dataset.slot}`,
-        baseUrl: row.querySelector('select').value || row.dataset.baseUrl || '',
-        models: { reasoning: inputs[1].value.trim(), coding: inputs[2].value.trim(), validation: inputs[3].value.trim() },
-        apiKey: inputs[0].value.trim()
+        baseUrl: providerValue === CUSTOM_PROVIDER_VALUE ? customUrl : providerValue || row.dataset.baseUrl || '',
+        models: {
+          reasoning: row.querySelector('[data-model-role="reasoning"]').value.trim(),
+          coding: row.querySelector('[data-model-role="coding"]').value.trim(),
+          validation: row.querySelector('[data-model-role="validation"]').value.trim()
+        },
+        apiKey: row.querySelector('.api-key-input').value.trim()
       };
     });
     await api('/api/account/apis', { method: 'PUT', body: JSON.stringify({ apis }) });
