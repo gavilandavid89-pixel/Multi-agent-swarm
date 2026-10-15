@@ -102,7 +102,9 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
     }
   }
   transcript.push({ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra }, ...publicPatch });
+  const checkpointPayload = { ...current.payload, ...extra };
+  const memory = recordAgentCheckpoint(checkpointPayload, { agent, stage, content });
+  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra, ...memory }, ...publicPatch });
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
