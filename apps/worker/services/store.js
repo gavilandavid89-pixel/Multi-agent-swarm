@@ -9,6 +9,12 @@ import path from 'node:path';
 const { Pool } = pg;
 const connectionString = process.env.DATABASE_URL || '';
 if (!connectionString) throw new Error('DATABASE_URL es obligatorio: configurá la conexión de PostgreSQL de Render.');
+const isRenderDatabase = /render\.com/i.test(connectionString);
+// Render's internal PostgreSQL endpoints may use a platform CA. For other external
+// PostgreSQL URLs, upgrade sslmode=require to full certificate + hostname verification.
+const verifiedConnectionString = isRenderDatabase
+  ? connectionString
+  : connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const encryptionHex = process.env.HISTORY_ENCRYPTION_KEY || '';
 if (!/^[0-9a-fA-F]{64}$/.test(encryptionHex)) throw new Error('HISTORY_ENCRYPTION_KEY debe contener exactamente 64 caracteres hexadecimales. Generala con: openssl rand -hex 32');
 const encryptionKey = Buffer.from(encryptionHex, 'hex');
@@ -17,8 +23,8 @@ const workerConcurrency = Number.isFinite(configuredConcurrency) ? Math.min(8, M
 const configuredPoolSize = Number.parseInt(process.env.PG_POOL_SIZE || '5', 10);
 const poolMax = Math.max(workerConcurrency + 2, Math.min(10, Number.isFinite(configuredPoolSize) ? Math.max(2, configuredPoolSize) : 5));
 const pool = new Pool({
-  connectionString,
-  ssl: /render\.com/i.test(connectionString) ? { rejectUnauthorized: false } : undefined,
+  connectionString: verifiedConnectionString,
+  ssl: isRenderDatabase ? { rejectUnauthorized: false } : undefined,
   max: poolMax,
   connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000
