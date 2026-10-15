@@ -57,15 +57,15 @@ function runSandbox(root, mode, paths) {
       if (!html) return resolve({ status: 'skipped', reason: 'No se encontró un archivo HTML para la prueba gráfica.', exitCode: null, stdout: '', stderr: '' });
       testMode = 'browser';
       command = 'bwrap';
-      args = sandboxArgs(root, ['/usr/bin/xvfb-run', '-a', '/usr/local/bin/node', '/app/browser-harness.mjs', html]);
+      args = sandboxArgs(root, ['/usr/bin/xvfb-run', '-a', '/node-bin/node', '/app/browser-harness.mjs', html]);
     } else if (mode === 'node' || (mode === 'auto' && (testFiles.length || jsFiles.length))) {
       testMode = 'node';
       let inner;
-      if (testFiles.length) inner = ['/usr/local/bin/node', '--test', ...testFiles];
+      if (testFiles.length) inner = ['/node-bin/node', '--test', ...testFiles];
       else {
         let entry = ['index.js','index.mjs','main.js','main.mjs','app.js','app.mjs','server.js'].find(p => paths.includes(p)) || (jsFiles.length === 1 ? jsFiles[0] : null);
         if (!entry) return resolve({ status: 'skipped', reason: 'No hay pruebas automatizadas ni punto de entrada inequívoco; no se ejecuta un archivo arbitrario por suposición.', exitCode: null, stdout: '', stderr: '' });
-        inner = ['/usr/local/bin/node', '--disable-proto=throw', entry];
+        inner = ['/node-bin/node', '--disable-proto=throw', entry];
       }
       command = 'bwrap';
       args = sandboxArgs(root, inner);
@@ -102,6 +102,7 @@ function sandboxArgs(root, command) {
     '--ro-bind', '/etc', '/etc',
     '--ro-bind', '/app', '/app',
     '--ro-bind', '/ms-playwright', '/ms-playwright',
+    '--dir', '/node-bin', '--ro-bind', path.dirname(process.execPath), '/node-bin',
     '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--chmod', '1777', '/tmp',
     '--ro-bind', root, '/input',
     '--size', '67108864', '--tmpfs', '/workspace', '--chdir', '/workspace',
@@ -110,7 +111,7 @@ function sandboxArgs(root, command) {
     '--setenv', 'PLAYWRIGHT_BROWSERS_PATH', '/ms-playwright',
     '--setenv', 'NODE_PATH', '/app/node_modules',
     '--', '/usr/bin/prlimit', '--cpu=30', '--nproc=128', '--fsize=10485760', '--nofile=256', '--',
-    '/usr/local/bin/node', '/app/sandbox-bootstrap.mjs', '/input', '/workspace', '--', ...command
+    '/node-bin/node', '/app/sandbox-bootstrap.mjs', '/input', '/workspace', '--', ...command
   ];
 }
 async function removeTree(root) {
