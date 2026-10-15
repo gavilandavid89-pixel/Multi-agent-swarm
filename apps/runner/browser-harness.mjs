@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { chromium } from '/app/node_modules/playwright/index.mjs';
 
 const root = process.cwd();
-const loopback = spawnSync('ip', ['link', 'set', 'lo', 'up'], { encoding: 'utf8', timeout: 1500 });
+const loopback = spawnSync('/usr/sbin/ip', ['link', 'set', 'lo', 'up'], { encoding: 'utf8', timeout: 1500 });
 if (loopback.status !== 0) throw new Error('No se pudo habilitar loopback dentro del namespace aislado.');
 const entry = String(process.argv[2] || 'index.html');
 if (entry.startsWith('/') || entry.split('/').some(part => !part || part === '..' || part === '.')) throw new Error('Invalid entry path');
