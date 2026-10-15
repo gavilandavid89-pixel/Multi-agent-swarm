@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { sanitizeProviderErrorBody } from './sanitizeProviderError.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -109,7 +110,7 @@ export async function consultarGemini({
     } catch (error) {
       retry++;
       const wait = retryDelay(retry);
-      const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
+      const reason = `error de red: ${sanitizeProviderErrorBody(String(error?.message || error), apiKey, 180)}`;
       if (failoverOnRetryable) throw deferredProviderError(model, retry, wait, reason);
       await onRetry({ retry, wait, reason });
       if (retry >= MAX_PROVIDER_RETRIES) throw deferredProviderError(model, retry, wait, reason);
@@ -192,6 +193,6 @@ export async function consultarGemini({
     }
 
     // Do not include the request URL in errors: the API key is passed as a query parameter.
-    throw new Error(`Error de Gemini (${response.status}, modelo ${model}): ${bodyText.slice(0, 800)}`);
+    throw new Error(`Error de Gemini (${response.status}, modelo ${model}): ${sanitizeProviderErrorBody(bodyText, apiKey)}`);
   }
 }
