@@ -434,13 +434,13 @@ export function parseValidationResponse(rawValue) {
   }
   // Si el proveedor truncó el objeto, recuperá solo hallazgos completos o parcialmente visibles
   // cuando el veredicto explícito es NEEDS_CHANGES. Nunca se rescata APPROVED de JSON incompleto.
-  const verdictMatch = normalizedRaw.match(/"verdict"\\s*:\\s*"(APPROVED|NEEDS_CHANGES)"/);
-  const findingsStart = normalizedRaw.match(/"findings"\\s*:\\s*\\[/);
+  const verdictMatch = normalizedRaw.match(/"verdict"\s*:\s*"(APPROVED|NEEDS_CHANGES)"/);
+  const findingsStart = normalizedRaw.match(/"findings"\s*:\s*\[/);
   if (verdictMatch?.[1] === 'NEEDS_CHANGES' && findingsStart) {
     let cursor = findingsStart.index + findingsStart[0].length;
     const recovered = [];
     while (cursor < normalizedRaw.length && recovered.length < 30) {
-      while (cursor < normalizedRaw.length && /[\\s,]/.test(normalizedRaw[cursor])) cursor++;
+      while (cursor < normalizedRaw.length && /[\s,]/.test(normalizedRaw[cursor])) cursor++;
       if (cursor >= normalizedRaw.length || normalizedRaw[cursor] === ']') break;
       if (normalizedRaw[cursor] !== '"') { cursor++; continue; }
       const start = cursor++;
@@ -449,19 +449,19 @@ export function parseValidationResponse(rawValue) {
       while (cursor < normalizedRaw.length) {
         const char = normalizedRaw[cursor++];
         if (escaped) escaped = false;
-        else if (char === '\\\\') escaped = true;
+        else if (char === '\\') escaped = true;
         else if (char === '"') { closed = true; break; }
       }
       const token = normalizedRaw.slice(start, cursor);
       let value = '';
       try { value = JSON.parse(closed ? token : token + '"'); }
-      catch { value = token.slice(1).replace(/\\\\"/g, '"').replace(/\\\\\\\\/g, '\\\\'); }
+      catch { value = token.slice(1).replace(/\\"/g, '"').replace(/\\\\/g, '\\'); }
       value = String(value).trim();
       if (value) recovered.push(value.slice(0, 2000));
       if (!closed) break;
     }
     if (recovered.length) {
-      const summaryMatch = normalizedRaw.match(/"summary"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"/);
+      const summaryMatch = normalizedRaw.match(/"summary"\s*:\s*"((?:\\.|[^"\\])*)"/);
       let summary = 'El JSON del validador llegó truncado; se rescataron hallazgos visibles y no se aprobó automáticamente.';
       if (summaryMatch) { try { summary = JSON.parse('"' + summaryMatch[1] + '"').slice(0, 5000); } catch {} }
       return { verdict: 'NEEDS_CHANGES', findings: recovered, summary, raw: raw.slice(0, 12000) };
