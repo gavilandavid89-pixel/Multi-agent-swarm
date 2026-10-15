@@ -16,7 +16,7 @@ export function parseImprovementVote(value) {
 export function summarizeImprovementVotes(votes = []) {
   const tally = { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 };
   for (const item of Array.isArray(votes) ? votes : []) {
-    if (item?.error != null || item?.responseReceived === false) continue;
+    if (item?.error != null || item?.responseReceived !== true) continue;
     const vote = String(item?.vote || '').toUpperCase();
     if (Object.hasOwn(tally, vote)) tally[vote] += 1;
     else tally.ABSTENERSE += 1;
