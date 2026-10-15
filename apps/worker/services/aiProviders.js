@@ -3,6 +3,7 @@ import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 import { safeProviderFetch } from './safeProviderFetch.js';
+import { parseProviderResponseBody } from './providerResponse.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 const KNOWN_PROVIDER_HOSTS = new Set([
@@ -211,7 +212,30 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       await sleep(wait); continue;
     }
     if (response.ok) {
-      const data = await response.json(); const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
+      const hasTextReader = typeof response.text === 'function';
+      const responseBody = hasTextReader ? await response.text().catch(() => '') : '';
+      let data;
+      try {
+        // Native Fetch responses expose text(); the json() fallback also supports
+        // older adapters and test doubles while preserving the same validation.
+        data = hasTextReader ? parseProviderResponseBody(responseBody) : await response.json();
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw Object.assign(new Error('Estructura JSON inesperada.'), { code: 'PROVIDER_INVALID_JSON' });
+        }
+      } catch {
+        retry++;
+        const wait = retryDelay(retry);
+        const reason = 'respuesta HTTP 200 con JSON inválido del proveedor';
+        // Never log the body: a provider may echo prompts or sensitive context.
+        console.warn('[worker][provider_invalid_json]', JSON.stringify({ provider: providerName, model, attempt: retry, bodyLength: responseBody.length }));
+        if (failoverAvailable || retry >= MAX_PROVIDER_RETRIES) {
+          throw deferredProviderError(model, retry, wait, reason, providerName);
+        }
+        await onRetry({ retry, wait, reason });
+        await sleep(wait);
+        continue;
+      }
+      const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
