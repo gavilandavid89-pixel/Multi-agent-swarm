@@ -33,3 +33,7 @@ jobs:
         run: npm --prefix apps/bridge install --no-audit --no-fund
       - name: Check JavaScript syntax and unit tests
         run: npm run check
+      - name: Audit direct and transitive dependencies
+        run: |
+          npm --prefix apps/bridge audit --audit-level=high --no-fund
+          npm --prefix apps/worker audit --audit-level=high --no-fund
