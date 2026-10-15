@@ -89,6 +89,7 @@ export async function withUserProviders(userId, operation) {
   if (!pool) throw new Error('User API database is not configured.');
   const { rows } = await pool.query('SELECT label,base_url,model_reasoning,model_coding,model_validation,encrypted_api_key FROM user_api_keys WHERE user_id=$1 ORDER BY slot', [userId]);
   const providers = [];
+  const geminiProviders = [];
   let gemini = null;
   for (const row of rows) {
     let apiKey;
@@ -104,8 +105,10 @@ export async function withUserProviders(userId, operation) {
       }
     };
     if (/generativelanguage\.googleapis\.com/i.test(provider.baseUrl)) {
-      if (!gemini) gemini = { apiKey, models: provider.models, name: provider.name };
+      const geminiProvider = { apiKey, models: provider.models, name: provider.name, baseUrl: provider.baseUrl };
+      geminiProviders.push(geminiProvider);
+      if (!gemini) gemini = geminiProvider;
     } else if (/^https:\/\//i.test(provider.baseUrl)) providers.push(provider);
   }
-  return context.run({ userId, providers, gemini }, operation);
+  return context.run({ userId, providers, gemini, geminiProviders }, operation);
 }
