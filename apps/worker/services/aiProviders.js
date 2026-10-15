@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { consultarGemini } from './geminiProvider.js';
-import { currentUserProviders } from './userProviders.js';
+import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
@@ -86,6 +86,9 @@ export async function consultarModelo(options) {
 
 export async function consultarWithProviderContext(options, userContext = null, env = process.env) {
   const { model, maxTokens = 1200 } = options;
+  const beforeProviderRequest = userContext?.userId
+    ? () => assertUserAccountActive(userContext.userId)
+    : undefined;
   const providers = userContext
     ? userContext.providers.map(provider => ({ ...provider, model: providerModelForSlot(provider, model, maxTokens) })).filter(provider => provider.model)
     : configuredOpenAIProviders(model, maxTokens, env);
@@ -108,6 +111,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
         ...options,
         model: providerModelForSlot(gemini, model, maxTokens),
         apiKey: gemini.apiKey,
+        beforeProviderRequest,
         failoverOnRetryable: hasNext
       });
     } catch (error) {
@@ -130,6 +134,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
       return await consultarOpenAICompatible({
         ...options, model: provider.model, apiKey: provider.apiKey,
         baseUrl: provider.baseUrl, providerName: provider.name,
+        beforeProviderRequest,
         failoverAvailable: index < providers.length - 1
       });
     } catch (error) {
@@ -150,7 +155,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
   throw error;
 }
 
-async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', failoverAvailable = false }) {
+async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -179,6 +184,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowedNow));
     }
     const usageId = randomUUID();
+    if (beforeProviderRequest) await beforeProviderRequest();
     let response;
     try { response = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: requestMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: safeMaxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: safeMaxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) }) }); }
     catch (error) {

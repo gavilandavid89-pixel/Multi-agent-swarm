@@ -68,6 +68,7 @@ export async function consultarGemini({
   canContinue = () => true,
   onPartialOutput = () => {},
   failoverOnRetryable = false,
+  beforeProviderRequest,
   apiKey: suppliedApiKey
 }) {
   const apiKey = suppliedApiKey || process.env.GEMINI_API_KEY;
@@ -84,6 +85,7 @@ export async function consultarGemini({
   let requestMessages = messages;
 
   while (true) {
+    if (beforeProviderRequest) await beforeProviderRequest();
     const usageId = randomUUID();
     const converted = toGeminiContents(requestMessages);
     if (!converted.contents.length) throw new Error('Gemini recibió una conversación vacía.');
