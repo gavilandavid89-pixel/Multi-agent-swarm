@@ -85,18 +85,18 @@ export function canContinueBudgetTask(job = {}, payload = {}) {
   return isBudgetPausedJob(job) && !payload?.continuedByJobId;
 }
 
-/** Increase a task budget in controlled 25k steps; null means the 100k cap is already reached. */
+/** Increase a task budget in controlled 25k steps; null means the 1M cap is already reached. */
 export function nextAutomaticTokenBudget(currentValue) {
-  const current = Math.min(100000, Math.max(4000, Math.round(number(currentValue || 50000) / 1000) * 1000));
-  return current >= 100000 ? null : Math.min(100000, current + 25000);
+  const current = Math.min(1000000, Math.max(4000, Math.round(number(currentValue || 50000) / 1000) * 1000));
+  return current >= 1000000 ? null : Math.min(1000000, current + 25000);
 }
 
 /** Resume the same task after an automatic budget increase, preserving its checkpoint and transcript. */
 export function buildAutomaticBudgetExtensionPatch(current = {}, fromBudget, toBudget, timestamp = new Date().toISOString()) {
   const payload = current?.payload && typeof current.payload === 'object' ? current.payload : {};
-  const from = Math.min(100000, Math.max(4000, Math.round(number(fromBudget || payload.tokenBudget || 50000) / 1000) * 1000));
-  const to = Math.min(100000, Math.max(4000, Math.round(number(toBudget) / 1000) * 1000));
-  if (to <= from || to > 100000) return null;
+  const from = Math.min(1000000, Math.max(4000, Math.round(number(fromBudget || payload.tokenBudget || 50000) / 1000) * 1000));
+  const to = Math.min(1000000, Math.max(4000, Math.round(number(toBudget) / 1000) * 1000));
+  if (to <= from || to > 1000000) return null;
   const checkpoint = String(payload.lastCheckpoint || 'último checkpoint guardado').slice(0, 160);
   const transcript = [...(Array.isArray(payload.transcript) ? payload.transcript : []), {
     at: timestamp,
@@ -176,11 +176,11 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
     at: timestamp,
     agent: 'sistema',
     type: 'budget',
-    content: 'Se abrió una nueva tanda de 100.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
+    content: 'Se abrió una nueva tanda de 1.000.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
   });
   return {
     ...sourcePayload,
-    tokenBudget: 100000,
+    tokenBudget: 1000000,
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
     usageEventIds: [],
     tokenBatchHistory: [...previousBatches, batchSnapshot].slice(-50),
