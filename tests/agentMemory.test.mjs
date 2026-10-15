@@ -7,12 +7,14 @@ test('guarda una nota individual y una nota compartida en cada checkpoint', () =
     at: '2026-10-15T00:00:00.000Z', agent: 'Arquitecto', stage: 'Arquitectura', content: 'Definí módulos y contratos.'
   });
   assert.match(first.agentDocuments.arquitecto.markdown, /Definí módulos y contratos/);
-  assert.match(first.sharedDocument, /Arquitectura — Arquitecto/);\n  assert.ok(first.sharedDocument.includes('Objetivo original') && first.sharedDocument.includes('Crear app'));
+  assert.match(first.sharedDocument, /Arquitectura — Arquitecto/);
+  assert.ok(first.sharedDocument.includes('Objetivo original') && first.sharedDocument.includes('Crear app'));
   const second = recordAgentCheckpoint(first, {
     at: '2026-10-15T00:01:00.000Z', agent: 'Desarrollador', stage: 'Desarrollo', content: 'Creé el módulo principal.'
   });
   assert.match(second.sharedDocument, /Definí módulos y contratos/);
-  assert.match(second.sharedDocument, /Creé el módulo principal/);\n  assert.ok(second.sharedDocument.includes('Plan / estrategia vigente') && second.sharedDocument.includes('El plan todavía no está definido'));
+  assert.match(second.sharedDocument, /Creé el módulo principal/);
+  assert.ok(second.sharedDocument.includes('Plan / estrategia vigente') && second.sharedDocument.includes('El plan todavía no está definido'));
   assert.equal(second.agentDocuments.arquitecto.entries.length, 1);
   assert.equal(second.agentDocuments.desarrollador.entries.length, 1);
 });
