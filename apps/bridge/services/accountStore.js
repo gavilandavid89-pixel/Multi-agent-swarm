@@ -125,16 +125,21 @@ export async function ensureAccountKey(userId) {
     const result = await client.query('SELECT id,account_code,access_key_hash,access_key_encrypted FROM app_users WHERE id=$1 AND disabled_at IS NULL FOR UPDATE', [userId]);
     if (!result.rows.length) throw Object.assign(new Error('La cuenta no está disponible.'), { status: 404 });
     let { account_code: accountCode, access_key_hash: keyHash, access_key_encrypted: encryptedKey } = result.rows[0];
-    if (!accountCode || !keyHash || !encryptedKey) {
-      accountCode = accountCode || await uniqueAccountCode(client);
-      const accessKey = randomDigits(15);
-      keyHash = hashPassword(accessKey);
-      encryptedKey = encryptSecret(accessKey);
-      await client.query('UPDATE app_users SET account_code=$2,access_key_hash=$3,access_key_encrypted=$4 WHERE id=$1', [userId, accountCode, keyHash, encryptedKey]);
+    // Repair a missing account code without rotating a valid, already-issued access key.
+    if (!accountCode) accountCode = await uniqueAccountCode(client);
+    if (keyHash && encryptedKey) {
+      const accessKey = decryptSecret(encryptedKey);
+      if (!result.rows[0].account_code) {
+        await client.query('UPDATE app_users SET account_code=$2 WHERE id=$1', [userId, accountCode]);
+      }
       await client.query('COMMIT');
       return { accountCode, accessKey };
     }
-    const accessKey = decryptSecret(encryptedKey);
+    // A key is only regenerated when its recoverable encrypted value or verification hash is missing.
+    const accessKey = randomDigits(15);
+    keyHash = hashPassword(accessKey);
+    encryptedKey = encryptSecret(accessKey);
+    await client.query('UPDATE app_users SET account_code=$2,access_key_hash=$3,access_key_encrypted=$4 WHERE id=$1', [userId, accountCode, keyHash, encryptedKey]);
     await client.query('COMMIT');
     return { accountCode, accessKey };
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
