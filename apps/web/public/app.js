@@ -12,7 +12,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -23,7 +23,7 @@ function renderHistory(data) {
   const latest = jobs[0];
   $('history-indicator').textContent = active.length ? '◌' : data.hasHistory ? '▤' : '◌';
   $('history-title').textContent = active.length ? `${active.length} tarea${active.length === 1 ? '' : 's'} en marcha` : data.hasHistory ? `${data.count} tarea${data.count === 1 ? '' : 's'} guardada${data.count === 1 ? '' : 's'}` : 'Todavía no hay historial';
-  $('history-copy').textContent = active.length ? `${latest && ['queued','running'].includes(latest.status) ? latest.stage : 'El comité sigue trabajando'} · los hitos se guardan al terminar cada etapa.` : data.hasHistory ? (latest ? `Última: ${statusNames[latest.status] || latest.status} · ${latest.stage || 'sin etapa'}` : 'Abrí una tarea para ver su conversación.') : 'Las tareas y sus conversaciones aparecerán aquí.';
+  $('history-copy').textContent = active.length ? `${latest && ['queued','running'].includes(latest.status) ? (latest.title || latest.stage) : 'El comité sigue trabajando'} · los hitos se guardan al terminar cada etapa.` : data.hasHistory ? (latest ? `Última: ${latest.title || 'Tarea'} · ${statusNames[latest.status] || latest.status}` : 'Abrí una tarea para ver su conversación.') : 'Las tareas y sus conversaciones aparecerán aquí.';
   $('show-history').classList.toggle('hidden', !data.hasHistory);
 }
 async function loadHistorySummary() { renderHistory(await api('/api/history')); }
@@ -35,10 +35,10 @@ function observeJobStatus(job) {
   const wasActive = ['queued', 'running'].includes(previousStatus);
   const terminal = ['completed', 'failed', 'needs_review'].includes(job.status);
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
-  else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
-  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tarea ${job.id.slice(0,8)} alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
-  else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
+  if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron «${job.title || `tarea ${job.id.slice(0,8)}`}». El resultado está listo para revisar.`, 'completed');
+  else if (wasActive && job.status === 'failed') showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
+  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
+  else if (wasActive && job.status === 'needs_review') showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
 async function monitorAllJobStatuses() {
@@ -72,7 +72,7 @@ async function loadJobs({ append = false } = {}) {
   if (!state.jobs.length) {
     list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
   } else {
-    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name">Tarea ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
   }
   $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
   $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
@@ -352,7 +352,9 @@ function updateDetailView(data) {
   const job = data.job || {};
   const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
   const continuationLabel = data.continuationOf ? ` · Continuación ${taskNumber}` : '';
-  $('detail-title').textContent = `Agentes · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
+  const taskTitle = job.title || (job.id ? `Tarea ${job.id.slice(0,8)}` : 'Conversación de agentes');
+  $('detail-title').textContent = `${taskTitle}${continuationLabel}`;
+  $('detail-title').title = taskTitle;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Continuación ${taskNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
@@ -926,7 +928,7 @@ $('job-form').addEventListener('submit', async event => {
       const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
       const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
       $('objective').value = ''; resizeObjectiveInput();
-      $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
+      $('job-submit-status').textContent = `Orden recibida: ${job.title || 'Nueva tarea'}. Abriendo la conversación…`;
       await showDetail(job.id); await refresh();
     }
   } catch (error) { $('job-submit-status').textContent = `No se pudo enviar: ${error.message}`; }
@@ -959,11 +961,32 @@ $('show-history').addEventListener('click', async () => {
       const pct = done ? 100 : job.status === 'needs_review' ? 99 : failed ? null : null;
       const progress = active ? '<div class="history-progress indeterminate"><span></span></div>' : pct !== null ? `<div class="history-progress"><span style="width:${pct}%"></span></div>` : '';
       const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · actividad en curso` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
-      return `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
+      return `<div class="history-row"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(statusNames[job.status] || job.status)} · ${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
     }).join('') || '<p class="muted tiny">Sin registros.</p>';
-    list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.history)));
+    list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => { closeHistoryDrawer(); showDetail(button.dataset.history); }));
   } catch (error) { alert(error.message); }
 });
+function closeHistoryDrawer() {
+  const drawer = $('history-drawer');
+  if (!drawer) return;
+  drawer.classList.add('hidden');
+  drawer.setAttribute('aria-hidden', 'true');
+  $('open-history-menu')?.setAttribute('aria-expanded', 'false');
+  state.historyShown = false;
+  $('history-list')?.classList.add('hidden');
+  if ($('show-history')) $('show-history').innerHTML = 'Ver registros <span>→</span>';
+}
+function openHistoryDrawer() {
+  const drawer = $('history-drawer');
+  if (!drawer) return;
+  if (!drawer.classList.contains('hidden')) { closeHistoryDrawer(); return; }
+  $('files-drawer')?.classList.add('hidden');
+  $('files-drawer')?.setAttribute('aria-hidden', 'true');
+  drawer.classList.remove('hidden');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('open-history-menu')?.setAttribute('aria-expanded', 'true');
+  if (!state.historyShown) $('show-history')?.click();
+}
 $('copy-detail').addEventListener('click', async () => {
   const button = $('copy-detail'); const content = $('detail-content').textContent || '';
   if (!content.trim()) { $('copy-status').textContent = 'No hay diagnóstico para copiar.'; return; }
@@ -1032,7 +1055,15 @@ async function boot() {
 // Unificamos los archivos en el cajón inferior sin duplicar ni reconstruir el contenido.
 const artifactsPanel = $('artifacts-panel');
 if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
+const historyPanel = document.querySelector('#dashboard-grid .history-panel') || document.querySelector('.history-panel');
+if (historyPanel && $('history-drawer-slot')) $('history-drawer-slot').append(historyPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+$('open-history-menu').addEventListener('click', () => {
+  $('account-menu-items').classList.add('hidden');
+  $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+  openHistoryDrawer();
+});
+$('close-history-drawer').addEventListener('click', closeHistoryDrawer);
 $('account-menu-toggle').addEventListener('click', event => {
   event.preventDefault();
   event.stopPropagation();
@@ -1059,6 +1090,8 @@ document.addEventListener('keydown', event => {
     $('account-menu-items')?.classList.add('hidden');
     $('account-menu-toggle')?.setAttribute('aria-expanded', 'false');
     $('files-drawer')?.classList.add('hidden');
+    $('files-drawer')?.setAttribute('aria-hidden', 'true');
+    closeHistoryDrawer();
   }
 });
 $('open-technical-diagnostic').addEventListener('click', () => {
@@ -1068,13 +1101,16 @@ $('open-technical-diagnostic').addEventListener('click', () => {
   if (diagnostic) { diagnostic.open = true; diagnostic.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 });
 $('files-menu-toggle').addEventListener('click', () => {
-  $('files-drawer').classList.toggle('hidden');
-  if (!$('files-drawer').classList.contains('hidden')) {
+  const opening = $('files-drawer').classList.contains('hidden');
+  $('files-drawer').classList.toggle('hidden', !opening);
+  $('files-drawer').setAttribute('aria-hidden', String(!opening));
+  if (opening) {
+    closeHistoryDrawer();
     const count = $('artifacts-count')?.textContent || '0 archivos';
     $('files-drawer-status').textContent = state.currentDetailId ? count + ' · pertenecen a la tarea abierta.' : 'Abrí una tarea para ver sus archivos.';
   }
 });
-$('close-files-drawer').addEventListener('click', () => $('files-drawer').classList.add('hidden'));
+$('close-files-drawer').addEventListener('click', () => { $('files-drawer').classList.add('hidden'); $('files-drawer').setAttribute('aria-hidden', 'true'); });
 $('files-download-button').addEventListener('click', () => {
   const button = $('download-bundle');
   if (!button || button.disabled) { $('files-drawer-status').textContent = 'Todavía no hay archivos guardados para empaquetar.'; return; }
@@ -1085,4 +1121,34 @@ $('files-preview-button').addEventListener('click', () => {
   if (!preview) { $('files-drawer-status').textContent = 'Todavía no hay un HTML listo para previsualizar.'; return; }
   preview.click();
 });
+function syncViewportAfterChange({ resetScroll = false } = {}) {
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
+    document.documentElement.style.setProperty('--swarm-viewport-height', `${Math.round(viewportHeight)}px`);
+  }
+  // Resizing the visual viewport also happens when the mobile keyboard opens.
+  // Only reset the document position after an actual orientation change.
+  if (resetScroll && !document.body.classList.contains('auth-gate')) {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+}
+let viewportSyncScheduled = false;
+let viewportResetScrollPending = false;
+function scheduleViewportSync(resetScroll = false) {
+  viewportResetScrollPending = viewportResetScrollPending || resetScroll;
+  if (viewportSyncScheduled) return;
+  viewportSyncScheduled = true;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const shouldResetScroll = viewportResetScrollPending;
+    viewportResetScrollPending = false;
+    viewportSyncScheduled = false;
+    syncViewportAfterChange({ resetScroll: shouldResetScroll });
+  }));
+}
+window.addEventListener('resize', () => scheduleViewportSync(), { passive: true });
+window.addEventListener('orientationchange', () => scheduleViewportSync(true), { passive: true });
+window.visualViewport?.addEventListener('resize', () => scheduleViewportSync(), { passive: true });
+syncViewportAfterChange();
 boot();

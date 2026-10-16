@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
@@ -15,6 +15,9 @@ const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const configuredShutdownGrace = Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '20000', 10);
 const SHUTDOWN_GRACE_MS = Number.isFinite(configuredShutdownGrace) ? Math.min(30000, Math.max(1000, configuredShutdownGrace)) : 20000;
+const WORKER_WAKE_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000, 10000, 10000, 10000, 10000];
+let workerReadyUntil = 0;
+let workerWakePromise = null;
 const failedAuth = new Map();
 const jobCreateWindows = new Map();
 const previewSessions = new Map();
@@ -40,6 +43,36 @@ app.get('/readyz', async (_req, res) => {
     res.status(503).json({ ok: false, role: 'bridge', database: 'unavailable', workerConfigured });
   }
 });
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function ensureWorkerAwake() {
+  if (Date.now() < workerReadyUntil) return;
+  if (workerWakePromise) return workerWakePromise;
+  workerWakePromise = (async () => {
+    let lastDetail = 'sin respuesta del endpoint de disponibilidad';
+    for (let attempt = 0; attempt <= WORKER_WAKE_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const response = await fetch(`${WORKER_BASE_URL}/readyz`, { signal: AbortSignal.timeout(6000) });
+        const rawBody = await response.text().catch(() => '');
+        let data = {};
+        try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+        if (response.ok && data?.ok === true && data?.role === 'worker') {
+          workerReadyUntil = Date.now() + 5000;
+          console.info('[bridge][worker_ready_after_wake]', JSON.stringify({ attempts: attempt + 1 }));
+          return;
+        }
+        lastDetail = `HTTP ${response.status}${data?.database === 'unavailable' ? ' (PostgreSQL aún no está listo)' : ''}`;
+      } catch (cause) {
+        lastDetail = String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 180);
+      }
+      if (attempt < WORKER_WAKE_RETRY_DELAYS_MS.length) await sleep(WORKER_WAKE_RETRY_DELAYS_MS[attempt]);
+    }
+    const error = new Error(`El motor de agentes no volvió a estar listo después de intentar despertarlo durante hasta dos minutos (${lastDetail}). Esta operación no quedó confirmada; revisá el worker e intentá nuevamente.`);
+    error.status = 503;
+    throw error;
+  })();
+  try { return await workerWakePromise; }
+  finally { workerWakePromise = null; }
+}
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
   if (!map.has(key) && map.size >= 5000) {
@@ -263,13 +296,16 @@ function safeEqual(a, b) {
   const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b));
   return aa.length === bb.length && aa.length > 0 && timingSafeEqual(aa, bb);
 }
-async function workerRequest(route, options = {}) {
+async function workerRequest(route, options = {}, mayWake = true) {
   if (!WORKER_BASE_URL || !WORKER_SHARED_SECRET) {
     const error = new Error('El motor externo no está configurado.');
     error.status = 503;
     throw error;
   }
   const startedAt = Date.now();
+  const method = String(options.method || 'GET').toUpperCase();
+  const idempotencyKey = options.headers?.['x-swarm-idempotency-key'] || options.headers?.['X-Swarm-Idempotency-Key'];
+  const replaySafe = ['GET', 'HEAD', 'OPTIONS'].includes(method) || Boolean(idempotencyKey);
   let response;
   try {
     response = await fetch(`${WORKER_BASE_URL}${route}`, {
@@ -282,6 +318,11 @@ async function workerRequest(route, options = {}) {
       ? 'timeout después de 15 segundos'
       : String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 300);
     console.error('[bridge][worker_network_error]', JSON.stringify({ route, durationMs: Date.now() - startedAt, detail }));
+    if (mayWake && replaySafe) {
+      console.warn('[bridge][worker_network_recovery]', JSON.stringify({ route, method, idempotentPost: method === 'POST' && Boolean(idempotencyKey) }));
+      await ensureWorkerAwake();
+      return workerRequest(route, options, false);
+    }
     const error = new Error(`No se pudo conectar con el motor externo (${detail}). Revisá que swarm-worker esté activo y que WORKER_BASE_URL sea correcto.`);
     error.status = 502;
     throw error;
@@ -290,6 +331,13 @@ async function workerRequest(route, options = {}) {
   let data = {};
   try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
   if (!response.ok) {
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
+    if (mayWake && replaySafe && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
+      console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
+      await ensureWorkerAwake();
+      return workerRequest(route, options, false);
+    }
     const detail = String(data?.error || rawBody || response.statusText || 'el motor no envió detalles').slice(0, 1200);
     console.error('[bridge][worker_http_error]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt, detail }));
     const error = new Error(`El motor externo respondió HTTP ${response.status}: ${detail}`);
@@ -335,7 +383,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', headers: { 'x-swarm-idempotency-key': randomUUID() }, body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });

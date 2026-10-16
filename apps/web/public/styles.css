@@ -487,3 +487,28 @@ body:not(.auth-gate) .files-drawer { position:absolute!important; top:52px; righ
   body:not(.auth-gate) #objective { height:36px; min-height:36px; max-height:86px; padding:7px 9px; }
   body:not(.auth-gate) .chat-composer-controls #submit-job { min-height:36px; }
 }
+
+
+/* Rotation-safe viewport: use the visual viewport height supplied by app.js,
+   keep the authenticated shell in one viewport, and give scroll only to panels. */
+:root{--swarm-viewport-height:100dvh}
+body:not(.auth-gate){position:fixed;inset:0;width:100%;height:auto;min-height:0;overflow:hidden;overscroll-behavior:none}
+body:not(.auth-gate) .shell{width:100%;max-width:none;height:var(--swarm-viewport-height,100dvh);max-height:var(--swarm-viewport-height,100dvh);min-height:0;margin:0;padding:max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));overflow:hidden;gap:0}
+body:not(.auth-gate) .hero{display:none!important}
+body:not(.auth-gate) .topbar{position:relative;z-index:20;flex:0 0 auto;min-height:36px}
+body:not(.auth-gate) #app-content{flex:1 1 auto;width:100%;height:auto!important;max-height:none!important;min-height:0;overflow:hidden}
+body:not(.auth-gate) .account-menu-items{max-height:calc(var(--swarm-viewport-height,100dvh) - 64px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+body:not(.auth-gate) .files-drawer,
+body:not(.auth-gate) .history-drawer{position:absolute!important;top:calc(env(safe-area-inset-top,0px) + 48px);right:max(4px,env(safe-area-inset-right));bottom:auto!important;left:auto!important;z-index:90;width:min(520px,calc(100vw - 16px));max-height:calc(var(--swarm-viewport-height,100dvh) - 64px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
+body:not(.auth-gate) #history-drawer-slot .history-panel{display:block;margin:0;padding:0;border:0;background:transparent;box-shadow:none;max-height:none}
+body:not(.auth-gate) #history-drawer #history-list{max-height:calc(var(--swarm-viewport-height,100dvh) - 190px);overflow-y:auto;overscroll-behavior:contain}
+@media(max-width:700px){
+ body:not(.auth-gate) .files-drawer,
+ body:not(.auth-gate) .history-drawer{top:calc(env(safe-area-inset-top,0px) + 44px);right:max(4px,env(safe-area-inset-right));width:calc(100vw - 12px);max-height:calc(var(--swarm-viewport-height,100dvh) - 56px);padding:10px}
+ body:not(.auth-gate) #history-drawer #history-list{max-height:calc(var(--swarm-viewport-height,100dvh) - 176px)}
+}
+@media(orientation:landscape) and (max-height:520px){
+ body:not(.auth-gate) .files-drawer,
+ body:not(.auth-gate) .history-drawer{top:calc(env(safe-area-inset-top,0px) + 38px);max-height:calc(var(--swarm-viewport-height,100dvh) - 46px)}
+ body:not(.auth-gate) #history-drawer #history-list{max-height:calc(var(--swarm-viewport-height,100dvh) - 154px)}
+}

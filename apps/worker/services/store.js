@@ -1,8 +1,9 @@
 import pg from 'pg';
 import Database from 'better-sqlite3';
-import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
+import { generateTaskTitle } from './taskTitle.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -56,7 +57,14 @@ function unseal(blob) {
   return JSON.parse(inflateRawSync(compressed).toString('utf8'));
 }
 const toIso = value => value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-const toPublic = row => ({ id: row.id, status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at), error: row.error || null });
+const toPublic = row => {
+  let title = '';
+  try {
+    const payload = unseal(row.encrypted_payload);
+    title = payload.title || generateTaskTitle(payload.objective);
+  } catch {}
+  return { id: row.id, title: title || `Tarea ${String(row.id).slice(0, 8)}`, status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at), error: row.error || null };
+};
 const artifactsRoot = path.resolve(process.env.ARTIFACTS_DIR || './data/artifacts');
 const MAX_ARTIFACTS = 40;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -71,6 +79,10 @@ export async function initStore() {
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_updated_idx ON jobs(updated_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_created_idx ON jobs(created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS job_request_idempotency (
+    idempotency_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
+    job_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL
+  )`);
   // Importa registros de SQLite local si existieran, sin pisar el historial ya presente en PostgreSQL.
   const legacyPath = process.env.DATABASE_PATH || './data/swarm.sqlite';
   if (fs.existsSync(legacyPath)) {
@@ -130,14 +142,55 @@ export async function getArtifact(id, index) {
   if (!file || !Number.isInteger(Number(index)) || Number(index) < 0) return null;
   return { path: file.path, content: file.content, size: file.size, contentType: file.contentType };
 }
-export async function createJob(objective, requestedTokenBudget, userId = null) {
+export async function createJob(objective, requestedTokenBudget, userId = null, idempotencyKey = null) {
   const timestamp = now();
   const rawDefault = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
   const defaultBudget = Number.isFinite(rawDefault) ? Math.min(1000000, Math.max(4000, rawDefault)) : 1000000;
   const tokenBudget = Number.isFinite(Number(requestedTokenBudget)) ? Math.min(1000000, Math.max(4000, Math.round(Number(requestedTokenBudget) / 1000) * 1000)) : defaultBudget;
-  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
-  await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
-  return toPublic(row);
+  const title = generateTaskTitle(objective);
+  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, title, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
+  if (!idempotencyKey) {
+    await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
+    return toPublic(row);
+  }
+  const requestHash = createHash('sha256').update(JSON.stringify({ objective, tokenBudget, userId })).digest('hex');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'INSERT INTO job_request_idempotency (idempotency_key,request_hash,job_id,created_at) VALUES ($1,$2,NULL,$3) ON CONFLICT (idempotency_key) DO NOTHING',
+      [idempotencyKey, requestHash, timestamp]
+    );
+    const { rows: keyRows } = await client.query(
+      'SELECT request_hash,job_id FROM job_request_idempotency WHERE idempotency_key=$1 FOR UPDATE',
+      [idempotencyKey]
+    );
+    const existingKey = keyRows[0];
+    if (!existingKey) throw new Error('No se pudo reservar la clave de idempotencia.');
+    if (existingKey.request_hash !== requestHash) {
+      const error = new Error('La clave de idempotencia ya fue utilizada para otra solicitud.');
+      error.status = 409;
+      throw error;
+    }
+    if (existingKey.job_id) {
+      const { rows: existingJobs } = await client.query('SELECT * FROM jobs WHERE id=$1', [existingKey.job_id]);
+      if (!existingJobs[0]) throw new Error('La clave de idempotencia apunta a una tarea inexistente.');
+      await client.query('COMMIT');
+      return { ...toPublic(existingJobs[0]), created: false };
+    }
+    await client.query(
+      'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]
+    );
+    await client.query('UPDATE job_request_idempotency SET job_id=$2 WHERE idempotency_key=$1', [idempotencyKey, row.id]);
+    await client.query('COMMIT');
+    return { ...toPublic(row), created: true };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 /**
  * Create a fresh 1M-token continuation task from a budget-paused job while preserving its encrypted
@@ -175,7 +228,7 @@ export async function createContinuationJob(sourceId) {
       progress: Math.min(Number(source.progress) || 0, 90),
       attempt: Number(source.attempt) || 0,
       created_at: timestamp, updated_at: timestamp, error: null,
-      encrypted_payload: seal(payload)
+      encrypted_payload: seal({ ...payload, title: sourcePayload.title || generateTaskTitle(sourcePayload.objective) })
     };
     await client.query(
       'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',

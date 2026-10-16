@@ -19,10 +19,27 @@ if (!menuHandler.includes('event.stopPropagation()') || !menuHandler.includes("i
 if (!appSource.includes("event.key === 'Enter' && !event.shiftKey") || !appSource.includes('resizeObjectiveInput')) {
   throw new Error('Chat composer must support Enter-to-send and controlled automatic height.');
 }
+if (!appSource.includes("window.addEventListener('orientationchange'") || !appSource.includes('visualViewport?.addEventListener')) {
+  throw new Error('Mobile viewport must resync after orientation and visual viewport changes.');
+}
+if (!appSource.includes("if (resetScroll && !document.body.classList.contains('auth-gate'))") ||
+    !appSource.includes("window.addEventListener('orientationchange', () => scheduleViewportSync(true)") ||
+    !appSource.includes("window.addEventListener('resize', () => scheduleViewportSync(),")) {
+  throw new Error('Mobile keyboard/viewport resizing must not force scroll-to-top; only orientation changes may reset the page position.');
+}
+if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
+  throw new Error('Task history must be reachable from the three-dot menu and moved to its drawer.');
+}
+if (!appSource.includes("const taskTitle = job.title") || !appSource.includes("job.title || `Tarea ${job.id.slice(0,8)}`")) {
+  throw new Error('Task titles must appear automatically in the conversation and activity/history lists.');
+}
 
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
   .replace(/<script src="\/invite-gate\.js[^"]*" defer><\/script>\s*/g, '');
+if (!sourceHtml.includes('id="open-history-menu"') || !sourceHtml.includes('id="history-drawer"')) {
+  throw new Error('The three-dot menu needs a history entry and matching drawer.');
+}
 const injected = `
 <pre id="layout-result" hidden></pre>
 <script>
@@ -30,19 +47,31 @@ const injected = `
   document.getElementById('access-panel').classList.add('hidden');
   document.getElementById('api-settings-panel').classList.add('hidden');
   document.getElementById('app-content').classList.remove('hidden');
+  document.getElementById('files-menu-toggle').classList.remove('hidden');
+  document.getElementById('account-menu').classList.remove('hidden');
+  document.getElementById('account-menu-items').classList.remove('hidden');
   document.getElementById('welcome-chat').classList.add('hidden');
   document.getElementById('detail-panel').classList.remove('hidden');
   const conversation = document.getElementById('conversation');
   conversation.innerHTML = Array.from({length: 36}, (_, i) =>
     '<article class="chat-message"><div class="agent-avatar">A</div><div class="message-body"><div class="message-heading"><strong>Agent ' + (i % 6 + 1) + '</strong><span>Working</span></div><div class="message-text">A long sample message checks that history scrolls inside the chat without moving the whole page. Message ' + i + '.</div></div></article>'
   ).join('');
-  window.addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => {
+  window.__measureSwarmLayout = () => {
     const conversation = document.getElementById('conversation');
     const composer = document.querySelector('#app-content > .composer');
     const composerRect = composer.getBoundingClientRect();
     const report = {
       width: window.innerWidth,
       height: window.innerHeight,
+      scrollY: window.scrollY,
+      shellTop: Math.round(document.querySelector('.shell').getBoundingClientRect().top),
+      topbarTop: Math.round(document.querySelector('.topbar').getBoundingClientRect().top),
+      topbarBottom: Math.round(document.querySelector('.topbar').getBoundingClientRect().bottom),
+      accountToggleTop: Math.round(document.getElementById('account-menu-toggle').getBoundingClientRect().top),
+      accountToggleBottom: Math.round(document.getElementById('account-menu-toggle').getBoundingClientRect().bottom),
+      filesButtonTop: Math.round(document.getElementById('files-menu-toggle').getBoundingClientRect().top),
+      filesButtonBottom: Math.round(document.getElementById('files-menu-toggle').getBoundingClientRect().bottom),
+      historyMenuPresent: Boolean(document.getElementById('open-history-menu')),
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootScrollHeight: document.documentElement.scrollHeight,
       bodyScrollHeight: document.body.scrollHeight,
@@ -68,7 +97,9 @@ const injected = `
       }))
     };
     document.getElementById('layout-result').textContent = btoa(JSON.stringify(report));
-  })));
+    return report;
+  };
+  window.addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => window.__measureSwarmLayout())));
 </script>`;
 const html = sourceHtml.replace('</body>', injected + '\n</body>');
 const server = createServer((req, res) => {
@@ -185,6 +216,10 @@ async function runViewport(url, profile, width, height, orientation) {
     const report = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
     const issues = [];
     if (report.width !== width || report.height !== height) issues.push(`viewport is ${report.width}x${report.height}, expected ${width}x${height}`);
+    if (report.shellTop < -1 || report.topbarTop < 0 || report.topbarBottom > height + 2) issues.push(`top bar is outside viewport (${report.topbarTop}–${report.topbarBottom}px)`);
+    if (report.accountToggleTop < 0 || report.accountToggleBottom > height + 2) issues.push(`three-dot menu is outside viewport (${report.accountToggleTop}–${report.accountToggleBottom}px)`);
+    if (report.filesButtonTop < 0 || report.filesButtonBottom > height + 2) issues.push(`files button is outside viewport (${report.filesButtonTop}–${report.filesButtonBottom}px)`);
+    if (!report.historyMenuPresent) issues.push('three-dot menu has no task-history entry');
     if (report.bodyOverflowY !== 'hidden') issues.push(`body overflow-y is ${report.bodyOverflowY}`);
     if (report.rootScrollHeight > height + 2) issues.push(`document scroll height ${report.rootScrollHeight} > viewport ${height}`);
     if (report.bodyScrollHeight > height + 2) issues.push(`body scroll height ${report.bodyScrollHeight} > viewport ${height}`);
@@ -200,6 +235,32 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.filesDrawerPosition === 'fixed') issues.push('files drawer must be anchored to the app shell, not the viewport');
     if (issues.length) throw new Error(`${orientation} layout failed: ${issues.join('; ')}. Report: ${JSON.stringify(report)}`);
     console.log(`PASS ${orientation}: ${width}x${height}; page locked, conversation scrolls independently, composer visible.`);
+    const rotationSizes = [[width, height], [height, width], [width, height], [height, width], [width, height]];
+    for (let cycle = 0; cycle < rotationSizes.length; cycle++) {
+      const [cycleWidth, cycleHeight] = rotationSizes[cycle];
+      await devtools.send('Emulation.setDeviceMetricsOverride', {
+        width: cycleWidth, height: cycleHeight, deviceScaleFactor: 1, mobile: true,
+        screenWidth: cycleWidth, screenHeight: cycleHeight
+      }, sessionId);
+      await delay(180);
+      await devtools.send('Runtime.evaluate', { expression: "window.__measureSwarmLayout?.()", returnByValue: true }, sessionId);
+      const measured = await devtools.send('Runtime.evaluate', {
+        expression: "document.getElementById('layout-result')?.textContent || ''", returnByValue: true
+      }, sessionId);
+      const encodedAfterRotation = measured.result?.value || '';
+      if (!encodedAfterRotation) throw new Error(`Missing layout report after rotation ${cycle + 1} (${cycleWidth}x${cycleHeight}).`);
+      const rotated = JSON.parse(Buffer.from(encodedAfterRotation, 'base64').toString('utf8'));
+      const rotationIssues = [];
+      if (rotated.width !== cycleWidth || rotated.height !== cycleHeight) rotationIssues.push(`viewport is ${rotated.width}x${rotated.height}, expected ${cycleWidth}x${cycleHeight}`);
+      if (rotated.rootScrollHeight > cycleHeight + 2) rotationIssues.push(`document scroll height ${rotated.rootScrollHeight} > viewport ${cycleHeight}`);
+      if (!rotated.composerVisible) rotationIssues.push(`composer shifted outside viewport to ${rotated.composerTop}–${rotated.composerBottom}px`);
+      if (rotated.topbarTop < 0 || rotated.topbarBottom > cycleHeight + 2) rotationIssues.push('top bar shifted outside viewport');
+      if (rotated.accountToggleTop < 0 || rotated.accountToggleBottom > cycleHeight + 2) rotationIssues.push('three-dot menu became unreachable');
+      if (rotated.filesButtonTop < 0 || rotated.filesButtonBottom > cycleHeight + 2) rotationIssues.push('files button became unreachable');
+      if (rotated.scrollY !== 0) rotationIssues.push(`page retained scrollY=${rotated.scrollY}`);
+      if (rotationIssues.length) throw new Error(`Rotation ${cycle + 1} failed: ${rotationIssues.join('; ')}. Report: ${JSON.stringify(rotated)}`);
+    }
+    console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; three-dot menu and files remain visible.`);
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {
