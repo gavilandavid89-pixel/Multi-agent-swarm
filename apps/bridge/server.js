@@ -303,6 +303,9 @@ async function workerRequest(route, options = {}, mayWake = true) {
     throw error;
   }
   const startedAt = Date.now();
+  const method = String(options.method || 'GET').toUpperCase();
+  const idempotencyKey = options.headers?.['x-swarm-idempotency-key'] || options.headers?.['X-Swarm-Idempotency-Key'];
+  const replaySafe = ['GET', 'HEAD', 'OPTIONS'].includes(method) || Boolean(idempotencyKey);
   let response;
   try {
     response = await fetch(`${WORKER_BASE_URL}${route}`, {
@@ -315,6 +318,11 @@ async function workerRequest(route, options = {}, mayWake = true) {
       ? 'timeout después de 15 segundos'
       : String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 300);
     console.error('[bridge][worker_network_error]', JSON.stringify({ route, durationMs: Date.now() - startedAt, detail }));
+    if (mayWake && replaySafe) {
+      console.warn('[bridge][worker_network_recovery]', JSON.stringify({ route, method, idempotentPost: method === 'POST' && Boolean(idempotencyKey) }));
+      await ensureWorkerAwake();
+      return workerRequest(route, options, false);
+    }
     const error = new Error(`No se pudo conectar con el motor externo (${detail}). Revisá que swarm-worker esté activo y que WORKER_BASE_URL sea correcto.`);
     error.status = 502;
     throw error;
@@ -325,9 +333,6 @@ async function workerRequest(route, options = {}, mayWake = true) {
   if (!response.ok) {
     const contentType = String(response.headers.get('content-type') || '').toLowerCase();
     const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
-    const method = String(options.method || 'GET').toUpperCase();
-    const idempotencyKey = options.headers?.['x-swarm-idempotency-key'] || options.headers?.['X-Swarm-Idempotency-Key'];
-    const replaySafe = ['GET', 'HEAD', 'OPTIONS'].includes(method) || Boolean(idempotencyKey);
     if (mayWake && replaySafe && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
       console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
       await ensureWorkerAwake();
