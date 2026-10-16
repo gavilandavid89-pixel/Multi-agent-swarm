@@ -414,3 +414,76 @@ body:not(.auth-gate) .connection { min-width:0; }
   body:not(.auth-gate) .global-chat-form textarea { min-height:34px; max-height:16dvh; padding:6px 9px; }
   body:not(.auth-gate) .chat-composer-controls #submit-job { min-height:34px; }
 }
+
+
+/* Chat UX correction: the conversation owns the viewport; composer is a compact, non-draggable bar below it. */
+body:not(.auth-gate) .shell {
+  height:100dvh; min-height:0; max-height:100dvh; padding: max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));
+  display:flex; flex-direction:column; overflow:hidden;
+}
+body:not(.auth-gate) .topbar { position:relative; z-index:50; flex:0 0 auto; margin-bottom:6px; padding:2px 0 7px; overflow:visible; }
+body:not(.auth-gate) .connection { position:relative; z-index:51; gap:7px; }
+body:not(.auth-gate) #connection-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+body:not(.auth-gate) #account-menu { position:relative; z-index:100; flex:0 0 auto; }
+body:not(.auth-gate) #account-menu-toggle { width:40px; height:40px; min-width:40px; font-size:24px; touch-action:manipulation; }
+body:not(.auth-gate) #account-menu-items { position:absolute; top:calc(100% + 6px); right:0; z-index:1000; min-width:210px; max-width:calc(100vw - 24px); max-height:calc(100dvh - 70px); overflow-y:auto; overscroll-behavior:contain; }
+body:not(.auth-gate) #app-content { flex:1 1 0; height:auto; max-height:none; min-height:0; display:flex; flex-direction:column; gap:6px; overflow:hidden; }
+body:not(.auth-gate) #app-content>.composer { order:2; position:static!important; inset:auto!important; z-index:auto; flex:0 0 auto; max-height:none; overflow:visible; margin:0; padding:7px 9px; border-radius:15px; }
+body:not(.auth-gate) .chat-composer-heading { display:none!important; }
+body:not(.auth-gate) .global-chat-form { display:flex; flex-direction:row; align-items:flex-end; gap:7px; margin:0; }
+body:not(.auth-gate) .global-chat-form textarea,
+body:not(.auth-gate) #objective {
+  flex:1 1 auto; width:100%; min-width:0; height:44px; min-height:44px; max-height:120px;
+  padding:11px 13px; line-height:20px; border-radius:14px; resize:none!important; overflow-x:hidden; overflow-y:hidden;
+  white-space:pre-wrap; overflow-wrap:anywhere; scrollbar-width:thin;
+}
+body:not(.auth-gate) .chat-composer-controls { display:flex; flex:0 0 auto; align-items:center; gap:6px; margin:0; }
+body:not(.auth-gate) .chat-composer-controls #chat-target { width:190px; max-width:25vw; min-width:0; flex:0 1 190px; margin:0; padding:10px 9px; }
+body:not(.auth-gate) .chat-composer-controls .budget-select-label,
+body:not(.auth-gate) .chat-composer-controls>span,
+body:not(.auth-gate) #job-submit-status { display:none!important; }
+body:not(.auth-gate) .chat-composer-controls #submit-job { min-height:44px; flex:0 0 auto; white-space:nowrap; border-radius:13px; padding:10px 14px; }
+body:not(.auth-gate) #detail-panel { order:1; flex:1 1 0; min-height:0; max-height:none; overflow:hidden; margin:0; padding:8px 10px; display:flex; flex-direction:column; gap:5px; }
+body:not(.auth-gate) #detail-panel>.section-head { flex:0 0 auto; margin:0; }
+body:not(.auth-gate) #detail-panel .task-status,
+body:not(.auth-gate) #detail-panel .progress-track { display:none!important; }
+body:not(.auth-gate) #detail-panel .token-budget { display:none!important; }
+body:not(.auth-gate) #detail-hint,
+body:not(.auth-gate) #agent-memory-panel,
+body:not(.auth-gate) .agent-reply-panel,
+body:not(.auth-gate) #improvement-vote-panel { display:none!important; }
+body:not(.auth-gate) #conversation { order:10; display:flex; flex:1 1 0; min-height:0; max-height:none; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:5px 4px max(8px,env(safe-area-inset-bottom)); gap:9px; }
+body:not(.auth-gate) .welcome-chat { order:1; flex:1 1 0; min-height:0; max-height:none; overflow:auto; justify-content:center; padding:12px; }
+body:not(.auth-gate) .floating-files-button { position:static!important; inset:auto!important; z-index:auto; width:34px; height:34px; flex:0 0 34px; border-radius:10px; box-shadow:none; font-size:17px; margin-left:0; }
+body:not(.auth-gate) .files-drawer { position:absolute!important; top:52px; right:8px; bottom:auto!important; left:auto!important; z-index:90; width:min(520px,calc(100vw - 20px)); max-height:calc(100dvh - 64px); overflow:auto; }
+@media(max-width:700px) {
+  body:not(.auth-gate) .shell { padding-left:8px; padding-right:8px; }
+  body:not(.auth-gate) .topbar { gap:6px; }
+  body:not(.auth-gate) .brand { gap:7px; font-size:19px; }
+  body:not(.auth-gate) .brand-mark { width:32px; height:32px; }
+  body:not(.auth-gate) .connection { gap:5px; font-size:10px; }
+  body:not(.auth-gate) #connection-label { max-width:clamp(58px,22vw,120px); }
+  body:not(.auth-gate) #account-menu-toggle { width:36px; height:36px; min-width:36px; }
+  body:not(.auth-gate) #app-content { gap:5px; }
+  body:not(.auth-gate) #app-content>.composer { padding:6px; border-radius:14px; }
+  body:not(.auth-gate) .global-chat-form { flex-wrap:wrap; gap:5px; }
+  body:not(.auth-gate) .global-chat-form textarea,
+  body:not(.auth-gate) #objective { flex:1 1 100%; width:100%; min-height:42px; height:42px; max-height:120px; padding:10px 12px; font-size:14px; }
+  body:not(.auth-gate) .chat-composer-controls { width:100%; gap:6px; }
+  body:not(.auth-gate) .chat-composer-controls #chat-target { flex:1 1 0; width:auto; max-width:none; }
+  body:not(.auth-gate) .chat-composer-controls #submit-job { min-height:40px; padding:9px 12px; }
+  body:not(.auth-gate) #detail-panel { padding:6px; gap:3px; }
+  body:not(.auth-gate) #detail-title { font-size:14px; }
+  body:not(.auth-gate) .detail-actions { gap:4px; }
+  body:not(.auth-gate) .floating-files-button { width:29px; height:29px; flex-basis:29px; }
+  body:not(.auth-gate) .files-drawer { top:46px; right:4px; width:calc(100vw - 12px); max-height:calc(100dvh - 54px); padding:10px; }
+}
+@media(orientation:landscape) and (max-height:520px) {
+  body:not(.auth-gate) .shell { padding-top:4px; padding-bottom:4px; }
+  body:not(.auth-gate) .topbar { margin-bottom:3px; padding-bottom:3px; min-height:32px; }
+  body:not(.auth-gate) #app-content { gap:3px; }
+  body:not(.auth-gate) #app-content>.composer { padding:4px 7px; }
+  body:not(.auth-gate) .global-chat-form textarea,
+  body:not(.auth-gate) #objective { height:36px; min-height:36px; max-height:86px; padding:7px 9px; }
+  body:not(.auth-gate) .chat-composer-controls #submit-job { min-height:36px; }
+}
