@@ -11,4 +11,4 @@ if ! command -v xvfb-run >/dev/null 2>&1; then
   exit 127
 fi
 
-exec xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" "$@"
+exec env -i PATH="${PATH:-/usr/bin:/bin}" HOME="${HOME:-/tmp}" LANG="${LANG:-C.UTF-8}" xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" "$@"
