@@ -12,7 +12,7 @@
     gate.classList.remove('hidden');
     form.classList.add('hidden');
     login.classList.add('hidden');
-    loginLink.classList.add('hidden');
+    loginLink.classList.remove('hidden');
     status.textContent = '';
     validatedInvite = '';
   }
@@ -49,7 +49,7 @@
       $('register-username').focus();
     } catch (error) {
       status.textContent = error.message;
-      loginLink.classList.remove('hidden');
+      // Stay on the invite screen. Login is a separate, explicit choice and never an automatic fallback.
     } finally {
       button.disabled = false;
     }
@@ -86,10 +86,6 @@
   } else if (query.get('login') === '1') {
     showLogin();
   } else {
-    form.classList.add('hidden');
-    gate.classList.remove('hidden');
-    login.classList.add('hidden');
-    loginLink.classList.add('hidden');
-    status.textContent = '';
+    showInvite();
   }
 })();
