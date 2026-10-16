@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
@@ -147,12 +147,6 @@ test('una segunda tarea de continuación conserva el historial completo y regist
 });
 
 
-test('no aumenta el presupuesto de la misma tarea: el tope se resuelve creando una continuación', () => {
-  assert.equal(nextAutomaticTokenBudget(50000), null);
-  assert.equal(nextAutomaticTokenBudget(1000000), null);
-  assert.equal(nextAutomaticTokenBudget(25000), null);
-});
-
 test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el estado terminal obsoleto', () => {
   const current = {
     publicJob: { id: 'job-1', status: 'needs_review', stage: 'Pausada por presupuesto de tokens', progress: 99 },
@@ -169,3 +163,21 @@ test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el esta
   assert.deepEqual(patch.payload.lastBudgetIncrease, { from: 50000, to: 75000, at: '2026-10-14T03:00:00Z' });
   assert.match(patch.payload.transcript.at(-1).content, /checkpoint validation-1/);
 });
+test('el registro acumulado de continuaciones no se trunca después de 50 tareas', () => {
+  const history = Array.from({ length: 55 }, (_, index) => ({
+    jobId: `prior-${index + 1}`, batchNumber: index + 1, tokenBudget: 1000000,
+    tokenUsage: { totalTokens: 1000000 }, lastCheckpoint: 'checkpoint', stage: 'paused',
+    closedAt: '2026-10-16T00:00:00.000Z'
+  }));
+  const next = prepareContinuationPayload({
+    objective: 'Trabajo de larga duración',
+    tokenBudget: 1000000,
+    tokenUsage: { promptTokens: 500000, completionTokens: 500000, totalTokens: 1000000, calls: 100 },
+    tokenBatchHistory: history,
+    lastCheckpoint: 'latest'
+  }, { id: 'job-56', stage: 'Pausada por presupuesto de tokens' }, '2026-10-16T01:00:00.000Z');
+  assert.equal(next.tokenBatchHistory.length, 56);
+  assert.equal(next.tokenBatchHistory[0].jobId, 'prior-1');
+  assert.equal(next.tokenBatchHistory.at(-1).jobId, 'job-56');
+});
+
