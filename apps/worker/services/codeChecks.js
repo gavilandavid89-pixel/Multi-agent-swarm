@@ -96,7 +96,7 @@ function extractFiles(delivery) {
   let match;
   while ((match = re.exec(String(delivery || '')))) {
     let name = String(match[1] || match[2] || match[3] || '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').trim().replace(/^\x60|\x60$/g, '').replace(/^\.\//, '');
-    if (name && !name.includes('..') && name.length < 180) files.set(name, { content: match[5], language: match[4].trim().toLowerCase() });
+    if (name && !name.includes('..') && !name.startsWith('/') && !/^[a-z]:/i.test(name) && !name.includes('\\') && name.length < 180) files.set(name, { content: match[5], language: match[4].trim().toLowerCase() });
   }
   return files;
 }
