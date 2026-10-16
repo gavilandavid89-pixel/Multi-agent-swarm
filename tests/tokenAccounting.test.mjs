@@ -61,7 +61,7 @@ test('cuenta llamadas sin usage de tokens reportado sin inventar consumo', () =>
 });
 
 
-test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contador de tanda', () => {
+test('una tarea de continuación de 1M conserva contexto y archivos y registra el consumo previo', () => {
   const timestamp = '2026-10-14T01:00:00.000Z';
   const source = {
     objective: 'Construir una app',
@@ -93,7 +93,7 @@ test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contad
   assert.equal(next.tokenBatchHistory.length, 1);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.totalTokens, 50000);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.wastedTokens, 100);
-  assert.ok(next.transcript.some(item => /nueva tanda de 1.000.000/.test(item.content)));
+  assert.ok(next.transcript.some(item => /tarea de continuación con un presupuesto nuevo de hasta 1.000.000/.test(item.content)));
 });
 
 
@@ -129,7 +129,7 @@ test('solo ofrece continuación para tareas pausadas por presupuesto que aún no
   assert.equal(canContinueBudgetTask({ status: 'failed', stage: 'Pausada por presupuesto de tokens' }, {}), false);
 });
 
-test('una segunda tanda conserva el historial de tandas y registra el consumo previo', () => {
+test('una segunda tarea de continuación conserva el historial completo y registra el consumo previo', () => {
   const first = prepareContinuationPayload({
     objective: 'Objetivo', tokenBudget: 4000,
     tokenUsage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000, calls: 3 },
@@ -147,13 +147,10 @@ test('una segunda tanda conserva el historial de tandas y registra el consumo pr
 });
 
 
-test('el presupuesto aumenta automáticamente en pasos de 25k hasta el máximo de 1M', () => {
-  assert.equal(nextAutomaticTokenBudget(50000), 75000);
-  assert.equal(nextAutomaticTokenBudget(75000), 100000);
-  assert.equal(nextAutomaticTokenBudget(100000), 125000);
-  assert.equal(nextAutomaticTokenBudget(975000), 1000000);
+test('no aumenta el presupuesto de la misma tarea: el tope se resuelve creando una continuación', () => {
+  assert.equal(nextAutomaticTokenBudget(50000), null);
   assert.equal(nextAutomaticTokenBudget(1000000), null);
-  assert.equal(nextAutomaticTokenBudget(25000), 50000);
+  assert.equal(nextAutomaticTokenBudget(25000), null);
 });
 
 test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el estado terminal obsoleto', () => {
