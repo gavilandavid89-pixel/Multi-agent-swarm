@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
@@ -325,7 +325,10 @@ async function workerRequest(route, options = {}, mayWake = true) {
   if (!response.ok) {
     const contentType = String(response.headers.get('content-type') || '').toLowerCase();
     const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
-    if (mayWake && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
+    const method = String(options.method || 'GET').toUpperCase();
+    const idempotencyKey = options.headers?.['x-swarm-idempotency-key'] || options.headers?.['X-Swarm-Idempotency-Key'];
+    const replaySafe = ['GET', 'HEAD', 'OPTIONS'].includes(method) || Boolean(idempotencyKey);
+    if (mayWake && replaySafe && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
       console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
       await ensureWorkerAwake();
       return workerRequest(route, options, false);
@@ -375,7 +378,7 @@ app.post('/api/jobs', limitJobCreation, async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const result = await workerRequest('/internal/jobs', { method: 'POST', body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
+  try { const result = await workerRequest('/internal/jobs', { method: 'POST', headers: { 'x-swarm-idempotency-key': randomUUID() }, body: JSON.stringify({ objective, tokenBudget, userId: req.user.id }) }); const jobId = String(result?.job?.id || result?.id || result?.jobId || ''); if (jobId) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [jobId, req.user.id, result?.createdAt || result?.job?.createdAt || null]); res.status(202).json(result); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 app.get('/api/jobs/:id', async (req, res) => { try { res.json(await workerRequest(`/internal/jobs/${encodeURIComponent(req.params.id)}`)); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
