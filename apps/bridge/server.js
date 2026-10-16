@@ -323,7 +323,8 @@ async function workerRequest(route, options = {}, mayWake = true) {
   let data = {};
   try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
   if (!response.ok) {
-    const isHtmlGatewayPage = /text\\/html/i.test(response.headers.get('content-type') || '') || /^\\s*(?:<!doctype html|<html)/i.test(rawBody);
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
     if (mayWake && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
       console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
       await ensureWorkerAwake();
