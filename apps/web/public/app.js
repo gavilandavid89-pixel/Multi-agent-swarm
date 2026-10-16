@@ -37,7 +37,7 @@ function observeJobStatus(job) {
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
   else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
-  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tanda de la tarea ${job.id.slice(0,8)} agotó el presupuesto. Se guardó el checkpoint; abrí otra tanda para continuar.`, 'warning');
+  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tarea ${job.id.slice(0,8)} alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
   else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
@@ -246,16 +246,7 @@ function renderTokenBudget(data) {
   state.currentTokenBudget = total;
   const job = data.job || {};
   const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  const canExtend = ['queued', 'running'].includes(job.status) || budgetPaused;
-  const extendButton = $('extend-task-budget');
-  if (extendButton) {
-    extendButton.classList.toggle('hidden', !canExtend || total >= 1000000);
-    extendButton.disabled = !canExtend || total >= 1000000;
-    extendButton.textContent = `Ampliar límite +${Math.min(25000, 1000000 - total).toLocaleString('es-AR')}`;
-  }
-  const continueButton = $('continue-token-batch');
-  const canOpenNextBatch = Boolean(data.continuationAvailable) && total >= 1000000;
-  if (continueButton) { continueButton.classList.toggle('hidden', !canOpenNextBatch); continueButton.disabled = !canOpenNextBatch; }
+  // Continuations are created by the worker; no manual budget-extension or batch button is shown.
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
   const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
@@ -285,17 +276,17 @@ function renderTokenBudget(data) {
     .join(' · ');
   if ($('token-stage-breakdown')) $('token-stage-breakdown').textContent = stageSummary ? 'Por etapa: ' + stageSummary : 'Por etapa: todavía sin consumo registrado.';
   if ($('token-batch-note')) {
-    const batch = Math.max(1, Number(data.continuationNumber) || 1);
+    const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
     const prior = Math.max(0, Number(data.priorTokensUsed) || 0);
     const lifetime = Math.max(0, Number(data.lifetimeTokensUsed) || (prior + used));
-    $('token-batch-note').textContent = `Tanda ${batch} · ${fmt(used)} / ${fmt(total)} tokens. Tandas anteriores: ${fmt(prior)} · acumulado: ${fmt(lifetime)} tokens.`;
+    $('token-batch-note').textContent = `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
   }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
   const baseNote = budgetPaused
-    ? (total >= 1000000 ? 'Tanda de 1.000.000 agotada. El checkpoint está guardado; la siguiente tanda se abrirá automáticamente.' : 'Esta tarea quedó pausada. Ampliá el límite +25.000 para reanudar desde el checkpoint; el próximo aumento ya será automático.')
+    ? 'Esta tarea llegó al presupuesto configurado. El checkpoint se conserva y la continuación se crea automáticamente.'
     : remaining === 0
-      ? 'El límite se amplía automáticamente en pasos de 25.000 tokens hasta 1.000.000. Si se alcanza el máximo, el sistema abre otra tanda de 1.000.000 y conserva los checkpoints.'
+      ? 'Cada tarea tiene un máximo de 1.000.000 tokens. Al agotarlo, Swarm crea automáticamente otra tarea y conserva el checkpoint, los archivos y el consumo acumulado.'
       : remaining <= total * 0.15
       ? 'Queda menos del 15 % del presupuesto. Priorizá correcciones y validación.'
       : 'Consumo según el usage reportado por el proveedor; “Tras cierre” identifica respuestas automáticas tardías y el chat va separado.';
@@ -416,7 +407,15 @@ $('task-notice-close')?.addEventListener('click', hideTaskNotice);
 
 async function updateSelectedDetail() {
   if (!state.currentDetailId) return;
-  const data = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/history`);
+  const selectedId = state.currentDetailId;
+  const data = await api(`/api/jobs/${encodeURIComponent(selectedId)}/history`);
+  // The worker persists the parent->child link transactionally. Follow it in the UI
+  // so a long-running order stays on its newest continuation after the 1M cap.
+  if (data.continuedByJobId && data.continuedByJobId !== selectedId) {
+    await showDetail(data.continuedByJobId);
+    return;
+  }
+  if (state.currentDetailId !== selectedId) return;
   updateDetailView(data);
 }
 async function refresh() {
@@ -879,7 +878,7 @@ $('job-form').addEventListener('submit', async event => {
       await updateSelectedDetail();
     } else {
       $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
-      const tokenBudget = Number($('new-task-budget')?.value) || 50000;
+      const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
       const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
       $('objective').value = '';
       $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
@@ -888,36 +887,7 @@ $('job-form').addEventListener('submit', async event => {
   } catch (error) { $('job-submit-status').textContent = `No se pudo enviar: ${error.message}`; }
   finally { button.disabled = false; button.textContent = 'Enviar ↗'; }
 });
-$('extend-task-budget').addEventListener('click', async () => {
-  if (!state.currentDetailId) return;
-  const button = $('extend-task-budget');
-  const nextBudget = Math.min(1000000, state.currentTokenBudget + 25000);
-  if (nextBudget <= state.currentTokenBudget) return;
-  button.disabled = true; button.textContent = 'Ampliando…';
-  try {
-    await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget: nextBudget }) });
-    $('token-budget-note').textContent = `Límite ampliado a ${nextBudget.toLocaleString('es-AR')} tokens. Si estaba pausada por presupuesto, se reanudará desde el último checkpoint.`;
-    await updateSelectedDetail(); await loadJobs();
-  } catch (error) { $('token-budget-note').textContent = `No se pudo ampliar el límite: ${error.message}`; }
-  finally { button.disabled = state.currentTokenBudget >= 1000000; button.textContent = state.currentTokenBudget >= 1000000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 1000000 - state.currentTokenBudget).toLocaleString('es-AR')}`; }
-});
-$('continue-token-batch').addEventListener('click', async () => {
-  if (!state.currentDetailId) return;
-  const sourceId = state.currentDetailId;
-  const button = $('continue-token-batch');
-  button.disabled = true; button.textContent = 'Preparando nueva tanda…';
-  try {
-    const job = await api(`/api/jobs/${encodeURIComponent(sourceId)}/continue-budget`, { method: 'POST', body: '{}' });
-    $('token-budget-note').textContent = 'Nueva tanda creada: 1.000.000 tokens disponibles. Se recuperan los checkpoints y archivos de la tarea anterior.';
-    await showDetail(job.id);
-    await loadJobs();
-    await refresh();
-  } catch (error) {
-    $('token-budget-note').textContent = `No se pudo abrir la nueva tanda: ${error.message}`;
-    button.disabled = false; button.textContent = 'Continuar en nueva tanda · 1.000.000 tokens ↗';
-  }
-});
-$('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
+ $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
 $('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
 $('load-more-jobs').addEventListener('click', async () => { const button = $('load-more-jobs'); button.disabled = true; try { await loadJobs({ append: true }); } catch (error) { alert(error.message); } finally { button.disabled = false; } });
 $('show-history').addEventListener('click', async () => {
