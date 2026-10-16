@@ -41,8 +41,8 @@ async function runBrowserSmokeCheck(files) {
     const entryPath = path.join(directory, ...entry[0].replace(/\\/g, '/').split('/'));
     let document = fs.readFileSync(entryPath, 'utf8');
     const monitor = '<script>(()=>{const e=[];addEventListener("error",x=>{if(x.target===window)e.push(String(x.message||"Error JavaScript"));},true);addEventListener("unhandledrejection",x=>{const m=String(x.reason&&x.reason.message||x.reason||"Promesa rechazada");if(!/failed to fetch|fetch failed|load failed|networkerror|network request failed/i.test(m))e.push(m)});addEventListener("load",()=>setTimeout(()=>{document.documentElement.setAttribute("data-swarm-js-errors",encodeURIComponent(JSON.stringify(e.slice(0,20))));},350));})();</script>';
-    if (/<head\\b[^>]*>/i.test(document)) document = document.replace(/<head\\b[^>]*>/i, match => match + monitor);
-    else if (/<html\\b[^>]*>/i.test(document)) document = document.replace(/<html\\b[^>]*>/i, match => match + monitor);
+    if (/<head\b[^>]*>/i.test(document)) document = document.replace(/<head\b[^>]*>/i, match => match + monitor);
+    else if (/<html\b[^>]*>/i.test(document)) document = document.replace(/<html\b[^>]*>/i, match => match + monitor);
     else document = monitor + document;
     fs.writeFileSync(entryPath, document, { mode: 0o600 });
 
