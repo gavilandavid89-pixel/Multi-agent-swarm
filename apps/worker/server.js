@@ -97,7 +97,7 @@ app.post('/internal/jobs', async (req, res) => {
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId, idempotencyKey || null); enqueue(job.id); res.status(202).json(job); }
+  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId, idempotencyKey || null); if (job.created !== false) enqueue(job.id); res.status(202).json(job); }
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
