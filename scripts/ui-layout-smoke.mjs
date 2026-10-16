@@ -177,13 +177,13 @@ async function runViewport(url, profile, width, height, orientation) {
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {
+      const closed = new Promise(resolve => child.once('close', resolve));
       try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
-      await Promise.race([
-        new Promise(resolve => child.once('close', resolve)),
-        delay(1500).then(() => {
-          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
-        })
-      ]);
+      await Promise.race([closed, delay(1500)]);
+      if (child.exitCode === null) {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        await Promise.race([closed, delay(1000)]);
+      }
     }
   }
 }
