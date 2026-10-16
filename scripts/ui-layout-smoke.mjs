@@ -8,7 +8,7 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const publicDir = path.join(root, 'apps/web/public');
 const chrome = process.env.CHROME_BIN || 'chromium';
 const appSource = readFileSync(path.join(publicDir, 'app.js'), 'utf8');
-const menuClickHandlers = (appSource.match(/\\$\\('account-menu-toggle'\\)\\.addEventListener\\('click'/g) || []).length;
+const menuClickHandlers = appSource.split("$('account-menu-toggle').addEventListener('click'").length - 1;
 if (menuClickHandlers !== 1) throw new Error(`Expected exactly one account-menu click handler, found ${menuClickHandlers}.`);
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
