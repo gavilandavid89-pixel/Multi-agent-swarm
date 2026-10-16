@@ -64,9 +64,16 @@ async function runBrowserSmokeCheck(files) {
       ], {
         cwd: directory,
         env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: directory, LANG: 'C.UTF-8' },
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32'
       });
-      timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 15000);
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
+          else child.kill('SIGKILL');
+        } catch { child.kill('SIGKILL'); }
+      }, 15000);
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', chunk => { if (stdout.length < 2500000) stdout += chunk; });
