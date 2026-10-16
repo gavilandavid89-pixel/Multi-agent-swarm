@@ -90,13 +90,15 @@ app.get('/internal/jobs', async (req, res, next) => {
   try { res.json(await listJobs({ limit, offset, status: requestedStatus === 'all' ? '' : requestedStatus })); } catch (error) { next(error); }
 });
 app.post('/internal/jobs', async (req, res) => {
+  const idempotencyKey = req.get('x-swarm-idempotency-key') || '';
+  if (idempotencyKey && !/^[0-9a-f-]{36}$/i.test(idempotencyKey)) return res.status(400).json({ error: 'Clave de idempotencia inválida.' });
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'El objetivo es obligatorio.' });
   if (objective.length > 20000) return res.status(413).json({ error: 'El objetivo supera los 20.000 caracteres.' });
   const requestedBudget = Number(req.body?.tokenBudget);
   const tokenBudget = Number.isFinite(requestedBudget) ? Math.min(1000000, Math.max(4000, Math.round(requestedBudget / 1000) * 1000)) : undefined;
-  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId); enqueue(job.id); res.status(202).json(job); }
-  catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(500).json({ error: 'No se pudo guardar la tarea de forma persistente.' }); }
+  try { const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId) ? req.body.userId : null; const job = await createJob(objective, tokenBudget, userId, idempotencyKey || null); enqueue(job.id); res.status(202).json(job); }
+  catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
 app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
