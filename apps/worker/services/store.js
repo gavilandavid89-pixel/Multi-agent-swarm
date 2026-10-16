@@ -134,7 +134,7 @@ export async function saveArtifacts(id, delivery) {
 }
 export async function listArtifacts(id) {
   const record = await getPayload(id);
-  return (record?.payload?.artifacts || []).map(({ path: filePath, size, contentType }, index) => ({ index, path: filePath, size, contentType }));
+  return (record?.payload?.artifacts || []).map(({ path: filePath, size, contentType, content }, index) => ({ index, path: filePath, size, contentType, version: createHash('sha256').update(String(content ?? '')).digest('hex').slice(0, 16) }));
 }
 export async function getArtifact(id, index) {
   const record = await getPayload(id);

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {} };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '' };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -81,9 +81,11 @@ async function loadJobs({ append = false } = {}) {
 }
 function renderConversation(data) {
   const conversation = $('conversation');
-  const historyEntries = Array.isArray(data.history) ? data.history : [];
+  const historyEntries = (Array.isArray(data.history) ? data.history : []).filter(entry => !(entry?.type === 'activity' && /termin[oó] su an[aá]lisis y comparti[oó] su respuesta|termin[oó] la revisi[oó]n; resultado de la auditor[ií]a a continuaci[oó]n/i.test(String(entry.content || ''))));
   const entries = data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }, ...historyEntries] : historyEntries;
-  const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
+  const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 48;
+  const anchor = nearBottom ? null : [...conversation.querySelectorAll('[data-message-key]')].find(node => node.getBoundingClientRect().bottom > conversation.getBoundingClientRect().top + 2);
+  const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
   const existing = new Map([...conversation.querySelectorAll('[data-message-key]')].map(node => [node.dataset.messageKey, node]));
   if (!entries.length) {
     if (!conversation.querySelector('.empty-state')) conversation.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>El comité está preparando la primera intervención…</p></div>';
@@ -95,7 +97,8 @@ function renderConversation(data) {
     const type = String(entry.type || 'message');
     const key = String(entry.at || '') + '|' + agent + '|' + index;
     let node = existing.get(key);
-    const isSystem = ['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type);
+    const isUser = ['vos', 'usuario', 'user', 'tú'].includes(agent.toLocaleLowerCase('es'));
+    const isSystem = !isUser && (['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type));
     const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
     const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
     if (!node) {
@@ -105,7 +108,7 @@ function renderConversation(data) {
       node.innerHTML = '<div class="agent-avatar"></div><div class="message-body"><div class="message-heading"><strong></strong><span></span><time></time></div><div class="message-text"></div></div>';
       conversation.appendChild(node);
     }
-    node.className = `chat-message ${isSystem ? 'system-message' : 'agent-' + agentClass(agent)} ${type === 'thinking' ? 'thinking-message' : ''}`;
+    node.className = `chat-message ${isUser ? 'agent-vos' : isSystem ? 'system-message' : 'agent-' + agentClass(agent)} ${type === 'thinking' ? 'thinking-message' : ''}`;
     node.querySelector('.agent-avatar').textContent = icon;
     node.querySelector('.message-heading strong').textContent = agent;
     node.querySelector('.message-heading span').textContent = label;
@@ -116,7 +119,24 @@ function renderConversation(data) {
   const keys = new Set(entries.map((entry,index) => String(entry.at || '') + '|' + String(entry.agent || 'sistema') + '|' + index));
   [...conversation.querySelectorAll('[data-message-key]')].forEach(node => { if (!keys.has(node.dataset.messageKey)) node.remove(); });
   if (nearBottom) conversation.scrollTop = conversation.scrollHeight;
+  else if (anchor?.isConnected) conversation.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+  syncJumpLatestButton();
 }
+function syncJumpLatestButton() {
+  const conversation = $('conversation');
+  const button = $('jump-to-latest');
+  if (!conversation || !button) return;
+  const awayFromLatest = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight > 120;
+  button.classList.toggle('hidden', !awayFromLatest || !conversation.querySelector('[data-message-key]'));
+  button.setAttribute('aria-hidden', String(!awayFromLatest));
+}
+$('conversation')?.addEventListener('scroll', syncJumpLatestButton, { passive: true });
+$('jump-to-latest')?.addEventListener('click', () => {
+  const conversation = $('conversation');
+  if (!conversation) return;
+  conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'auto' });
+  syncJumpLatestButton();
+});
 function saveDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -137,6 +157,10 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
   $('artifacts-kicker').textContent = bundleReady ? 'ENTREGA VALIDADA' : jobStatus === 'needs_review' ? 'ARCHIVOS · REQUIEREN CORRECCIÓN' : 'ARCHIVOS GENERADOS · EN PROCESO';
   $('download-bundle').disabled = items.length === 0;
   $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' || jobStatus === 'failed' ? 'Descargar ZIP · revisión pendiente ↓' : 'Descargar ZIP · entrega sin validar ↓';
+  const signature = JSON.stringify({ jobId, files: items.map(file => [file.index, file.path, file.size, file.version || file.updatedAt || '']) });
+  const artifactsChanged = signature !== state.artifactsSignature;
+  if (artifactsChanged) state.artifactsSignature = signature;
+  if (artifactsChanged) {
   list.innerHTML = items.map(file => {
     const ext = String(file.path || '').split('.').pop().toLowerCase();
     const kind = ext === 'html' ? 'HTML · vista previa disponible' : ext === 'apk' ? 'APK · requiere ser un binario Android válido' : ext === 'zip' ? 'ZIP · archivo proporcionado por la tarea' : 'Archivo del proyecto';
@@ -162,13 +186,32 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
       $('artifact-preview-title').textContent = item?.path || 'Vista previa HTML';
       $('artifact-preview-status').textContent = 'Vista aislada: las conexiones de red, formularios y acceso a la sesión principal están bloqueados. La vista previa caduca en 10 minutos.';
       $('artifact-preview-frame').src = result.url;
+      state.previewedArtifactIndex = Number(button.dataset.previewIndex);
+      state.previewedArtifactJobId = jobId;
+      state.previewedArtifactVersion = signature;
       preview.classList.remove('hidden');
-      preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      preview.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     } catch (error) {
       $('artifact-preview-status').textContent = `No se pudo abrir la vista previa: ${error.message}`;
       preview.classList.remove('hidden');
     } finally { button.disabled = false; button.textContent = original; }
   }));
+  }
+  if (artifactsChanged && !$('artifact-preview').classList.contains('hidden') && state.previewedArtifactJobId === jobId && state.previewedArtifactIndex !== null) {
+    const selected = items.find(file => Number(file.index) === Number(state.previewedArtifactIndex));
+    if (selected && state.previewedArtifactVersion !== signature && state.previewRefreshPending !== signature) {
+      state.previewRefreshPending = signature;
+      api(`/api/jobs/${encodeURIComponent(jobId)}/preview-session`, { method: 'POST', body: JSON.stringify({ index: Number(selected.index) }) }).then(result => {
+        if (state.currentDetailId !== jobId || state.artifactsSignature !== signature || $('artifact-preview').classList.contains('hidden')) return;
+        const frame = $('artifact-preview-frame');
+        if (frame.src !== result.url) frame.src = result.url;
+        state.previewedArtifactVersion = signature;
+        $('artifact-preview-status').textContent = 'Vista previa actualizada con los últimos archivos guardados. La sesión sigue aislada de la página principal.';
+      }).catch(error => {
+        $('artifact-preview-status').textContent = `Los archivos cambiaron, pero no se pudo actualizar la vista previa: ${error.message}`;
+      }).finally(() => { if (state.previewRefreshPending === signature) state.previewRefreshPending = ''; });
+    }
+  }
 }
 $('download-bundle').addEventListener('click', async () => {
   const jobId = state.currentDetailId;
@@ -190,6 +233,7 @@ $('download-bundle').addEventListener('click', async () => {
 $('close-artifact-preview').addEventListener('click', () => {
   $('artifact-preview-frame').src = 'about:blank';
   $('artifact-preview').classList.add('hidden');
+  state.previewedArtifactIndex = null; state.previewedArtifactJobId = null; state.previewedArtifactVersion = '';
 });
 function closeUploadedZipPreview() {
   $('zip-preview-frame').src = 'about:blank';
@@ -1122,9 +1166,11 @@ $('files-preview-button').addEventListener('click', () => {
   preview.click();
 });
 function syncViewportAfterChange({ resetScroll = false } = {}) {
-  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  const viewport = window.visualViewport;
+  const viewportHeight = viewport?.height || window.innerHeight;
   if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
     document.documentElement.style.setProperty('--swarm-viewport-height', `${Math.round(viewportHeight)}px`);
+    document.documentElement.style.setProperty('--swarm-viewport-top', `${Math.max(0, Math.round(viewport?.offsetTop || 0))}px`);
   }
   // Resizing the visual viewport also happens when the mobile keyboard opens.
   // Only reset the document position after an actual orientation change.

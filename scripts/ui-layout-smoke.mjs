@@ -33,6 +33,22 @@ if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !a
 if (!appSource.includes("const taskTitle = job.title") || !appSource.includes("job.title || `Tarea ${job.id.slice(0,8)}`")) {
   throw new Error('Task titles must appear automatically in the conversation and activity/history lists.');
 }
+if (!appSource.includes("$('jump-to-latest')?.addEventListener('click'") || !appSource.includes('conversation.scrollTop += anchor.getBoundingClientRect().top - anchorTop')) {
+  throw new Error('Chat must preserve the reading position and provide a jump-to-latest control.');
+}
+if (!appSource.includes('file.version || file.updatedAt') || !appSource.includes('if (artifactsChanged) {')) {
+  throw new Error('Artifact rows must update only when file content changes, avoiding preview/list flicker.');
+}
+if (!appSource.includes("['vos', 'usuario', 'user', 'tú'].includes(agent.toLocaleLowerCase('es'))")) {
+  throw new Error('Messages from the user must render using the user-side chat bubble style.');
+}
+if (!appSource.includes("setProperty('--swarm-viewport-top'") || !appSource.includes("setProperty('--swarm-viewport-height'")) {
+  throw new Error('Mobile keyboard and orientation handling must use the visual viewport dimensions.');
+}
+const styleSource = readFileSync(path.join(publicDir, 'styles.css'), 'utf8');
+if (!styleSource.includes('touch-action:pan-y') || !styleSource.includes('.agent-vos .message-body') || !styleSource.includes('.jump-to-latest')) {
+  throw new Error('Drawers must be touch-scrollable, user messages right-aligned, and latest-message navigation visible.');
+}
 
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')

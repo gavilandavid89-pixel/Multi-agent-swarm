@@ -97,7 +97,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
   for (let i = transcript.length - 1; i >= 0; i--) {
     if (transcript[i].agent === agent && transcript[i].type === 'thinking') {
-      transcript[i] = { ...transcript[i], type: 'activity', content: 'Terminó su análisis y compartió su respuesta.' };
+      transcript.splice(i, 1);
       break;
     }
   }
@@ -143,31 +143,31 @@ async function runJob(jobId) {
   let payload = initial.payload; let { proposal = '', critique = '', strategy = '', coherence = '', delivery = '', partialDelivery = '' } = payload;
   try {
     if (!proposal) {
-      await startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Estoy analizando el objetivo y preparando una propuesta técnica.');
+      await startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Voy a ordenar el objetivo, fijar las decisiones técnicas y dejar criterios claros para que el equipo pueda comprobar el resultado.');
       await assertTaskTokenBudget(jobId);
       proposal = await agenteArquitecto(objective, onRetry('Arquitecto', 'Arquitectura'));
       await checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
     }
     if (!critique) {
-      await startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Estoy revisando la propuesta para encontrar riesgos, contradicciones y casos límite.');
+      await startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Voy a poner a prueba la propuesta: buscaré contradicciones, situaciones límite y fallos que podrían pasar inadvertidos.');
       await assertTaskTokenBudget(jobId);
       critique = await agenteEsceptico(objective, proposal, onRetry('Escéptico', 'Auditoría escéptica'));
       await checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique });
     }
     if (!strategy) {
-      await startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Estoy comparando la propuesta y las objeciones para acordar un plan.');
+      await startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Revisaré las objeciones una por una y decidiré qué controles son necesarios antes de avanzar.');
       await assertTaskTokenBudget(jobId);
       strategy = await agenteArbitro(objective, proposal, critique, onRetry('Árbitro', 'Síntesis técnica'));
       await checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
     }
     if (!coherence) {
-      await startAgent(jobId, 'Mapa de coherencia', 30, 'Coordinador de coherencia', 'Estoy definiendo los contratos compartidos, dependencias y reglas que todos los agentes deberán respetar.');
+      await startAgent(jobId, 'Mapa de coherencia', 30, 'Coordinador de coherencia', 'Voy a comprobar cómo encajan las partes, qué información se pasan entre sí y qué acuerdos necesita respetar el equipo.');
       await assertTaskTokenBudget(jobId);
       coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry('Coordinador de coherencia', 'Mapa de coherencia'));
       await checkpoint(jobId, 'Mapa de coherencia', 32, 'Coordinador de coherencia', coherence, { proposal, critique, strategy, coherence });
     }
     if (!delivery) {
-      await startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Estoy preparando la entrega respetando el mapa compartido de coherencia.');
+      await startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Con el plan acordado, voy a construir los archivos procurando que las piezas encajen entre sí; después pasarán una revisión independiente.');
       await assertTaskTokenBudget(jobId);
       if (partialDelivery) {
         delivery = partialDelivery;
@@ -189,12 +189,12 @@ async function runJob(jobId) {
       if (!saved) {
         let coherenceReview = resumeState.coherenceReview;
         if (!coherenceReview) {
-          await startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Estoy comprobando que los archivos respeten el mapa común y que sus interfaces sean compatibles.');
+          await startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Voy a revisar las conexiones entre archivos y buscar incompatibilidades concretas antes de que el proyecto llegue a la validación final.');
           await assertTaskTokenBudget(jobId);
           coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry('Coordinador de coherencia', `Auditoría de coherencia ${round}`));
           await checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, coherenceReviewRound: round, activeValidationRound: round, delivery, validation: null, syntax: null });
         }
-        await startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Estoy haciendo una revisión independiente y una comprobación determinista.');
+        await startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
         await assertTaskTokenBudget(jobId);
         validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`));
         if (coherenceReview.verdict !== 'APPROVED') {
@@ -210,7 +210,7 @@ async function runJob(jobId) {
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
         for (let i = transcript.length - 1; i >= 0; i--) {
           if (transcript[i].agent === 'Validador' && transcript[i].type === 'thinking') {
-            transcript[i] = { ...transcript[i], type: 'activity', content: 'Terminó la revisión; resultado de la auditoría a continuación.' };
+            transcript.splice(i, 1);
             break;
           }
         }
