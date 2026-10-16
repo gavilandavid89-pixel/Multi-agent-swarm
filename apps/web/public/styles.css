@@ -247,3 +247,103 @@ body.auth-gate .shell{min-height:100vh;min-height:100dvh;max-width:480px;padding
 body.auth-gate footer,body.auth-gate .task-notice{display:none!important}
 
 .account-key-panel{width:min(300px,calc(100vw - 50px));padding:12px;margin:4px 0 8px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:7px}.account-key-panel label{font-size:10px;color:var(--muted)}.account-key-field{display:flex;align-items:center;gap:6px}.account-key-field input{min-width:0;padding:9px 10px;font-size:13px;letter-spacing:1px}.account-key-field .icon-button{flex-shrink:0}.account-key-panel .mini-button{align-self:flex-start}.account-menu-items{max-height:min(75vh,560px);overflow-y:auto}
+
+
+/* Full-screen chat workspace: the page stays still and only chat/settings content scrolls. */
+body:not(.auth-gate){height:100vh;height:100dvh;overflow:hidden;overscroll-behavior:none}
+body:not(.auth-gate) .shell{width:100%;max-width:none;height:100vh;height:100dvh;min-height:0;margin:0;padding:max(8px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));overflow:hidden;gap:0}
+body:not(.auth-gate) .topbar{flex:0 0 auto;min-height:42px;padding:2px 0 8px;margin:0 0 8px;gap:10px}
+body:not(.auth-gate) #app-content{height:100%;max-height:100%;min-height:0;overflow:hidden;gap:8px}
+body:not(.auth-gate) #app-content>.composer{order:2;position:relative;inset:auto;flex:0 0 auto;max-height:44%;overflow-y:auto;overscroll-behavior:contain;margin:0;padding:10px 12px;border-radius:16px}
+body:not(.auth-gate) .chat-composer-heading{margin:0 0 6px}
+body:not(.auth-gate) .chat-composer-heading h2{font-size:16px}
+body:not(.auth-gate) .chat-composer-heading .pill{padding:4px 8px;font-size:9px}
+body:not(.auth-gate) .global-chat-form textarea{min-height:54px;max-height:24dvh;resize:none;padding:10px 12px;line-height:1.4}
+body:not(.auth-gate) .chat-composer-controls{margin-top:7px;gap:7px}
+body:not(.auth-gate) .chat-composer-controls .history-filter{padding:9px 10px}
+body:not(.auth-gate) #job-submit-status{margin:5px 0 0;font-size:10px;line-height:1.35}
+body:not(.auth-gate) #detail-panel{order:1;flex:1 1 auto;min-height:0;max-height:100%;overflow:hidden;margin:0;padding:10px 12px;gap:7px}
+body:not(.auth-gate) #detail-panel>.section-head{flex:0 0 auto;margin:0;gap:8px}
+body:not(.auth-gate) #detail-title{font-size:16px}
+body:not(.auth-gate) .detail-actions{gap:6px}
+body:not(.auth-gate) .detail-actions #copy-detail{display:none}
+body:not(.auth-gate) .task-status{display:flex!important;flex:0 0 auto;margin:0;padding:7px 10px;min-height:0;gap:10px}
+body:not(.auth-gate) .task-status strong{font-size:12px}
+body:not(.auth-gate) .progress-track{display:block!important;flex:0 0 auto;height:4px;margin:0;overflow:hidden}
+body:not(.auth-gate) .token-budget{display:block!important;flex:0 0 auto;max-height:86px;overflow:auto;overscroll-behavior:contain;margin:0;padding:7px 9px;border-radius:10px}
+body:not(.auth-gate) .token-budget-head{margin:0;align-items:center;gap:8px}
+body:not(.auth-gate) .token-budget-head .panel-kicker{margin:0;font-size:8px}
+body:not(.auth-gate) .token-budget-head strong{font-size:11px}
+body:not(.auth-gate) .token-budget-track{height:3px;margin:5px 0}
+body:not(.auth-gate) .token-budget-stats{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:9px;line-height:1.25}
+body:not(.auth-gate) .token-budget-note,body:not(.auth-gate) #token-stage-breakdown,body:not(.auth-gate) #token-chain-note{display:none}
+body:not(.auth-gate) .detail-hint{display:block!important;flex:0 0 auto;margin:0;font-size:9px;line-height:1.25}
+body:not(.auth-gate) #agent-memory-panel{flex:0 0 auto;margin:0;padding:0;border:0;background:transparent}
+body:not(.auth-gate) #agent-memory-panel>.section-head,body:not(.auth-gate) #agent-memory-panel>p,body:not(.auth-gate) #agent-memory-panel>label,body:not(.auth-gate) #agent-memory-panel>select,body:not(.auth-gate) #agent-memory-panel>pre{display:none}
+body:not(.auth-gate) #agent-memory-panel:before{content:"Memoria de agentes disponible en Diagnóstico Técnico";display:block;color:var(--muted);font-size:9px}
+body:not(.auth-gate) .agent-reply-panel{display:none!important}
+body:not(.auth-gate) #conversation{order:10;display:flex;flex:1 1 0;min-height:0;max-height:none;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:4px 4px max(10px,env(safe-area-inset-bottom));gap:10px}
+body:not(.auth-gate) .chat-message{max-width:min(92%,880px)}
+body:not(.auth-gate) .message-body{padding:10px 12px}
+body:not(.auth-gate) .message-text{font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+body:not(.auth-gate) .welcome-chat{order:1;flex:1 1 auto;min-height:0;max-height:100%;overflow-y:auto;overscroll-behavior:contain;padding:18px 12px}
+body:not(.auth-gate) #api-settings-panel{flex:1 1 auto;min-height:0;max-height:100%;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;margin:0;padding:16px}
+body:not(.auth-gate) .account-menu-items{max-width:calc(100vw - 20px)}
+body:not(.auth-gate) footer{display:none}
+body:not(.auth-gate) .files-drawer{max-height:calc(100dvh - 90px);overflow-y:auto;overscroll-behavior:contain}
+body.auth-gate{min-height:100vh;min-height:100dvh;overflow-y:auto;overscroll-behavior:contain}
+body.auth-gate .shell{min-height:100vh;min-height:100dvh;padding: max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+body.auth-gate #access-panel{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain}
+#account-code-value{font-weight:800;letter-spacing:2px}
+#copy-account-code{margin:0 0 6px}
+@media(max-width:700px){
+ body:not(.auth-gate) .shell{padding: max(6px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}
+ body:not(.auth-gate) .topbar{min-height:38px;padding-bottom:6px;margin-bottom:6px}
+ body:not(.auth-gate) .brand{font-size:18px;gap:8px}
+ body:not(.auth-gate) .brand-mark{width:30px;height:30px;font-size:20px}
+ body:not(.auth-gate) .connection{font-size:10px;gap:7px}
+ body:not(.auth-gate) #connection-label{max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ body:not(.auth-gate) #app-content{gap:6px}
+ body:not(.auth-gate) #app-content>.composer{max-height:48%;padding:9px;border-radius:14px}
+ body:not(.auth-gate) .chat-composer-heading h2{font-size:14px}
+ body:not(.auth-gate) .chat-composer-heading .pill{display:none}
+ body:not(.auth-gate) .global-chat-form textarea{min-height:48px;max-height:20dvh;font-size:14px}
+ body:not(.auth-gate) .chat-composer-controls{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+ body:not(.auth-gate) #chat-target{grid-column:1/-1;width:100%;min-height:36px}
+ body:not(.auth-gate) .budget-select-label{display:none}
+ body:not(.auth-gate) .chat-composer-controls .muted{font-size:9px}
+ body:not(.auth-gate) .chat-composer-controls #submit-job{min-height:38px;padding:8px 12px}
+ body:not(.auth-gate) #job-submit-status{font-size:9px}
+ body:not(.auth-gate) #detail-panel{padding:8px;gap:5px}
+ body:not(.auth-gate) #detail-panel>.section-head{align-items:center}
+ body:not(.auth-gate) #detail-live{font-size:8px}
+ body:not(.auth-gate) #close-detail{width:28px;height:28px}
+ body:not(.auth-gate) .task-status{padding:6px 8px}
+ body:not(.auth-gate) .task-status>div{gap:2px}
+ body:not(.auth-gate) .task-status #detail-progress-label{font-size:9px}
+ body:not(.auth-gate) .token-budget{max-height:66px;padding:6px 8px}
+ body:not(.auth-gate) .token-budget-stats{display:none}
+ body:not(.auth-gate) .detail-hint{font-size:8px}
+ body:not(.auth-gate) #conversation{padding:2px 2px max(8px,env(safe-area-inset-bottom));gap:8px}
+ body:not(.auth-gate) .chat-message{max-width:100%}
+ body:not(.auth-gate) .message-text{font-size:12px;line-height:1.5}
+ body:not(.auth-gate) .agent-avatar{width:29px;height:29px;flex:0 0 29px;font-size:12px}
+ body:not(.auth-gate) .message-body{padding:9px 10px}
+ body:not(.auth-gate) .welcome-chat{padding:14px 8px}
+ body:not(.auth-gate) #api-settings-panel{padding:12px}
+}
+@media(orientation:landscape) and (max-height:520px){
+ body:not(.auth-gate) .topbar{min-height:30px;padding-bottom:4px;margin-bottom:4px}
+ body:not(.auth-gate) .brand-mark{width:26px;height:26px;font-size:17px}
+ body:not(.auth-gate) #app-content{gap:4px}
+ body:not(.auth-gate) #app-content>.composer{max-height:39%;padding:7px 10px}
+ body:not(.auth-gate) .chat-composer-heading{margin-bottom:3px}
+ body:not(.auth-gate) .global-chat-form textarea{min-height:38px;max-height:14dvh;padding:7px 9px}
+ body:not(.auth-gate) .chat-composer-controls{margin-top:4px}
+ body:not(.auth-gate) #job-submit-status{display:none}
+ body:not(.auth-gate) #detail-panel{padding:6px 8px;gap:4px}
+ body:not(.auth-gate) .token-budget{max-height:46px}
+ body:not(.auth-gate) .token-budget-stats{display:none}
+ body:not(.auth-gate) .detail-hint{display:none!important}
+ body:not(.auth-gate) .welcome-chat{padding:6px}
+}
