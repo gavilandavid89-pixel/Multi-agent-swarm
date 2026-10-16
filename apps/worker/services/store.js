@@ -171,7 +171,7 @@ export async function createContinuationJob(sourceId) {
     const timestamp = closedAt;
     const childId = randomUUID();
     const childRow = {
-      id: childId, status: 'queued', stage: 'Nueva tanda · recuperando checkpoint',
+      id: childId, status: 'queued', stage: 'Continuación automática · recuperando checkpoint',
       progress: Math.min(Number(source.progress) || 0, 90),
       attempt: Number(source.attempt) || 0,
       created_at: timestamp, updated_at: timestamp, error: null,
