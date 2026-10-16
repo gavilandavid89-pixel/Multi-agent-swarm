@@ -25,6 +25,9 @@ if (!appSource.includes("window.addEventListener('orientationchange'") || !appSo
 if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
   throw new Error('Task history must be reachable from the three-dot menu and moved to its drawer.');
 }
+if (!appSource.includes("const taskTitle = job.title") || !appSource.includes("job.title || `Tarea ${job.id.slice(0,8)}`")) {
+  throw new Error('Task titles must appear automatically in the conversation and activity/history lists.');
+}
 
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
