@@ -45,11 +45,13 @@
       validatedInvite = code;
       gate.classList.add('hidden');
       form.classList.remove('hidden');
+      loginLink.classList.add('hidden');
       status.textContent = '';
       $('register-username').focus();
     } catch (error) {
       status.textContent = error.message;
-      // Stay on the invite screen. Login is a separate, explicit choice and never an automatic fallback.
+      // Stay on the invite screen; offer login only as an explicit, separate action.
+      loginLink.classList.remove('hidden');
     } finally {
       button.disabled = false;
     }
