@@ -176,7 +176,7 @@ export async function createJob(objective, requestedTokenBudget, userId = null, 
       const { rows: existingJobs } = await client.query('SELECT * FROM jobs WHERE id=$1', [existingKey.job_id]);
       if (!existingJobs[0]) throw new Error('La clave de idempotencia apunta a una tarea inexistente.');
       await client.query('COMMIT');
-      return toPublic(existingJobs[0]);
+      return { ...toPublic(existingJobs[0]), created: false };
     }
     await client.query(
       'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
@@ -184,7 +184,7 @@ export async function createJob(objective, requestedTokenBudget, userId = null, 
     );
     await client.query('UPDATE job_request_idempotency SET job_id=$2 WHERE idempotency_key=$1', [idempotencyKey, row.id]);
     await client.query('COMMIT');
-    return toPublic(row);
+    return { ...toPublic(row), created: true };
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch {}
     throw error;
