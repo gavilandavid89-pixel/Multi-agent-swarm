@@ -66,7 +66,7 @@ async function ensureWorkerAwake() {
       }
       if (attempt < WORKER_WAKE_RETRY_DELAYS_MS.length) await sleep(WORKER_WAKE_RETRY_DELAYS_MS[attempt]);
     }
-    const error = new Error(`El motor de agentes no volvió a estar listo después de intentar despertarlo durante aproximadamente un minuto (${lastDetail}). Esta operación no quedó confirmada; revisá el worker e intentá nuevamente.`);
+    const error = new Error(`El motor de agentes no volvió a estar listo después de intentar despertarlo durante hasta dos minutos (${lastDetail}). Esta operación no quedó confirmada; revisá el worker e intentá nuevamente.`);
     error.status = 503;
     throw error;
   })();
