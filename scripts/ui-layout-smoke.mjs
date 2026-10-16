@@ -38,6 +38,9 @@ const injected = `
       conversationScrollable: conversation.scrollHeight > conversation.clientHeight,
       composerTop: Math.round(composerRect.top),
       composerBottom: Math.round(composerRect.bottom),
+      composerPosition: getComputedStyle(composer).position,
+      filesButtonPosition: getComputedStyle(document.getElementById('files-menu-toggle')).position,
+      filesDrawerPosition: getComputedStyle(document.getElementById('files-drawer')).position,
       composerVisible: composerRect.top >= 0 && composerRect.bottom <= window.innerHeight + 2,
       detailHeight: Math.round(document.getElementById('detail-panel').getBoundingClientRect().height),
       detailChildren: Array.from(document.getElementById('detail-panel').children).map(element => ({
@@ -172,6 +175,9 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.conversationHeight < 80) issues.push(`conversation is too short: ${report.conversationHeight}px`);
     if (!report.conversationScrollable) issues.push('conversation did not become its own scroll region');
     if (!report.composerVisible) issues.push(`composer is outside viewport (${report.composerTop}–${report.composerBottom}px)`);
+    if (report.composerPosition === 'fixed' || report.composerPosition === 'sticky') issues.push(`composer must stay in normal flow, got position ${report.composerPosition}`);
+    if (report.filesButtonPosition === 'fixed') issues.push('files button must not float over the conversation');
+    if (report.filesDrawerPosition === 'fixed') issues.push('files drawer must be anchored to the app shell, not the viewport');
     if (issues.length) throw new Error(`${orientation} layout failed: ${issues.join('; ')}. Report: ${JSON.stringify(report)}`);
     console.log(`PASS ${orientation}: ${width}x${height}; page locked, conversation scrolls independently, composer visible.`);
   } finally {
