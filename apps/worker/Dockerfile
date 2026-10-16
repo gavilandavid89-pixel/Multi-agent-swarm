@@ -10,4 +10,5 @@ COPY . .
 RUN npm run check && mkdir -p /app/data/artifacts && chown -R node:node /app/data
 ENV NODE_ENV=production
 USER node
+RUN node scripts/browser-smoke-test.mjs
 CMD ["node", "server.js"]
