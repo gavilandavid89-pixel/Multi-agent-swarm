@@ -276,12 +276,17 @@ body:not(.auth-gate) .token-budget-head .panel-kicker{margin:0;font-size:8px}
 body:not(.auth-gate) .token-budget-head strong{font-size:11px}
 body:not(.auth-gate) .token-budget-track{height:3px;margin:5px 0}
 body:not(.auth-gate) .token-budget-stats{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:9px;line-height:1.25}
-body:not(.auth-gate) .token-budget-note,body:not(.auth-gate) #token-stage-breakdown,body:not(.auth-gate) #token-chain-note{display:none}
-body:not(.auth-gate) .detail-hint{display:block!important;flex:0 0 auto;margin:0;font-size:9px;line-height:1.25}
-body:not(.auth-gate) #agent-memory-panel{flex:0 0 auto;margin:0;padding:0;border:0;background:transparent}
-body:not(.auth-gate) #agent-memory-panel>.section-head,body:not(.auth-gate) #agent-memory-panel>p,body:not(.auth-gate) #agent-memory-panel>label,body:not(.auth-gate) #agent-memory-panel>select,body:not(.auth-gate) #agent-memory-panel>pre{display:none}
-body:not(.auth-gate) #agent-memory-panel:before{content:"Memoria de agentes disponible en Diagnóstico Técnico";display:block;color:var(--muted);font-size:9px}
+body:not(.auth-gate) #token-budget-note,body:not(.auth-gate) #token-stage-breakdown,body:not(.auth-gate) #token-chain-note{display:none}
+body:not(.auth-gate) #detail-hint{display:block!important;flex:0 0 auto;margin:0;font-size:9px;line-height:1.25}
+body:not(.auth-gate) #agent-memory-panel{flex:0 0 auto;max-height:36%;overflow:auto;overscroll-behavior:contain;margin:0;padding:0;border:0;background:transparent}
+body:not(.auth-gate) #agent-memory-panel>.agent-memory-summary{display:block;cursor:pointer;color:var(--muted);font-size:9px;line-height:1.5;padding:2px 0;list-style-position:inside}
+body:not(.auth-gate) #agent-memory-panel[open]{padding:8px;border:1px solid var(--line);border-radius:10px;background:#171a1dcc}
+body:not(.auth-gate) #agent-memory-panel[open] .agent-memory-content{padding-top:6px}
+body:not(.auth-gate) #agent-memory-panel[open] .section-head{margin-bottom:6px}
+body:not(.auth-gate) #agent-memory-panel[open] .memory-document{max-height:120px}
+body:not(.auth-gate) #agent-memory-panel:not([open]) .agent-memory-content{display:none}
 body:not(.auth-gate) .agent-reply-panel{display:none!important}
+body:not(.auth-gate) #artifacts-panel{order:20;flex:0 0 auto;max-height:25%;overflow:auto;overscroll-behavior:contain}
 body:not(.auth-gate) #conversation{order:10;display:flex;flex:1 1 0;min-height:0;max-height:none;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:4px 4px max(10px,env(safe-area-inset-bottom));gap:10px}
 body:not(.auth-gate) .chat-message{max-width:min(92%,880px)}
 body:not(.auth-gate) .message-body{padding:10px 12px}
