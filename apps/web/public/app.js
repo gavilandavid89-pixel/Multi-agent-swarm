@@ -72,7 +72,7 @@ async function loadJobs({ append = false } = {}) {
   if (!state.jobs.length) {
     list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
   } else {
-    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name">Tarea ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
   }
   $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
   $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
@@ -352,7 +352,9 @@ function updateDetailView(data) {
   const job = data.job || {};
   const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
   const continuationLabel = data.continuationOf ? ` · Continuación ${taskNumber}` : '';
-  $('detail-title').textContent = `Agentes · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
+  const taskTitle = job.title || (job.id ? `Tarea ${job.id.slice(0,8)}` : 'Conversación de agentes');
+  $('detail-title').textContent = `${taskTitle}${continuationLabel}`;
+  $('detail-title').title = taskTitle;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Continuación ${taskNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
@@ -926,7 +928,7 @@ $('job-form').addEventListener('submit', async event => {
       const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
       const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
       $('objective').value = ''; resizeObjectiveInput();
-      $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
+      $('job-submit-status').textContent = `Orden recibida: ${job.title || 'Nueva tarea'}. Abriendo la conversación…`;
       await showDetail(job.id); await refresh();
     }
   } catch (error) { $('job-submit-status').textContent = `No se pudo enviar: ${error.message}`; }
@@ -959,7 +961,7 @@ $('show-history').addEventListener('click', async () => {
       const pct = done ? 100 : job.status === 'needs_review' ? 99 : failed ? null : null;
       const progress = active ? '<div class="history-progress indeterminate"><span></span></div>' : pct !== null ? `<div class="history-progress"><span style="width:${pct}%"></span></div>` : '';
       const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · actividad en curso` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
-      return `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
+      return `<div class="history-row"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(statusNames[job.status] || job.status)} · ${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
     }).join('') || '<p class="muted tiny">Sin registros.</p>';
     list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => { closeHistoryDrawer(); showDetail(button.dataset.history); }));
   } catch (error) { alert(error.message); }
