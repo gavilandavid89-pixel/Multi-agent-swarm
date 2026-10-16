@@ -346,13 +346,13 @@ body.auth-gate #access-panel{max-height:calc(100dvh - 32px);overflow-y:auto;over
  body:not(.auth-gate) .global-chat-form textarea{min-height:38px;max-height:14dvh;padding:7px 9px}
  body:not(.auth-gate) .chat-composer-controls{margin-top:4px}
  body:not(.auth-gate) #job-submit-status{display:none}
- body:not(.auth-gate) #detail-panel{padding:4px 6px;gap:3px}
+ body:not(.auth-gate) #detail-panel{padding:3px 6px;gap:2px}
  body:not(.auth-gate) #detail-panel>.section-head{min-height:0;gap:4px;align-items:center}
  body:not(.auth-gate) #detail-title{font-size:12px;line-height:1.15}
  body:not(.auth-gate) .detail-actions{gap:3px}
  body:not(.auth-gate) #detail-live{font-size:7px;line-height:1.1}
  body:not(.auth-gate) #close-detail{width:24px;height:24px;min-height:24px}
- body:not(.auth-gate) .task-status{padding:3px 6px;gap:5px}
+ body:not(.auth-gate) .task-status{padding:2px 5px;gap:5px}
  body:not(.auth-gate) .task-status>div{gap:1px;min-width:0}
  body:not(.auth-gate) #detail-stage{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:1.2}
  body:not(.auth-gate) #detail-status{font-size:8px;line-height:1.1}
