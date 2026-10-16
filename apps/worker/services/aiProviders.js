@@ -364,7 +364,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     throw new Error(`Error permanente de ${providerName} (${response.status}, modelo ${model}): ${body.slice(0, 800)}`);
   }
 }
-const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
+const sys = (role, instructions) => ({ role: 'system', content: `Sos el agente ${role} de un comité de ingeniería. Respondé en español salvo que el objetivo requiera otro idioma. Explicá las decisiones internas con lenguaje natural: evitá frases opacas como “mapa compartido de coherencia” si no aportan una explicación; describí qué archivos, dependencias o comportamientos deben encajar. Sé específico y no afirmes haber ejecutado pruebas que no ejecutaste. ${instructions}` });
 function userModel(slot) {
   const context = currentUserProviders();
   if (!context) return null;
