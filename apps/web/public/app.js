@@ -676,6 +676,33 @@ async function loadManagedUsers() {
       accountStatus.className = `managed-user-status ${user.disabledAt ? 'disabled' : 'active'}`;
       accountStatus.textContent = user.disabledAt ? 'Desactivada' : 'Activa';
       main.append(name, meta, accountStatus);
+      const identifiers = document.createElement('div');
+      identifiers.className = 'managed-user-identifiers';
+      const addIdentifier = (label, value) => {
+        const line = document.createElement('div');
+        line.className = 'job-meta';
+        const text = document.createElement('span');
+        text.textContent = `${label}: ${value || 'No disponible'}`;
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'mini-button';
+        copy.textContent = 'Copiar';
+        copy.disabled = !value;
+        copy.addEventListener('click', async () => {
+          try {
+            if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+            await navigator.clipboard.writeText(String(value));
+            status.textContent = `${label} copiado para ${user.username}.`;
+          } catch {
+            status.textContent = `No se pudo copiar automáticamente. ${label}: ${value}`;
+          }
+        });
+        line.append(text, copy);
+        identifiers.append(line);
+      };
+      addIdentifier('Código de cuenta', user.accountCode);
+      addIdentifier('UUID', user.id);
+      main.append(identifiers);
       row.append(main);
       if (user.role === 'user') {
         const button = document.createElement('button');
