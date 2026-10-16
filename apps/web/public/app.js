@@ -11,7 +11,7 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
 function showApp() { document.body.classList.remove('auth-gate'); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -490,7 +490,7 @@ $('key-access-form').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 $('show-key-login').addEventListener('click', () => { $('invite-gate-form')?.classList.add('hidden'); $('register-form')?.classList.add('hidden'); $('access-form')?.classList.add('hidden'); $('key-access-form').classList.remove('hidden'); $('show-login')?.classList.add('hidden'); $('show-key-login').classList.add('hidden'); });
-$('back-to-password-login').addEventListener('click', () => { $('key-access-form').classList.add('hidden'); $('access-form').classList.remove('hidden'); });
+$('back-to-password-login').addEventListener('click', () => { $('key-access-form').classList.add('hidden'); $('access-form').classList.remove('hidden'); $('show-key-login').classList.remove('hidden'); });
 $('toggle-login-key').addEventListener('click', () => { const input = $('key-access-secret'); input.type = input.type === 'password' ? 'text' : 'password'; $('toggle-login-key').setAttribute('aria-label', input.type === 'password' ? 'Mostrar clave' : 'Ocultar clave'); });
 
 // Account menu and compact, dynamically-added API fields.
@@ -751,7 +751,6 @@ $('open-account-key').addEventListener('click', async event => {
 $('toggle-account-key').addEventListener('click', event => { event.stopPropagation(); state.accountKeyVisible = !state.accountKeyVisible; $('account-key-value').type = state.accountKeyVisible ? 'text' : 'password'; $('toggle-account-key').setAttribute('aria-label', state.accountKeyVisible ? 'Ocultar clave' : 'Mostrar clave'); $('toggle-account-key').textContent = state.accountKeyVisible ? '◎' : '◉'; });
 $('copy-account-code').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-code-value').value); $('account-key-status').textContent = 'Código de cuenta copiado.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Seleccioná el código y copialo manualmente.'; } });
 $('copy-account-key').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-key-value').value); $('account-key-status').textContent = 'Clave copiada al portapapeles.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Podés revelarla y copiarla manualmente.'; } });
-$('show-key-login').classList.remove('hidden');
 $('open-api-settings').addEventListener('click', async () => {
   $('account-menu-items').classList.add('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.remove('hidden');
   $('api-settings-status').textContent = 'Cargando tus APIs…';
