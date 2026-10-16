@@ -73,7 +73,7 @@ function launchChrome(profile) {
       '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
       '--disable-extensions', '--no-first-run', '--remote-debugging-port=0',
       `--user-data-dir=${profile}`, 'about:blank'
-    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
     let stderr = '';
     let settled = false;
     const timeout = setTimeout(() => {
@@ -176,7 +176,15 @@ async function runViewport(url, profile, width, height, orientation) {
     console.log(`PASS ${orientation}: ${width}x${height}; page locked, conversation scrolls independently, composer visible.`);
   } finally {
     try { devtools?.socket.close(); } catch {}
-    child.kill('SIGTERM');
+    if (child.exitCode === null) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
+      await Promise.race([
+        new Promise(resolve => child.once('close', resolve)),
+        delay(1500).then(() => {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        })
+      ]);
+    }
   }
 }
 
