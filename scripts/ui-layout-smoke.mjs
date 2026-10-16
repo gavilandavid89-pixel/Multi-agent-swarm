@@ -24,7 +24,7 @@ if (!appSource.includes("window.addEventListener('orientationchange'") || !appSo
 }
 if (!appSource.includes("if (resetScroll && !document.body.classList.contains('auth-gate'))") ||
     !appSource.includes("window.addEventListener('orientationchange', () => scheduleViewportSync(true)") ||
-    !appSource.includes("window.addEventListener('resize', () => scheduleViewportSync())")) {
+    !appSource.includes("window.addEventListener('resize', () => scheduleViewportSync(),")) {
   throw new Error('Mobile keyboard/viewport resizing must not force scroll-to-top; only orientation changes may reset the page position.');
 }
 if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
