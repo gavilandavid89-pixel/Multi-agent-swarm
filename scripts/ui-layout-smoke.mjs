@@ -10,6 +10,16 @@ const chrome = process.env.CHROME_BIN || 'chromium';
 const appSource = readFileSync(path.join(publicDir, 'app.js'), 'utf8');
 const menuClickHandlers = appSource.split("$('account-menu-toggle').addEventListener('click'").length - 1;
 if (menuClickHandlers !== 1) throw new Error(`Expected exactly one account-menu click handler, found ${menuClickHandlers}.`);
+const menuHandlerStart = appSource.indexOf("$('account-menu-toggle').addEventListener('click'");
+const menuHandlerEnd = appSource.indexOf("\n$('account-menu-items').addEventListener('click'", menuHandlerStart);
+const menuHandler = appSource.slice(menuHandlerStart, menuHandlerEnd);
+if (!menuHandler.includes('event.stopPropagation()') || !menuHandler.includes("items.classList.toggle('hidden', !opening)") || !menuHandler.includes("setAttribute('aria-expanded', String(opening))")) {
+  throw new Error('Account three-dot menu must stop bubbling, toggle its items, and update aria-expanded.');
+}
+if (!appSource.includes("event.key === 'Enter' && !event.shiftKey") || !appSource.includes('resizeObjectiveInput')) {
+  throw new Error('Chat composer must support Enter-to-send and controlled automatic height.');
+}
+
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
   .replace(/<script src="\/invite-gate\.js[^"]*" defer><\/script>\s*/g, '');
