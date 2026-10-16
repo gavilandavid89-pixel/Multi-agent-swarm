@@ -15,6 +15,9 @@ const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const configuredShutdownGrace = Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '20000', 10);
 const SHUTDOWN_GRACE_MS = Number.isFinite(configuredShutdownGrace) ? Math.min(30000, Math.max(1000, configuredShutdownGrace)) : 20000;
+const WORKER_WAKE_RETRY_DELAYS_MS = [2000, 4000, 6000, 8000, 10000, 10000, 10000, 10000];
+let workerReadyUntil = 0;
+let workerWakePromise = null;
 const failedAuth = new Map();
 const jobCreateWindows = new Map();
 const previewSessions = new Map();
@@ -40,6 +43,36 @@ app.get('/readyz', async (_req, res) => {
     res.status(503).json({ ok: false, role: 'bridge', database: 'unavailable', workerConfigured });
   }
 });
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function ensureWorkerAwake() {
+  if (Date.now() < workerReadyUntil) return;
+  if (workerWakePromise) return workerWakePromise;
+  workerWakePromise = (async () => {
+    let lastDetail = 'sin respuesta del endpoint de disponibilidad';
+    for (let attempt = 0; attempt <= WORKER_WAKE_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const response = await fetch(`${WORKER_BASE_URL}/readyz`, { signal: AbortSignal.timeout(6000) });
+        const rawBody = await response.text().catch(() => '');
+        let data = {};
+        try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+        if (response.ok && data?.ok === true && data?.role === 'worker') {
+          workerReadyUntil = Date.now() + 5000;
+          console.info('[bridge][worker_ready_after_wake]', JSON.stringify({ attempts: attempt + 1 }));
+          return;
+        }
+        lastDetail = `HTTP ${response.status}${data?.database === 'unavailable' ? ' (PostgreSQL aún no está listo)' : ''}`;
+      } catch (cause) {
+        lastDetail = String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 180);
+      }
+      if (attempt < WORKER_WAKE_RETRY_DELAYS_MS.length) await sleep(WORKER_WAKE_RETRY_DELAYS_MS[attempt]);
+    }
+    const error = new Error(`El motor de agentes no volvió a estar listo después de intentar despertarlo durante aproximadamente un minuto (${lastDetail}). Esta operación no quedó confirmada; revisá el worker e intentá nuevamente.`);
+    error.status = 503;
+    throw error;
+  })();
+  try { return await workerWakePromise; }
+  finally { workerWakePromise = null; }
+}
 function windowLimit(map, key, limit, windowMs) {
   const now = Date.now();
   if (!map.has(key) && map.size >= 5000) {
@@ -263,7 +296,7 @@ function safeEqual(a, b) {
   const aa = Buffer.from(String(a)); const bb = Buffer.from(String(b));
   return aa.length === bb.length && aa.length > 0 && timingSafeEqual(aa, bb);
 }
-async function workerRequest(route, options = {}) {
+async function workerRequest(route, options = {}, mayWake = true) {
   if (!WORKER_BASE_URL || !WORKER_SHARED_SECRET) {
     const error = new Error('El motor externo no está configurado.');
     error.status = 503;
@@ -290,6 +323,12 @@ async function workerRequest(route, options = {}) {
   let data = {};
   try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
   if (!response.ok) {
+    const isHtmlGatewayPage = /text\\/html/i.test(response.headers.get('content-type') || '') || /^\\s*(?:<!doctype html|<html)/i.test(rawBody);
+    if (mayWake && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
+      console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
+      await ensureWorkerAwake();
+      return workerRequest(route, options, false);
+    }
     const detail = String(data?.error || rawBody || response.statusText || 'el motor no envió detalles').slice(0, 1200);
     console.error('[bridge][worker_http_error]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt, detail }));
     const error = new Error(`El motor externo respondió HTTP ${response.status}: ${detail}`);
