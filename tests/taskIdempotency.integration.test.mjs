@@ -21,9 +21,9 @@ if (!process.env.SWARM_DATABASE_URL) {
       createJob(objective, 8000, null, key)
     ]);
 
-    assert.equal(retry.id, first.id, 'replaying a request must not create a second task');
-    assert.equal(first.created, true, 'the first request should identify the newly created task');
-    assert.equal(retry.created, false, 'a replay should be identified so the worker does not enqueue it again');
+    assert.equal(retry.id, first.id, 'concurrent requests with the same key must return the same task');
+    assert.equal([first, retry].filter(job => job.created === true).length, 1, 'exactly one concurrent request may create the task');
+    assert.equal([first, retry].filter(job => job.created === false).length, 1, 'the replay must be marked so the worker does not enqueue it again');
     await assert.rejects(
       createJob(`${objective} modificada`, 8000, null, key),
       error => error?.status === 409,
