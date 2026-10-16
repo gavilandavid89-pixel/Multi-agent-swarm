@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const runCheck = source => new Promise(resolve => {
   const child = spawn(process.execPath, ['--check', '--input-type=module'], { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -10,6 +13,82 @@ const runCheck = source => new Promise(resolve => {
   child.on('close', code => resolve({ ok: code === 0, error: stderr.trim() }));
   child.stdin.end(source);
 });
+
+async function runBrowserSmokeCheck(files) {
+  const chrome = process.env.CHROME_BIN || '/usr/bin/chromium';
+  const xvfb = process.env.XVFB_RUN || 'xvfb-run';
+  const required = process.env.NODE_ENV === 'production';
+  if (!fs.existsSync(chrome)) {
+    return { available: false, checked: false, ok: !required, message: required ? 'No está disponible Chromium en el worker de producción.' : 'Prueba de navegador omitida: Chromium no está instalado en este entorno.' };
+  }
+
+  const htmlEntries = [...files.entries()].filter(([name]) => /\.html?$/i.test(name));
+  if (!htmlEntries.length) return { available: false, checked: false, ok: true, message: '' };
+  const safePath = name => {
+    const value = String(name || '').replace(/\\/g, '/');
+    return value && !value.startsWith('/') && !/^[a-z]:/i.test(value) && !value.split('/').some(part => !part || part === '.' || part === '..');
+  };
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-browser-check-'));
+  const profile = path.join(directory, 'profile');
+  try {
+    const entry = htmlEntries.find(([name]) => /(?:^|\/)index\.html?$/i.test(name)) || htmlEntries[0];
+    for (const [name, file] of files) {
+      if (!safePath(name)) continue;
+      const target = path.join(directory, ...name.replace(/\\/g, '/').split('/'));
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, String(file.content || ''), { mode: 0o600 });
+    }
+    const entryPath = path.join(directory, ...entry[0].replace(/\\/g, '/').split('/'));
+    let document = fs.readFileSync(entryPath, 'utf8');
+    const monitor = '<script>(()=>{const e=[];addEventListener("error",x=>{if(x.target===window)e.push(String(x.message||"Error JavaScript"));},true);addEventListener("unhandledrejection",x=>e.push(String(x.reason&&x.reason.message||x.reason||"Promesa rechazada")));addEventListener("load",()=>setTimeout(()=>{document.documentElement.setAttribute("data-swarm-js-errors",encodeURIComponent(JSON.stringify(e.slice(0,20))));},350));})();</script>';
+    if (/<\/head\s*>/i.test(document)) document = document.replace(/<\/head\s*>/i, monitor + '</head>');
+    else if (/<html\b[^>]*>/i.test(document)) document = document.replace(/<html\b[^>]*>/i, match => match + monitor);
+    else document = monitor + document;
+    fs.writeFileSync(entryPath, document, { mode: 0o600 });
+
+    const result = await new Promise(resolve => {
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      let settled = false;
+      let timer;
+      const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+      const child = spawn(xvfb, [
+        '-a', '-s', '-screen 0 1280x900x24 -nolisten tcp',
+        chrome, '--headless=new', '--disable-background-networking',
+        '--disable-sync', '--disable-extensions', '--disable-component-update',
+        '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
+        '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
+        '--virtual-time-budget=1500', '--dump-dom',
+        '--user-data-dir=' + profile, pathToFileURL(entryPath).href
+      ], {
+        cwd: directory,
+        env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: directory, LANG: 'C.UTF-8' },
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 15000);
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', chunk => { if (stdout.length < 512000) stdout += chunk; });
+      child.stderr.on('data', chunk => { if (stderr.length < 12000) stderr += chunk; });
+      child.on('error', error => finish({ exitCode: null, stdout, stderr, error: error.message, timedOut }));
+      child.on('close', exitCode => finish({ exitCode, stdout, stderr, error: '', timedOut }));
+    });
+    if (result.timedOut) return { available: true, checked: true, ok: false, message: 'La prueba de navegador superó los 15 segundos y se detuvo por seguridad.' };
+    if (result.exitCode !== 0) return { available: true, checked: true, ok: false, message: 'Chromium no pudo ejecutar la vista previa: ' + String(result.error || result.stderr || 'código de salida ' + result.exitCode).slice(0, 1200) };
+    const encoded = result.stdout.match(/data-swarm-js-errors="([^"]*)"/i)?.[1];
+    let errors = [];
+    if (encoded) {
+      try { errors = JSON.parse(decodeURIComponent(encoded)); } catch { errors = ['No se pudo leer el resultado de errores JavaScript del navegador.']; }
+    }
+    if (errors.length) return { available: true, checked: true, ok: false, message: 'La prueba de navegador detectó errores JavaScript: ' + errors.join('; ').slice(0, 1600) };
+    return { available: true, checked: true, ok: true, message: 'Chromium + Xvfb abrió el HTML de entrada y no detectó excepciones JavaScript durante la prueba de humo.' };
+  } catch (error) {
+    return { available: true, checked: true, ok: false, message: 'Falló la prueba aislada del navegador: ' + String(error?.message || error).slice(0, 1200) };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 function extractFiles(delivery) {
   const files = new Map();
@@ -72,15 +151,17 @@ export async function checkJavascriptSyntax(delivery) {
       if (/\@media[^{}]*\{[^{}]*$/s.test(css)) issues.push(`${name}: bloque @media incompleto al final del archivo.`);
     }
   }
-  const html = [...files.entries()].filter(([name]) => /\.html?$/i.test(name)).map(([, file]) => file.content).join('\n');
+  const htmlEntries = [...files.entries()].filter(([name]) => /\.html?$/i.test(name));
+  const html = htmlEntries.map(([, file]) => file.content).join('\n');
   if (html) {
     for (const [, rawPath] of html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|mjs|css))["']/gi)) {
       const target = rawPath.replace(/^\.\//, '').replace(/^\//, '');
-      const normalized = target.startsWith('src/') ? target : target;
-      const exists = [...files.keys()].some(name => name === normalized || name.endsWith('/' + normalized));
-      if (!exists && !/^(?:https?:|data:)/i.test(rawPath)) issues.push(`HTML referencia ${rawPath}, pero ese archivo no aparece en la entrega.`);
+      const exists = [...files.keys()].some(name => name === target || name.endsWith('/' + target));
+      if (!exists && !/^(?:https?:|data:)/i.test(rawPath)) issues.push('HTML referencia ' + rawPath + ', pero ese archivo no aparece en la entrega.');
     }
   }
+  const browser = html ? await runBrowserSmokeCheck(files) : { checked: false, ok: true, message: '' };
+  if (browser.checked && !browser.ok) issues.push(browser.message);
   for (const [name, file] of files) {
     if (name === 'package.json') {
       try {
@@ -92,7 +173,8 @@ export async function checkJavascriptSyntax(delivery) {
       } catch {}
     }
   }
-  if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length };
+  if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
   if (!sources.length && !files.size) return { checked: false, ok: true, message: 'No se encontraron archivos o bloques de código verificables; la entrega solo recibió revisión de IA.' };
-  return { checked: true, ok: true, message: `Comprobación determinista superada: ${files.size} archivo(s) detectado(s), ${sources.length} archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.`, filesChecked: files.size, javascriptChecked: sources.length };
+  const browserNote = browser.checked ? ' ' + browser.message : '';
+  return { checked: true, ok: true, message: 'Comprobación determinista superada: ' + files.size + ' archivo(s) detectado(s), ' + sources.length + ' archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.' + browserNote, filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
 }
