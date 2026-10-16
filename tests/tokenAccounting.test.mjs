@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
@@ -61,7 +61,7 @@ test('cuenta llamadas sin usage de tokens reportado sin inventar consumo', () =>
 });
 
 
-test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contador de tanda', () => {
+test('una tarea de continuación de 1M conserva contexto y archivos y registra el consumo previo', () => {
   const timestamp = '2026-10-14T01:00:00.000Z';
   const source = {
     objective: 'Construir una app',
@@ -93,7 +93,7 @@ test('una nueva tanda de 1M conserva contexto y archivos pero reinicia el contad
   assert.equal(next.tokenBatchHistory.length, 1);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.totalTokens, 50000);
   assert.equal(next.tokenBatchHistory[0].tokenUsage.wastedTokens, 100);
-  assert.ok(next.transcript.some(item => /nueva tanda de 1.000.000/.test(item.content)));
+  assert.ok(next.transcript.some(item => /tarea de continuación con un presupuesto nuevo de hasta 1.000.000/.test(item.content)));
 });
 
 
@@ -129,7 +129,7 @@ test('solo ofrece continuación para tareas pausadas por presupuesto que aún no
   assert.equal(canContinueBudgetTask({ status: 'failed', stage: 'Pausada por presupuesto de tokens' }, {}), false);
 });
 
-test('una segunda tanda conserva el historial de tandas y registra el consumo previo', () => {
+test('una segunda tarea de continuación conserva el historial completo y registra el consumo previo', () => {
   const first = prepareContinuationPayload({
     objective: 'Objetivo', tokenBudget: 4000,
     tokenUsage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000, calls: 3 },
@@ -147,15 +147,6 @@ test('una segunda tanda conserva el historial de tandas y registra el consumo pr
 });
 
 
-test('el presupuesto aumenta automáticamente en pasos de 25k hasta el máximo de 1M', () => {
-  assert.equal(nextAutomaticTokenBudget(50000), 75000);
-  assert.equal(nextAutomaticTokenBudget(75000), 100000);
-  assert.equal(nextAutomaticTokenBudget(100000), 125000);
-  assert.equal(nextAutomaticTokenBudget(975000), 1000000);
-  assert.equal(nextAutomaticTokenBudget(1000000), null);
-  assert.equal(nextAutomaticTokenBudget(25000), 50000);
-});
-
 test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el estado terminal obsoleto', () => {
   const current = {
     publicJob: { id: 'job-1', status: 'needs_review', stage: 'Pausada por presupuesto de tokens', progress: 99 },
@@ -172,3 +163,21 @@ test('ampliar presupuesto vuelve a poner la misma tarea en cola y limpia el esta
   assert.deepEqual(patch.payload.lastBudgetIncrease, { from: 50000, to: 75000, at: '2026-10-14T03:00:00Z' });
   assert.match(patch.payload.transcript.at(-1).content, /checkpoint validation-1/);
 });
+test('el registro acumulado de continuaciones no se trunca después de 50 tareas', () => {
+  const history = Array.from({ length: 55 }, (_, index) => ({
+    jobId: `prior-${index + 1}`, batchNumber: index + 1, tokenBudget: 1000000,
+    tokenUsage: { totalTokens: 1000000 }, lastCheckpoint: 'checkpoint', stage: 'paused',
+    closedAt: '2026-10-16T00:00:00.000Z'
+  }));
+  const next = prepareContinuationPayload({
+    objective: 'Trabajo de larga duración',
+    tokenBudget: 1000000,
+    tokenUsage: { promptTokens: 500000, completionTokens: 500000, totalTokens: 1000000, calls: 100 },
+    tokenBatchHistory: history,
+    lastCheckpoint: 'latest'
+  }, { id: 'job-56', stage: 'Pausada por presupuesto de tokens' }, '2026-10-16T01:00:00.000Z');
+  assert.equal(next.tokenBatchHistory.length, 56);
+  assert.equal(next.tokenBatchHistory[0].jobId, 'prior-1');
+  assert.equal(next.tokenBatchHistory.at(-1).jobId, 'job-56');
+});
+

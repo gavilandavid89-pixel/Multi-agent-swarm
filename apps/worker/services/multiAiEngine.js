@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
 import { getValidationResumeState } from './validationResume.js';
-import { buildBudgetPausePatch, buildAutomaticBudgetExtensionPatch, nextAutomaticTokenBudget } from './tokenAccounting.js';
+import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
@@ -69,7 +69,7 @@ async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const inputReserve = Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0));
   const availableForOutput = Math.max(0, remaining - inputReserve);
   if (availableForOutput < 256) {
-    const error = new Error(`Presupuesto insuficiente antes de llamar al modelo: ${used} usados, ${inputReserve} estimados para entrada y límite ${limit}. El checkpoint se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.`);
+    const error = new Error(`Presupuesto insuficiente antes de llamar al modelo: ${used} usados, ${inputReserve} estimados para entrada y límite ${limit}. El checkpoint se conserva; se creará automáticamente una tarea de continuación con presupuesto propio.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit; error.estimatedInputTokens = inputReserve;
     throw error;
   }
@@ -82,7 +82,7 @@ async function assertTaskTokenBudget(jobId) {
   const limit = Math.min(1000000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
-    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.`);
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; se creará automáticamente una tarea de continuación con presupuesto propio.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
     throw error;
   }
@@ -254,33 +254,17 @@ async function runJob(jobId) {
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
-      const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
-      const fallback = Number.isFinite(configured) ? Math.min(1000000, Math.max(4000, configured)) : 1000000;
-      const currentBudget = Math.min(1000000, Math.max(4000, Number(current.payload.tokenBudget) || fallback));
-      const nextBudget = nextAutomaticTokenBudget(currentBudget);
-      if (nextBudget && nextBudget > currentBudget) {
-        const patch = buildAutomaticBudgetExtensionPatch(current, currentBudget, nextBudget);
-        if (patch) {
-          await updateJob(jobId, patch);
-          console.warn('[worker][token_budget_auto_extended]', JSON.stringify({
-            jobId, usedTokens: error.usedTokens ?? null, previousLimit: currentBudget,
-            nextLimit: nextBudget, increment: nextBudget - currentBudget,
-            checkpoint: patch.payload.lastCheckpoint, progress: patch.progress
-          }));
-          return { deferred: true, retryAfterMs: 1000, budgetExtended: true };
-        }
-      }
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));
       await updateJob(jobId, patch);
-      // At the 1M ceiling, fork a durable continuation automatically. The database
+      // When this task reaches its configured budget, fork a durable continuation automatically. The database
       // row lock inside createContinuationJob makes this transition idempotent.
       const continuation = await createContinuationJob(jobId);
       if (continuation?.error) {
-        console.error('[worker][token_batch_continuation_failed]', JSON.stringify({ jobId, status: continuation.status || null, error: continuation.error }));
+        console.error('[worker][token_task_continuation_failed]', JSON.stringify({ jobId, status: continuation.status || null, error: continuation.error }));
         return { blocked: true, reason: patch.error };
       }
-      console.warn('[worker][token_batch_continuation]', JSON.stringify({
+      console.warn('[worker][token_task_continuation]', JSON.stringify({
         sourceJobId: jobId, continuationJobId: continuation.job.id,
         created: continuation.created, tokenBudget: 1000000,
         continuationNumber: continuation.job.attempt || null,

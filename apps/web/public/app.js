@@ -11,7 +11,7 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
 function showApp() { document.body.classList.remove('auth-gate'); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -37,7 +37,7 @@ function observeJobStatus(job) {
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron la tarea ${job.id.slice(0,8)}. El resultado está listo para revisar.`, 'completed');
   else if (wasActive && job.status === 'failed') showTaskNotice(`La tarea ${job.id.slice(0,8)} se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
-  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tanda de la tarea ${job.id.slice(0,8)} agotó el presupuesto. Se guardó el checkpoint; abrí otra tanda para continuar.`, 'warning');
+  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`La tarea ${job.id.slice(0,8)} alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
   else if (wasActive && job.status === 'needs_review') showTaskNotice(`El comité terminó la tarea ${job.id.slice(0,8)}, pero necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
@@ -246,16 +246,7 @@ function renderTokenBudget(data) {
   state.currentTokenBudget = total;
   const job = data.job || {};
   const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  const canExtend = ['queued', 'running'].includes(job.status) || budgetPaused;
-  const extendButton = $('extend-task-budget');
-  if (extendButton) {
-    extendButton.classList.toggle('hidden', !canExtend || total >= 1000000);
-    extendButton.disabled = !canExtend || total >= 1000000;
-    extendButton.textContent = `Ampliar límite +${Math.min(25000, 1000000 - total).toLocaleString('es-AR')}`;
-  }
-  const continueButton = $('continue-token-batch');
-  const canOpenNextBatch = Boolean(data.continuationAvailable) && total >= 1000000;
-  if (continueButton) { continueButton.classList.toggle('hidden', !canOpenNextBatch); continueButton.disabled = !canOpenNextBatch; }
+  // Continuations are created by the worker; no manual budget-extension or batch button is shown.
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
   const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
@@ -284,18 +275,18 @@ function renderTokenBudget(data) {
     .map(([stage, bucket]) => `${stage}: ${fmt(bucket.totalTokens)}`)
     .join(' · ');
   if ($('token-stage-breakdown')) $('token-stage-breakdown').textContent = stageSummary ? 'Por etapa: ' + stageSummary : 'Por etapa: todavía sin consumo registrado.';
-  if ($('token-batch-note')) {
-    const batch = Math.max(1, Number(data.continuationNumber) || 1);
+  if ($('token-chain-note')) {
+    const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
     const prior = Math.max(0, Number(data.priorTokensUsed) || 0);
     const lifetime = Math.max(0, Number(data.lifetimeTokensUsed) || (prior + used));
-    $('token-batch-note').textContent = `Tanda ${batch} · ${fmt(used)} / ${fmt(total)} tokens. Tandas anteriores: ${fmt(prior)} · acumulado: ${fmt(lifetime)} tokens.`;
+    $('token-chain-note').textContent = `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
   }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
   const baseNote = budgetPaused
-    ? (total >= 1000000 ? 'Tanda de 1.000.000 agotada. El checkpoint está guardado; la siguiente tanda se abrirá automáticamente.' : 'Esta tarea quedó pausada. Ampliá el límite +25.000 para reanudar desde el checkpoint; el próximo aumento ya será automático.')
+    ? 'Esta tarea llegó al presupuesto configurado. El checkpoint se conserva y la continuación se crea automáticamente.'
     : remaining === 0
-      ? 'El límite se amplía automáticamente en pasos de 25.000 tokens hasta 1.000.000. Si se alcanza el máximo, el sistema abre otra tanda de 1.000.000 y conserva los checkpoints.'
+      ? 'Cada tarea tiene un máximo de 1.000.000 tokens. Al agotarlo, Swarm crea automáticamente otra tarea y conserva el checkpoint, los archivos y el consumo acumulado.'
       : remaining <= total * 0.15
       ? 'Queda menos del 15 % del presupuesto. Priorizá correcciones y validación.'
       : 'Consumo según el usage reportado por el proveedor; “Tras cierre” identifica respuestas automáticas tardías y el chat va separado.';
@@ -359,14 +350,14 @@ function renderImprovementVote(data) {
 function updateDetailView(data) {
   renderAgentMemory(data);
   const job = data.job || {};
-  const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
-  const batchLabel = data.continuationOf ? ` · Tanda ${batchNumber}` : '';
-  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}${batchLabel}`;
+  const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
+  const continuationLabel = data.continuationOf ? ` · Continuación ${taskNumber}` : '';
+  $('detail-title').textContent = `Agentes · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Tanda ${batchNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
+  $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Continuación ${taskNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
   $('detail-status').className = `status ${job.status || 'queued'}`;
-  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ COMITÉ FINALIZADO' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
+  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ AGENTES TERMINARON' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
   $('detail-live').classList.toggle('live-active', ['queued','running'].includes(job.status));
   const fill = $('detail-progress-fill');
   const track = $('detail-progress');
@@ -416,7 +407,15 @@ $('task-notice-close')?.addEventListener('click', hideTaskNotice);
 
 async function updateSelectedDetail() {
   if (!state.currentDetailId) return;
-  const data = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/history`);
+  const selectedId = state.currentDetailId;
+  const data = await api(`/api/jobs/${encodeURIComponent(selectedId)}/history`);
+  // The worker persists the parent->child link transactionally. Follow it in the UI
+  // so a long-running order stays on its newest continuation after the 1M cap.
+  if (data.continuedByJobId && data.continuedByJobId !== selectedId) {
+    await showDetail(data.continuedByJobId);
+    return;
+  }
+  if (state.currentDetailId !== selectedId) return;
   updateDetailView(data);
 }
 async function refresh() {
@@ -439,7 +438,7 @@ async function showDetail(id) {
   state.currentDetailId = id;
   $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
-  $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
+  $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
   $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -491,7 +490,7 @@ $('key-access-form').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 $('show-key-login').addEventListener('click', () => { $('invite-gate-form')?.classList.add('hidden'); $('register-form')?.classList.add('hidden'); $('access-form')?.classList.add('hidden'); $('key-access-form').classList.remove('hidden'); $('show-login')?.classList.add('hidden'); $('show-key-login').classList.add('hidden'); });
-$('back-to-password-login').addEventListener('click', () => { $('key-access-form').classList.add('hidden'); $('access-form').classList.remove('hidden'); });
+$('back-to-password-login').addEventListener('click', () => { $('key-access-form').classList.add('hidden'); $('access-form').classList.remove('hidden'); $('show-key-login').classList.remove('hidden'); });
 $('toggle-login-key').addEventListener('click', () => { const input = $('key-access-secret'); input.type = input.type === 'password' ? 'text' : 'password'; $('toggle-login-key').setAttribute('aria-label', input.type === 'password' ? 'Mostrar clave' : 'Ocultar clave'); });
 
 // Account menu and compact, dynamically-added API fields.
@@ -677,6 +676,33 @@ async function loadManagedUsers() {
       accountStatus.className = `managed-user-status ${user.disabledAt ? 'disabled' : 'active'}`;
       accountStatus.textContent = user.disabledAt ? 'Desactivada' : 'Activa';
       main.append(name, meta, accountStatus);
+      const identifiers = document.createElement('div');
+      identifiers.className = 'managed-user-identifiers';
+      const addIdentifier = (label, value) => {
+        const line = document.createElement('div');
+        line.className = 'job-meta';
+        const text = document.createElement('span');
+        text.textContent = `${label}: ${value || 'No disponible'}`;
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'mini-button';
+        copy.textContent = 'Copiar';
+        copy.disabled = !value;
+        copy.addEventListener('click', async () => {
+          try {
+            if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+            await navigator.clipboard.writeText(String(value));
+            status.textContent = `${label} copiado para ${user.username}.`;
+          } catch {
+            status.textContent = `No se pudo copiar automáticamente. ${label}: ${value}`;
+          }
+        });
+        line.append(text, copy);
+        identifiers.append(line);
+      };
+      addIdentifier('Código de cuenta', user.accountCode);
+      addIdentifier('UUID', user.id);
+      main.append(identifiers);
       row.append(main);
       if (user.role === 'user') {
         const button = document.createElement('button');
@@ -714,7 +740,6 @@ async function loadManagedUsers() {
     status.textContent = error.message || 'No se pudieron cargar las cuentas.';
   }
 }
-$('account-menu-toggle').addEventListener('click', () => $('account-menu-items').classList.toggle('hidden'));
 $('open-account-key').addEventListener('click', async event => {
   event.stopPropagation(); const panel = $('account-key-panel'); const opening = panel.classList.contains('hidden');
   panel.classList.toggle('hidden', !opening); $('open-account-key').setAttribute('aria-expanded', String(opening)); if (!opening) return;
@@ -723,8 +748,8 @@ $('open-account-key').addEventListener('click', async event => {
   catch (error) { $('account-key-status').textContent = error.message || 'No se pudo cargar la clave.'; }
 });
 $('toggle-account-key').addEventListener('click', event => { event.stopPropagation(); state.accountKeyVisible = !state.accountKeyVisible; $('account-key-value').type = state.accountKeyVisible ? 'text' : 'password'; $('toggle-account-key').setAttribute('aria-label', state.accountKeyVisible ? 'Ocultar clave' : 'Mostrar clave'); $('toggle-account-key').textContent = state.accountKeyVisible ? '◎' : '◉'; });
+$('copy-account-code').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-code-value').value); $('account-key-status').textContent = 'Código de cuenta copiado.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Seleccioná el código y copialo manualmente.'; } });
 $('copy-account-key').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-key-value').value); $('account-key-status').textContent = 'Clave copiada al portapapeles.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Podés revelarla y copiarla manualmente.'; } });
-$('show-key-login').classList.remove('hidden');
 $('open-api-settings').addEventListener('click', async () => {
   $('account-menu-items').classList.add('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.remove('hidden');
   $('api-settings-status').textContent = 'Cargando tus APIs…';
@@ -821,6 +846,9 @@ function syncRegistrationAvailability() {
   const invite = $('register-invite').value.trim();
   const submit = $('register-form').querySelector('button[type="submit"]');
   submit.disabled = invite.length < 20;
+  // The invite gate owns its own validation message. Do not show a registration warning
+  // while the user is merely entering a code on the first screen.
+  if ($('register-form').classList.contains('hidden')) return;
   $('register-status').textContent = invite.length < 20
     ? 'Necesitás un enlace o código de invitación válido. Crear una cuenta nunca otorga permisos de administrador.'
     : '';
@@ -863,6 +891,22 @@ if (new URLSearchParams(location.search).has('invite')) {
 }
 syncRegistrationAvailability();
 
+const objectiveInput = $('objective');
+function resizeObjectiveInput() {
+  objectiveInput.style.height = 'auto';
+  const nextHeight = Math.min(Math.max(objectiveInput.scrollHeight, 44), 120);
+  objectiveInput.style.height = nextHeight + 'px';
+  objectiveInput.style.overflowY = objectiveInput.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+objectiveInput.addEventListener('input', resizeObjectiveInput);
+objectiveInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $('job-form').requestSubmit();
+  }
+});
+resizeObjectiveInput();
+
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault();
   const message = $('objective').value.trim();
@@ -874,50 +918,21 @@ $('job-form').addEventListener('submit', async event => {
     if (target !== 'global') {
       if (!state.currentDetailId) throw new Error('Primero iniciá o abrí una tarea global; después podés hablar directamente con un agente.');
       const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: target, message }) });
-      $('objective').value = '';
+      $('objective').value = ''; resizeObjectiveInput();
       $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || target}; la respuesta aparecerá en esta conversación.`;
       await updateSelectedDetail();
     } else {
       $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
-      const tokenBudget = Number($('new-task-budget')?.value) || 50000;
+      const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
       const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
-      $('objective').value = '';
+      $('objective').value = ''; resizeObjectiveInput();
       $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
       await showDetail(job.id); await refresh();
     }
   } catch (error) { $('job-submit-status').textContent = `No se pudo enviar: ${error.message}`; }
   finally { button.disabled = false; button.textContent = 'Enviar ↗'; }
 });
-$('extend-task-budget').addEventListener('click', async () => {
-  if (!state.currentDetailId) return;
-  const button = $('extend-task-budget');
-  const nextBudget = Math.min(1000000, state.currentTokenBudget + 25000);
-  if (nextBudget <= state.currentTokenBudget) return;
-  button.disabled = true; button.textContent = 'Ampliando…';
-  try {
-    await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/budget`, { method: 'POST', body: JSON.stringify({ tokenBudget: nextBudget }) });
-    $('token-budget-note').textContent = `Límite ampliado a ${nextBudget.toLocaleString('es-AR')} tokens. Si estaba pausada por presupuesto, se reanudará desde el último checkpoint.`;
-    await updateSelectedDetail(); await loadJobs();
-  } catch (error) { $('token-budget-note').textContent = `No se pudo ampliar el límite: ${error.message}`; }
-  finally { button.disabled = state.currentTokenBudget >= 1000000; button.textContent = state.currentTokenBudget >= 1000000 ? 'Límite máximo alcanzado' : `Ampliar límite +${Math.min(25000, 1000000 - state.currentTokenBudget).toLocaleString('es-AR')}`; }
-});
-$('continue-token-batch').addEventListener('click', async () => {
-  if (!state.currentDetailId) return;
-  const sourceId = state.currentDetailId;
-  const button = $('continue-token-batch');
-  button.disabled = true; button.textContent = 'Preparando nueva tanda…';
-  try {
-    const job = await api(`/api/jobs/${encodeURIComponent(sourceId)}/continue-budget`, { method: 'POST', body: '{}' });
-    $('token-budget-note').textContent = 'Nueva tanda creada: 1.000.000 tokens disponibles. Se recuperan los checkpoints y archivos de la tarea anterior.';
-    await showDetail(job.id);
-    await loadJobs();
-    await refresh();
-  } catch (error) {
-    $('token-budget-note').textContent = `No se pudo abrir la nueva tanda: ${error.message}`;
-    button.disabled = false; button.textContent = 'Continuar en nueva tanda · 1.000.000 tokens ↗';
-  }
-});
-$('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
+ $('refresh-jobs').addEventListener('click', async () => { try { await loadJobs(); await loadHistorySummary(); await refresh(); } catch (error) { alert(error.message); } });
 $('jobs-filter').addEventListener('change', async () => { state.jobsFilter = $('jobs-filter').value; state.jobs = []; state.jobsTotal = 0; try { await loadJobs(); } catch (error) { alert(error.message); } });
 $('load-more-jobs').addEventListener('click', async () => { const button = $('load-more-jobs'); button.disabled = true; try { await loadJobs({ append: true }); } catch (error) { alert(error.message); } finally { button.disabled = false; } });
 $('show-history').addEventListener('click', async () => {
@@ -1019,11 +1034,13 @@ const artifactsPanel = $('artifacts-panel');
 if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
 $('account-menu-toggle').addEventListener('click', event => {
+  event.preventDefault();
   event.stopPropagation();
   const items = $('account-menu-items');
   const opening = items.classList.contains('hidden');
   items.classList.toggle('hidden', !opening);
   $('account-menu-toggle').setAttribute('aria-expanded', String(opening));
+  if (opening) items.querySelector('button:not(.hidden)')?.focus({ preventScroll: true });
 });
 $('account-menu-items').addEventListener('click', event => {
   if (event.target.closest('button') && !event.target.closest('#open-account-key, #toggle-account-key, #copy-account-key')) {

@@ -12,7 +12,8 @@
     gate.classList.remove('hidden');
     form.classList.add('hidden');
     login.classList.add('hidden');
-    loginLink.classList.add('hidden');
+    loginLink.classList.remove('hidden');
+    $('show-key-login')?.classList.add('hidden');
     status.textContent = '';
     validatedInvite = '';
   }
@@ -21,6 +22,7 @@
     form.classList.add('hidden');
     login.classList.remove('hidden');
     loginLink.classList.add('hidden');
+    $('show-key-login')?.classList.remove('hidden');
     status.textContent = '';
   }
 
@@ -45,10 +47,13 @@
       validatedInvite = code;
       gate.classList.add('hidden');
       form.classList.remove('hidden');
+      loginLink.classList.add('hidden');
+      $('show-key-login')?.classList.add('hidden');
       status.textContent = '';
       $('register-username').focus();
     } catch (error) {
       status.textContent = error.message;
+      // Stay on the invite screen; offer login only as an explicit, separate action.
       loginLink.classList.remove('hidden');
     } finally {
       button.disabled = false;
@@ -86,10 +91,6 @@
   } else if (query.get('login') === '1') {
     showLogin();
   } else {
-    form.classList.add('hidden');
-    gate.classList.remove('hidden');
-    login.classList.add('hidden');
-    loginLink.classList.add('hidden');
-    status.textContent = '';
+    showInvite();
   }
 })();

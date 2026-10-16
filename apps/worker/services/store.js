@@ -140,7 +140,7 @@ export async function createJob(objective, requestedTokenBudget, userId = null) 
   return toPublic(row);
 }
 /**
- * Fork a budget-paused task into a fresh 1M-token batch while preserving its encrypted
+ * Create a fresh 1M-token continuation task from a budget-paused job while preserving its encrypted
  * checkpoint, source artifacts and agent decisions. The source row lock makes the action idempotent.
  */
 export async function createContinuationJob(sourceId) {
@@ -162,7 +162,7 @@ export async function createContinuationJob(sourceId) {
 
     if (!isBudgetPausedJob(source)) {
       await client.query('ROLLBACK');
-      return { error: 'Solo se puede abrir una nueva tanda cuando la tarea está pausada por presupuesto de tokens.', status: 409 };
+      return { error: 'Solo se puede continuar automáticamente una tarea pausada por presupuesto de tokens.', status: 409 };
     }
 
     const closedAt = now();
@@ -171,7 +171,7 @@ export async function createContinuationJob(sourceId) {
     const timestamp = closedAt;
     const childId = randomUUID();
     const childRow = {
-      id: childId, status: 'queued', stage: 'Nueva tanda · recuperando checkpoint',
+      id: childId, status: 'queued', stage: 'Continuación automática · recuperando checkpoint',
       progress: Math.min(Number(source.progress) || 0, 90),
       attempt: Number(source.attempt) || 0,
       created_at: timestamp, updated_at: timestamp, error: null,
