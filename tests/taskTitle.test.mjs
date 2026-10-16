@@ -23,6 +23,13 @@ test('normaliza saltos de línea y limita títulos largos a 64 caracteres', () =
   assert.ok(title.endsWith('…'));
 });
 
+test('elimina varios preámbulos conversacionales seguidos y conserva el objetivo', () => {
+  assert.equal(
+    generateTaskTitle('Che, por favor, necesito que revises el flujo de inicio de sesión. Luego agregá recuperación de contraseña.'),
+    'Revises el flujo de inicio de sesión'
+  );
+});
+
 test('usa un título de respaldo si el objetivo está vacío', () => {
   assert.equal(generateTaskTitle('  \n  '), 'Nueva tarea');
 });
