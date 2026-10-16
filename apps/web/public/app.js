@@ -12,7 +12,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -961,9 +961,30 @@ $('show-history').addEventListener('click', async () => {
       const detail = active ? `${escapeHtml(job.stage || 'Trabajando')} · actividad en curso` : `${escapeHtml(job.stage || 'Sin etapa')} · ${escapeHtml(dateLabel(job.updatedAt || job.createdAt))}`;
       return `<div class="history-row"><div class="job-main"><div class="job-name">${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(job.id.slice(0,8))}</div><div class="job-meta">${detail}</div>${progress}</div><button class="mini-button" data-history="${escapeHtml(job.id)}">Abrir</button></div>`;
     }).join('') || '<p class="muted tiny">Sin registros.</p>';
-    list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.history)));
+    list.querySelectorAll('[data-history]').forEach(button => button.addEventListener('click', () => { closeHistoryDrawer(); showDetail(button.dataset.history); }));
   } catch (error) { alert(error.message); }
 });
+function closeHistoryDrawer() {
+  const drawer = $('history-drawer');
+  if (!drawer) return;
+  drawer.classList.add('hidden');
+  drawer.setAttribute('aria-hidden', 'true');
+  $('open-history-menu')?.setAttribute('aria-expanded', 'false');
+  state.historyShown = false;
+  $('history-list')?.classList.add('hidden');
+  if ($('show-history')) $('show-history').innerHTML = 'Ver registros <span>→</span>';
+}
+function openHistoryDrawer() {
+  const drawer = $('history-drawer');
+  if (!drawer) return;
+  if (!drawer.classList.contains('hidden')) { closeHistoryDrawer(); return; }
+  $('files-drawer')?.classList.add('hidden');
+  $('files-drawer')?.setAttribute('aria-hidden', 'true');
+  drawer.classList.remove('hidden');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('open-history-menu')?.setAttribute('aria-expanded', 'true');
+  if (!state.historyShown) $('show-history')?.click();
+}
 $('copy-detail').addEventListener('click', async () => {
   const button = $('copy-detail'); const content = $('detail-content').textContent || '';
   if (!content.trim()) { $('copy-status').textContent = 'No hay diagnóstico para copiar.'; return; }
@@ -1032,7 +1053,15 @@ async function boot() {
 // Unificamos los archivos en el cajón inferior sin duplicar ni reconstruir el contenido.
 const artifactsPanel = $('artifacts-panel');
 if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
+const historyPanel = document.querySelector('#dashboard-grid .history-panel') || document.querySelector('.history-panel');
+if (historyPanel && $('history-drawer-slot')) $('history-drawer-slot').append(historyPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+$('open-history-menu').addEventListener('click', () => {
+  $('account-menu-items').classList.add('hidden');
+  $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+  openHistoryDrawer();
+});
+$('close-history-drawer').addEventListener('click', closeHistoryDrawer);
 $('account-menu-toggle').addEventListener('click', event => {
   event.preventDefault();
   event.stopPropagation();
@@ -1059,6 +1088,8 @@ document.addEventListener('keydown', event => {
     $('account-menu-items')?.classList.add('hidden');
     $('account-menu-toggle')?.setAttribute('aria-expanded', 'false');
     $('files-drawer')?.classList.add('hidden');
+    $('files-drawer')?.setAttribute('aria-hidden', 'true');
+    closeHistoryDrawer();
   }
 });
 $('open-technical-diagnostic').addEventListener('click', () => {
@@ -1068,13 +1099,16 @@ $('open-technical-diagnostic').addEventListener('click', () => {
   if (diagnostic) { diagnostic.open = true; diagnostic.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 });
 $('files-menu-toggle').addEventListener('click', () => {
-  $('files-drawer').classList.toggle('hidden');
-  if (!$('files-drawer').classList.contains('hidden')) {
+  const opening = $('files-drawer').classList.contains('hidden');
+  $('files-drawer').classList.toggle('hidden', !opening);
+  $('files-drawer').setAttribute('aria-hidden', String(!opening));
+  if (opening) {
+    closeHistoryDrawer();
     const count = $('artifacts-count')?.textContent || '0 archivos';
     $('files-drawer-status').textContent = state.currentDetailId ? count + ' · pertenecen a la tarea abierta.' : 'Abrí una tarea para ver sus archivos.';
   }
 });
-$('close-files-drawer').addEventListener('click', () => $('files-drawer').classList.add('hidden'));
+$('close-files-drawer').addEventListener('click', () => { $('files-drawer').classList.add('hidden'); $('files-drawer').setAttribute('aria-hidden', 'true'); });
 $('files-download-button').addEventListener('click', () => {
   const button = $('download-bundle');
   if (!button || button.disabled) { $('files-drawer-status').textContent = 'Todavía no hay archivos guardados para empaquetar.'; return; }
@@ -1085,4 +1119,28 @@ $('files-preview-button').addEventListener('click', () => {
   if (!preview) { $('files-drawer-status').textContent = 'Todavía no hay un HTML listo para previsualizar.'; return; }
   preview.click();
 });
+function syncViewportAfterChange() {
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
+    document.documentElement.style.setProperty('--swarm-viewport-height', `${Math.round(viewportHeight)}px`);
+  }
+  if (!document.body.classList.contains('auth-gate')) {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }
+}
+let viewportSyncScheduled = false;
+function scheduleViewportSync() {
+  if (viewportSyncScheduled) return;
+  viewportSyncScheduled = true;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    viewportSyncScheduled = false;
+    syncViewportAfterChange();
+  }));
+}
+window.addEventListener('resize', scheduleViewportSync, { passive: true });
+window.addEventListener('orientationchange', scheduleViewportSync, { passive: true });
+window.visualViewport?.addEventListener('resize', scheduleViewportSync, { passive: true });
+syncViewportAfterChange();
 boot();
