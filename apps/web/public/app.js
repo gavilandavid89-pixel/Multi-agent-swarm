@@ -1121,28 +1121,34 @@ $('files-preview-button').addEventListener('click', () => {
   if (!preview) { $('files-drawer-status').textContent = 'Todavía no hay un HTML listo para previsualizar.'; return; }
   preview.click();
 });
-function syncViewportAfterChange() {
+function syncViewportAfterChange({ resetScroll = false } = {}) {
   const viewportHeight = window.visualViewport?.height || window.innerHeight;
   if (Number.isFinite(viewportHeight) && viewportHeight > 0) {
     document.documentElement.style.setProperty('--swarm-viewport-height', `${Math.round(viewportHeight)}px`);
   }
-  if (!document.body.classList.contains('auth-gate')) {
+  // Resizing the visual viewport also happens when the mobile keyboard opens.
+  // Only reset the document position after an actual orientation change.
+  if (resetScroll && !document.body.classList.contains('auth-gate')) {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   }
 }
 let viewportSyncScheduled = false;
-function scheduleViewportSync() {
+let viewportResetScrollPending = false;
+function scheduleViewportSync(resetScroll = false) {
+  viewportResetScrollPending = viewportResetScrollPending || resetScroll;
   if (viewportSyncScheduled) return;
   viewportSyncScheduled = true;
   requestAnimationFrame(() => requestAnimationFrame(() => {
+    const shouldResetScroll = viewportResetScrollPending;
+    viewportResetScrollPending = false;
     viewportSyncScheduled = false;
-    syncViewportAfterChange();
+    syncViewportAfterChange({ resetScroll: shouldResetScroll });
   }));
 }
-window.addEventListener('resize', scheduleViewportSync, { passive: true });
-window.addEventListener('orientationchange', scheduleViewportSync, { passive: true });
-window.visualViewport?.addEventListener('resize', scheduleViewportSync, { passive: true });
+window.addEventListener('resize', () => scheduleViewportSync(), { passive: true });
+window.addEventListener('orientationchange', () => scheduleViewportSync(true), { passive: true });
+window.visualViewport?.addEventListener('resize', () => scheduleViewportSync(), { passive: true });
 syncViewportAfterChange();
 boot();
