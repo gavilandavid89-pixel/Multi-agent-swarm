@@ -58,7 +58,7 @@ async function runBrowserSmokeCheck(files) {
         chrome, '--headless=new', '--disable-background-networking',
         '--disable-sync', '--disable-extensions', '--disable-component-update',
         '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
-        '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
+        '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND', '--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>',
         '--virtual-time-budget=1500', '--dump-dom',
         '--user-data-dir=' + profile, pathToFileURL(entryPath).href
       ], {
