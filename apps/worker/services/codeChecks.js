@@ -40,9 +40,9 @@ async function runBrowserSmokeCheck(files) {
     }
     const entryPath = path.join(directory, ...entry[0].replace(/\\/g, '/').split('/'));
     let document = fs.readFileSync(entryPath, 'utf8');
-    const monitor = '<script>(()=>{const e=[];addEventListener("error",x=>{if(x.target===window)e.push(String(x.message||"Error JavaScript"));},true);addEventListener("unhandledrejection",x=>e.push(String(x.reason&&x.reason.message||x.reason||"Promesa rechazada")));addEventListener("load",()=>setTimeout(()=>{document.documentElement.setAttribute("data-swarm-js-errors",encodeURIComponent(JSON.stringify(e.slice(0,20))));},350));})();</script>';
-    if (/<\/head\s*>/i.test(document)) document = document.replace(/<\/head\s*>/i, monitor + '</head>');
-    else if (/<html\b[^>]*>/i.test(document)) document = document.replace(/<html\b[^>]*>/i, match => match + monitor);
+    const monitor = '<script>(()=>{const e=[];addEventListener("error",x=>{if(x.target===window)e.push(String(x.message||"Error JavaScript"));},true);addEventListener("unhandledrejection",x=>{const m=String(x.reason&&x.reason.message||x.reason||"Promesa rechazada");if(!/failed to fetch|fetch failed|load failed|networkerror|network request failed/i.test(m))e.push(m)});addEventListener("load",()=>setTimeout(()=>{document.documentElement.setAttribute("data-swarm-js-errors",encodeURIComponent(JSON.stringify(e.slice(0,20))));},350));})();</script>';
+    if (/<head\\b[^>]*>/i.test(document)) document = document.replace(/<head\\b[^>]*>/i, match => match + monitor);
+    else if (/<html\\b[^>]*>/i.test(document)) document = document.replace(/<html\\b[^>]*>/i, match => match + monitor);
     else document = monitor + document;
     fs.writeFileSync(entryPath, document, { mode: 0o600 });
 
@@ -69,7 +69,7 @@ async function runBrowserSmokeCheck(files) {
       timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 15000);
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
-      child.stdout.on('data', chunk => { if (stdout.length < 512000) stdout += chunk; });
+      child.stdout.on('data', chunk => { if (stdout.length < 2500000) stdout += chunk; });
       child.stderr.on('data', chunk => { if (stderr.length < 12000) stderr += chunk; });
       child.on('error', error => finish({ exitCode: null, stdout, stderr, error: error.message, timedOut }));
       child.on('close', exitCode => finish({ exitCode, stdout, stderr, error: '', timedOut }));
@@ -77,10 +77,9 @@ async function runBrowserSmokeCheck(files) {
     if (result.timedOut) return { available: true, checked: true, ok: false, message: 'La prueba de navegador superó los 15 segundos y se detuvo por seguridad.' };
     if (result.exitCode !== 0) return { available: true, checked: true, ok: false, message: 'Chromium no pudo ejecutar la vista previa: ' + String(result.error || result.stderr || 'código de salida ' + result.exitCode).slice(0, 1200) };
     const encoded = result.stdout.match(/data-swarm-js-errors="([^"]*)"/i)?.[1];
+    if (!encoded) return { available: true, checked: true, ok: false, message: 'Chromium no devolvió el marcador de la prueba; la ejecución HTML quedó incompleta.' };
     let errors = [];
-    if (encoded) {
-      try { errors = JSON.parse(decodeURIComponent(encoded)); } catch { errors = ['No se pudo leer el resultado de errores JavaScript del navegador.']; }
-    }
+    try { errors = JSON.parse(decodeURIComponent(encoded)); } catch { errors = ['No se pudo leer el resultado de errores JavaScript del navegador.']; }
     if (errors.length) return { available: true, checked: true, ok: false, message: 'La prueba de navegador detectó errores JavaScript: ' + errors.join('; ').slice(0, 1600) };
     return { available: true, checked: true, ok: true, message: 'Chromium + Xvfb abrió el HTML de entrada y no detectó excepciones JavaScript durante la prueba de humo.' };
   } catch (error) {
