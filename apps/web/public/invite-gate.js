@@ -13,6 +13,7 @@
     form.classList.add('hidden');
     login.classList.add('hidden');
     loginLink.classList.remove('hidden');
+    $('show-key-login')?.classList.add('hidden');
     status.textContent = '';
     validatedInvite = '';
   }
@@ -21,6 +22,7 @@
     form.classList.add('hidden');
     login.classList.remove('hidden');
     loginLink.classList.add('hidden');
+    $('show-key-login')?.classList.remove('hidden');
     status.textContent = '';
   }
 
@@ -46,6 +48,7 @@
       gate.classList.add('hidden');
       form.classList.remove('hidden');
       loginLink.classList.add('hidden');
+      $('show-key-login')?.classList.add('hidden');
       status.textContent = '';
       $('register-username').focus();
     } catch (error) {
