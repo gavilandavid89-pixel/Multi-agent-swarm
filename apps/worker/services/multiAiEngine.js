@@ -69,7 +69,7 @@ async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const inputReserve = Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0));
   const availableForOutput = Math.max(0, remaining - inputReserve);
   if (availableForOutput < 256) {
-    const error = new Error(`Presupuesto insuficiente antes de llamar al modelo: ${used} usados, ${inputReserve} estimados para entrada y límite ${limit}. El checkpoint se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.`);
+    const error = new Error(`Presupuesto insuficiente antes de llamar al modelo: ${used} usados, ${inputReserve} estimados para entrada y límite ${limit}. El checkpoint se conserva; se creará automáticamente una tarea de continuación con presupuesto propio.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit; error.estimatedInputTokens = inputReserve;
     throw error;
   }
@@ -82,7 +82,7 @@ async function assertTaskTokenBudget(jobId) {
   const limit = Math.min(1000000, Math.max(4000, Number(current?.payload?.tokenBudget) || defaultLimit));
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
   if (used >= limit) {
-    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.`);
+    const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; se creará automáticamente una tarea de continuación con presupuesto propio.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
     throw error;
   }
