@@ -38,7 +38,14 @@ const injected = `
       conversationScrollable: conversation.scrollHeight > conversation.clientHeight,
       composerTop: Math.round(composerRect.top),
       composerBottom: Math.round(composerRect.bottom),
-      composerVisible: composerRect.top >= 0 && composerRect.bottom <= window.innerHeight + 2
+      composerVisible: composerRect.top >= 0 && composerRect.bottom <= window.innerHeight + 2,
+      detailHeight: Math.round(document.getElementById('detail-panel').getBoundingClientRect().height),
+      detailChildren: Array.from(document.getElementById('detail-panel').children).map(element => ({
+        id: element.id || element.className || element.tagName.toLowerCase(),
+        height: Math.round(element.getBoundingClientRect().height),
+        display: getComputedStyle(element).display,
+        flex: getComputedStyle(element).flex
+      }))
     };
     document.getElementById('layout-result').textContent = btoa(JSON.stringify(report));
   })));
