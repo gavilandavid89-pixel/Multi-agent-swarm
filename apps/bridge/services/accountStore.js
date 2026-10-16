@@ -102,6 +102,22 @@ async function uniqueAccountCode(client) {
   }
   throw new Error('No se pudo generar un identificador de cuenta único. Intentá nuevamente.');
 }
+export async function ensureAccountCode(userId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query('SELECT id,account_code FROM app_users WHERE id=$1 FOR UPDATE', [userId]);
+    if (!result.rows.length) throw Object.assign(new Error('La cuenta no existe.'), { status: 404 });
+    let accountCode = result.rows[0].account_code;
+    if (!accountCode) {
+      accountCode = await uniqueAccountCode(client);
+      await client.query('UPDATE app_users SET account_code=$2 WHERE id=$1', [userId, accountCode]);
+    }
+    await client.query('COMMIT');
+    return accountCode;
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+  finally { client.release(); }
+}
 export async function ensureAccountKey(userId) {
   const client = await pool.connect();
   try {
@@ -195,15 +211,16 @@ export async function changePassword(userId, currentPassword, newPassword, curre
 }
 export async function listManagedUsers() {
   const { rows } = await pool.query(
-    "SELECT id,username,role,created_at,disabled_at FROM app_users ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, username ASC"
+    "SELECT id,username,role,account_code,created_at,disabled_at FROM app_users ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, username ASC"
   );
-  return rows.map(row => ({
+  return Promise.all(rows.map(async row => ({
     id: row.id,
     username: row.username,
     role: row.role,
+    accountCode: row.account_code || await ensureAccountCode(row.id),
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
     disabledAt: row.disabled_at ? (row.disabled_at instanceof Date ? row.disabled_at.toISOString() : new Date(row.disabled_at).toISOString()) : null
-  }));
+  })));
 }
 
 export async function setManagedUserDisabled(userId, disabled) {
