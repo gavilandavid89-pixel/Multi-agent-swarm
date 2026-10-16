@@ -37,3 +37,5 @@ jobs:
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
           npm --prefix apps/worker audit --audit-level=high --no-fund
+      - name: Build worker image and run Chromium/Xvfb smoke test
+        run: docker build -f apps/worker/Dockerfile apps/worker
