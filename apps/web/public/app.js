@@ -275,11 +275,11 @@ function renderTokenBudget(data) {
     .map(([stage, bucket]) => `${stage}: ${fmt(bucket.totalTokens)}`)
     .join(' · ');
   if ($('token-stage-breakdown')) $('token-stage-breakdown').textContent = stageSummary ? 'Por etapa: ' + stageSummary : 'Por etapa: todavía sin consumo registrado.';
-  if ($('token-batch-note')) {
+  if ($('token-chain-note')) {
     const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
     const prior = Math.max(0, Number(data.priorTokensUsed) || 0);
     const lifetime = Math.max(0, Number(data.lifetimeTokensUsed) || (prior + used));
-    $('token-batch-note').textContent = `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
+    $('token-chain-note').textContent = `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
   }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
@@ -350,12 +350,12 @@ function renderImprovementVote(data) {
 function updateDetailView(data) {
   renderAgentMemory(data);
   const job = data.job || {};
-  const batchNumber = Math.max(1, Number(data.continuationNumber) || 1);
-  const batchLabel = data.continuationOf ? ` · Tanda ${batchNumber}` : '';
-  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}${batchLabel}`;
+  const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
+  const continuationLabel = data.continuationOf ? ` · Continuación ${taskNumber}` : '';
+  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Tanda ${batchNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
+  $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Continuación ${taskNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
   $('detail-status').className = `status ${job.status || 'queued'}`;
   $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ COMITÉ FINALIZADO' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
   $('detail-live').classList.toggle('live-active', ['queued','running'].includes(job.status));
