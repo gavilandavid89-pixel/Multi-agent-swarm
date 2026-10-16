@@ -85,10 +85,9 @@ export function canContinueBudgetTask(job = {}, payload = {}) {
   return isBudgetPausedJob(job) && !payload?.continuedByJobId;
 }
 
-/** Increase a task budget in controlled 25k steps; null means the 1M cap is already reached. */
-export function nextAutomaticTokenBudget(currentValue) {
-  const current = Math.min(1000000, Math.max(4000, Math.round(number(currentValue || 50000) / 1000) * 1000));
-  return current >= 1000000 ? null : Math.min(1000000, current + 25000);
+/** Token budgets are not incremented in-place: each task is capped at 1M and continues as a new task. */
+export function nextAutomaticTokenBudget(_currentValue) {
+  return null;
 }
 
 /** Resume the same task after an automatic budget increase, preserving its checkpoint and transcript. */
@@ -149,8 +148,8 @@ export function buildBudgetPausePatch(current = {}, error = {}, timestamp = new 
 }
 
 /**
- * Prepare a fresh budget batch without losing checkpoint data or source artifacts.
- * Usage counters reset per batch; prior batches remain visible for cumulative accounting.
+ * Prepare a fresh 1M-token continuation task without losing checkpoints, delivery, artifacts or agent decisions.
+ * Usage counters reset for this task; the complete prior-task ledger remains for cumulative accounting.
  */
 export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, timestamp = new Date().toISOString()) {
   const currentUsage = sourcePayload.tokenUsage || {};
@@ -176,14 +175,14 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
     at: timestamp,
     agent: 'sistema',
     type: 'budget',
-    content: 'Se abrió una nueva tanda de 1.000.000 tokens. Se conserva el checkpoint, las decisiones, el contexto y los archivos de la tanda anterior; el contador de esta tanda comienza en cero.'
+    content: 'Se creó automáticamente una tarea de continuación con un presupuesto nuevo de hasta 1.000.000 tokens. Se conservan el checkpoint, las decisiones, el contexto y los archivos anteriores; el consumo acumulado sigue registrado.'
   });
   return {
     ...sourcePayload,
     tokenBudget: 1000000,
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
     usageEventIds: [],
-    tokenBatchHistory: [...previousBatches, batchSnapshot].slice(-50),
+    tokenBatchHistory: [...previousBatches, batchSnapshot],
     continuationOf: String(sourceJob.id || ''),
     continuationNumber,
     continuedByJobId: null,
