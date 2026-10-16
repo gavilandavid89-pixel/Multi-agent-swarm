@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium xvfb xauth \
+  && apt-get install -y --no-install-recommends chromium chromium-sandbox xvfb xauth \
   && rm -rf /var/lib/apt/lists/*
 ENV CHROME_BIN=/usr/bin/chromium
 COPY package.json package-lock.json* ./
