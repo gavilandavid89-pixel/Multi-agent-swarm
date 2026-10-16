@@ -517,7 +517,7 @@ body:not(.auth-gate) #history-drawer #history-list{max-height:calc(var(--swarm-v
 /* Mobile keyboard/orientation, scrollable drawers, stable chat reading and refreshed previews. */
 @media (max-width: 900px) {
   body:not(.auth-gate) { height:var(--swarm-viewport-height,100dvh); min-height:0; }
-  body:not(.auth-gate) .shell { height:var(--swarm-viewport-height,100dvh); min-height:0; }
+  body:not(.auth-gate) .shell { top:var(--swarm-viewport-top,0px); height:var(--swarm-viewport-height,100dvh); min-height:0; }
   body:not(.auth-gate) .files-drawer,
   body:not(.auth-gate) .history-drawer,
   body:not(.auth-gate) .account-menu-items {
@@ -547,7 +547,7 @@ body:not(.auth-gate) .agent-vos .agent-avatar { background:#3b7454;color:#e0ffe9
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
   min-height:38px; padding:8px 14px; border:1px solid #79d6a4a0; border-radius:999px;
   background:#263d32f5; color:#dfffea; box-shadow:0 5px 22px #0008;
-  font:600 12px/1.2 inherit; cursor:pointer; white-space:nowrap;
+  font:600 12px/1.2 system-ui,sans-serif; cursor:pointer; white-space:nowrap;
 }
 .jump-to-latest.hidden { display:none!important; }
 .jump-to-latest:active { transform:translateX(-50%) scale(.98); }
