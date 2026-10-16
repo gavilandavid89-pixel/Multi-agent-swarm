@@ -891,6 +891,22 @@ if (new URLSearchParams(location.search).has('invite')) {
 }
 syncRegistrationAvailability();
 
+const objectiveInput = $('objective');
+function resizeObjectiveInput() {
+  objectiveInput.style.height = 'auto';
+  const nextHeight = Math.min(Math.max(objectiveInput.scrollHeight, 44), 120);
+  objectiveInput.style.height = nextHeight + 'px';
+  objectiveInput.style.overflowY = objectiveInput.scrollHeight > 120 ? 'auto' : 'hidden';
+}
+objectiveInput.addEventListener('input', resizeObjectiveInput);
+objectiveInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $('job-form').requestSubmit();
+  }
+});
+resizeObjectiveInput();
+
 $('job-form').addEventListener('submit', async event => {
   event.preventDefault();
   const message = $('objective').value.trim();
@@ -902,14 +918,14 @@ $('job-form').addEventListener('submit', async event => {
     if (target !== 'global') {
       if (!state.currentDetailId) throw new Error('Primero iniciá o abrí una tarea global; después podés hablar directamente con un agente.');
       const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: target, message }) });
-      $('objective').value = '';
+      $('objective').value = ''; resizeObjectiveInput();
       $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || target}; la respuesta aparecerá en esta conversación.`;
       await updateSelectedDetail();
     } else {
       $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
       const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
       const job = await api('/api/jobs', { method: 'POST', body: JSON.stringify({ objective: message, tokenBudget }) });
-      $('objective').value = '';
+      $('objective').value = ''; resizeObjectiveInput();
       $('job-submit-status').textContent = 'Orden recibida. Abriendo la conversación…';
       await showDetail(job.id); await refresh();
     }
@@ -1018,11 +1034,13 @@ const artifactsPanel = $('artifacts-panel');
 if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(artifactsPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
 $('account-menu-toggle').addEventListener('click', event => {
+  event.preventDefault();
   event.stopPropagation();
   const items = $('account-menu-items');
   const opening = items.classList.contains('hidden');
   items.classList.toggle('hidden', !opening);
   $('account-menu-toggle').setAttribute('aria-expanded', String(opening));
+  if (opening) items.querySelector('button:not(.hidden)')?.focus({ preventScroll: true });
 });
 $('account-menu-items').addEventListener('click', event => {
   if (event.target.closest('button') && !event.target.closest('#open-account-key, #toggle-account-key, #copy-account-key')) {
