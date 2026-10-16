@@ -22,6 +22,8 @@ if (!process.env.SWARM_DATABASE_URL) {
     ]);
 
     assert.equal(retry.id, first.id, 'replaying a request must not create a second task');
+    assert.equal(first.created, true, 'the first request should identify the newly created task');
+    assert.equal(retry.created, false, 'a replay should be identified so the worker does not enqueue it again');
     await assert.rejects(
       createJob(`${objective} modificada`, 8000, null, key),
       error => error?.status === 409,
