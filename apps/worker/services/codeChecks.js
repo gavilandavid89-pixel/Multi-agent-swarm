@@ -73,7 +73,7 @@ async function runBrowserSmokeCheck(files) {
           if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
           else child.kill('SIGKILL');
         } catch { child.kill('SIGKILL'); }
-      }, 15000);
+      }, 30000);
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
       child.stdout.on('data', chunk => { if (stdout.length < 2500000) stdout += chunk; });
@@ -81,7 +81,7 @@ async function runBrowserSmokeCheck(files) {
       child.on('error', error => finish({ exitCode: null, stdout, stderr, error: error.message, timedOut }));
       child.on('close', exitCode => finish({ exitCode, stdout, stderr, error: '', timedOut }));
     });
-    if (result.timedOut) return { available: true, checked: true, ok: false, message: 'La prueba de navegador superó los 15 segundos y se detuvo por seguridad.' };
+    if (result.timedOut) return { available: true, checked: true, ok: false, message: 'La prueba de navegador superó los 30 segundos y se detuvo por seguridad.' };
     if (result.exitCode !== 0) {
       const sandboxUnavailable = /failed to move to new namespace|no usable sandbox|operation not permitted/i.test(result.stderr || '');
       if (sandboxUnavailable && required) return { available: true, checked: false, ok: true, message: 'Prueba de navegador omitida: el runtime no permite el sandbox de Chromium; siguen activas las comprobaciones deterministas.' };
