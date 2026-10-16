@@ -352,12 +352,12 @@ function updateDetailView(data) {
   const job = data.job || {};
   const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
   const continuationLabel = data.continuationOf ? ` · Continuación ${taskNumber}` : '';
-  $('detail-title').textContent = `Comité · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
+  $('detail-title').textContent = `Agentes · ${job.id ? job.id.slice(0,8) : ''}${continuationLabel}`;
   $('detail-stage').textContent = job.stage || 'Preparando tarea…';
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   $('detail-status').textContent = budgetBlocked ? 'Pausada · presupuesto' : `${data.continuationOf && ['queued','running'].includes(job.status) ? `Continuación ${taskNumber} · ` : ''}${statusNames[job.status] || job.status || 'Sin estado'}`;
   $('detail-status').className = `status ${job.status || 'queued'}`;
-  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ COMITÉ FINALIZADO' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
+  $('detail-live').textContent = ['queued','running'].includes(job.status) ? (job.stage?.includes('Esperando disponibilidad') ? '◷ EN ESPERA' : '● EN DIRECTO') : job.status === 'completed' ? '✓ AGENTES TERMINARON' : job.status === 'needs_review' ? '● ACCIÓN REQUERIDA' : job.status === 'failed' ? '● TAREA INTERRUMPIDA' : '● ACTUALIZADO';
   $('detail-live').classList.toggle('live-active', ['queued','running'].includes(job.status));
   const fill = $('detail-progress-fill');
   const track = $('detail-progress');
@@ -438,7 +438,7 @@ async function showDetail(id) {
   state.currentDetailId = id;
   $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
-  $('detail-title').textContent = `Comité · ${id.slice(0,8)}`;
+  $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
   $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -749,6 +749,7 @@ $('open-account-key').addEventListener('click', async event => {
   catch (error) { $('account-key-status').textContent = error.message || 'No se pudo cargar la clave.'; }
 });
 $('toggle-account-key').addEventListener('click', event => { event.stopPropagation(); state.accountKeyVisible = !state.accountKeyVisible; $('account-key-value').type = state.accountKeyVisible ? 'text' : 'password'; $('toggle-account-key').setAttribute('aria-label', state.accountKeyVisible ? 'Ocultar clave' : 'Mostrar clave'); $('toggle-account-key').textContent = state.accountKeyVisible ? '◎' : '◉'; });
+$('copy-account-code').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-code-value').value); $('account-key-status').textContent = 'Código de cuenta copiado.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Seleccioná el código y copialo manualmente.'; } });
 $('copy-account-key').addEventListener('click', async event => { event.stopPropagation(); try { await navigator.clipboard.writeText($('account-key-value').value); $('account-key-status').textContent = 'Clave copiada al portapapeles.'; } catch { $('account-key-status').textContent = 'No se pudo copiar automáticamente. Podés revelarla y copiarla manualmente.'; } });
 $('show-key-login').classList.remove('hidden');
 $('open-api-settings').addEventListener('click', async () => {
