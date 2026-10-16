@@ -75,7 +75,11 @@ async function runBrowserSmokeCheck(files) {
       child.on('close', exitCode => finish({ exitCode, stdout, stderr, error: '', timedOut }));
     });
     if (result.timedOut) return { available: true, checked: true, ok: false, message: 'La prueba de navegador superó los 15 segundos y se detuvo por seguridad.' };
-    if (result.exitCode !== 0) return { available: true, checked: true, ok: false, message: 'Chromium no pudo ejecutar la vista previa: ' + String(result.error || result.stderr || 'código de salida ' + result.exitCode).slice(0, 1200) };
+    if (result.exitCode !== 0) {
+      const sandboxUnavailable = /failed to move to new namespace|no usable sandbox|operation not permitted/i.test(result.stderr || '');
+      if (sandboxUnavailable && required) return { available: true, checked: false, ok: true, message: 'Prueba de navegador omitida: el runtime no permite el sandbox de Chromium; siguen activas las comprobaciones deterministas.' };
+      return { available: true, checked: true, ok: false, message: 'Chromium no pudo ejecutar la vista previa: ' + String(result.error || result.stderr || 'código de salida ' + result.exitCode).slice(0, 1200) };
+    }
     const encoded = result.stdout.match(/data-swarm-js-errors="([^"]*)"/i)?.[1];
     if (!encoded) return { available: true, checked: true, ok: false, message: 'Chromium no devolvió el marcador de la prueba; la ejecución HTML quedó incompleta.' };
     let errors = [];
@@ -174,6 +178,6 @@ export async function checkJavascriptSyntax(delivery) {
   }
   if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
   if (!sources.length && !files.size) return { checked: false, ok: true, message: 'No se encontraron archivos o bloques de código verificables; la entrega solo recibió revisión de IA.' };
-  const browserNote = browser.checked ? ' ' + browser.message : '';
+  const browserNote = browser.message ? ' ' + browser.message : '';
   return { checked: true, ok: true, message: 'Comprobación determinista superada: ' + files.size + ' archivo(s) detectado(s), ' + sources.length + ' archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.' + browserNote, filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
 }
