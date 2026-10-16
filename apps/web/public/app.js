@@ -740,7 +740,6 @@ async function loadManagedUsers() {
     status.textContent = error.message || 'No se pudieron cargar las cuentas.';
   }
 }
-$('account-menu-toggle').addEventListener('click', () => $('account-menu-items').classList.toggle('hidden'));
 $('open-account-key').addEventListener('click', async event => {
   event.stopPropagation(); const panel = $('account-key-panel'); const opening = panel.classList.contains('hidden');
   panel.classList.toggle('hidden', !opening); $('open-account-key').setAttribute('aria-expanded', String(opening)); if (!opening) return;
