@@ -346,9 +346,23 @@ body.auth-gate #access-panel{max-height:calc(100dvh - 32px);overflow-y:auto;over
  body:not(.auth-gate) .global-chat-form textarea{min-height:38px;max-height:14dvh;padding:7px 9px}
  body:not(.auth-gate) .chat-composer-controls{margin-top:4px}
  body:not(.auth-gate) #job-submit-status{display:none}
- body:not(.auth-gate) #detail-panel{padding:6px 8px;gap:4px}
- body:not(.auth-gate) .token-budget{max-height:46px}
+ body:not(.auth-gate) #detail-panel{padding:4px 6px;gap:3px}
+ body:not(.auth-gate) #detail-panel>.section-head{min-height:0;gap:4px;align-items:center}
+ body:not(.auth-gate) #detail-title{font-size:12px;line-height:1.15}
+ body:not(.auth-gate) .detail-actions{gap:3px}
+ body:not(.auth-gate) #detail-live{font-size:7px;line-height:1.1}
+ body:not(.auth-gate) #close-detail{width:24px;height:24px;min-height:24px}
+ body:not(.auth-gate) .task-status{padding:3px 6px;gap:5px}
+ body:not(.auth-gate) .task-status>div{gap:1px;min-width:0}
+ body:not(.auth-gate) #detail-stage{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:1.2}
+ body:not(.auth-gate) #detail-status{font-size:8px;line-height:1.1}
+ body:not(.auth-gate) #detail-progress-label{max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px}
+ body:not(.auth-gate) .token-budget{max-height:32px;padding:3px 6px;overflow:hidden}
+ body:not(.auth-gate) .token-budget-head .panel-kicker{display:none}
+ body:not(.auth-gate) .token-budget-head strong{font-size:9px;line-height:1.1}
+ body:not(.auth-gate) .token-budget-track{height:2px;margin:3px 0}
  body:not(.auth-gate) .token-budget-stats{display:none}
- body:not(.auth-gate) .detail-hint{display:none!important}
+ body:not(.auth-gate) #detail-hint,body:not(.auth-gate) #agent-memory-panel,body:not(.auth-gate) .diagnostic{display:none!important}
+ body:not(.auth-gate) #conversation{padding:2px;gap:6px}
  body:not(.auth-gate) .welcome-chat{padding:6px}
 }
