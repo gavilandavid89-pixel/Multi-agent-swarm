@@ -85,11 +85,6 @@ export function canContinueBudgetTask(job = {}, payload = {}) {
   return isBudgetPausedJob(job) && !payload?.continuedByJobId;
 }
 
-/** Token budgets are not incremented in-place: each task is capped at 1M and continues as a new task. */
-export function nextAutomaticTokenBudget(_currentValue) {
-  return null;
-}
-
 /** Resume the same task after an automatic budget increase, preserving its checkpoint and transcript. */
 export function buildAutomaticBudgetExtensionPatch(current = {}, fromBudget, toBudget, timestamp = new Date().toISOString()) {
   const payload = current?.payload && typeof current.payload === 'object' ? current.payload : {};
