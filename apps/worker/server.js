@@ -212,12 +212,12 @@ async function start() {
         else enqueue(job.id);
       }
       // Recover the narrow crash window between persisting a budget pause and
-      // creating its next batch. The DB transaction keeps each continuation idempotent.
+      // creating its next continuation task. The DB transaction keeps each continuation idempotent.
       for (const paused of await recoverableBudgetContinuations()) {
         const continuation = await createContinuationJob(paused.id);
         if (continuation?.job) {
           enqueue(continuation.job.id);
-          console.info('[worker][token_batch_continuation_recovered]', JSON.stringify({
+          console.info('[worker][token_task_continuation_recovered]', JSON.stringify({
             sourceJobId: paused.id, continuationJobId: continuation.job.id,
             created: continuation.created, checkpoint: paused.checkpoint
           }));
