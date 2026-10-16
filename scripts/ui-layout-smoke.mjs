@@ -42,6 +42,10 @@ const injected = `
       composerTop: Math.round(composerRect.top),
       composerBottom: Math.round(composerRect.bottom),
       composerPosition: getComputedStyle(composer).position,
+      objectiveResize: getComputedStyle(document.getElementById('objective')).resize,
+      objectiveHeight: Math.round(document.getElementById('objective').getBoundingClientRect().height),
+      menuTogglePresent: Boolean(document.getElementById('account-menu-toggle')),
+      menuItemsPresent: Boolean(document.getElementById('account-menu-items')),
       filesButtonPosition: getComputedStyle(document.getElementById('files-menu-toggle')).position,
       filesDrawerPosition: getComputedStyle(document.getElementById('files-drawer')).position,
       composerVisible: composerRect.top >= 0 && composerRect.bottom <= window.innerHeight + 2,
@@ -179,6 +183,9 @@ async function runViewport(url, profile, width, height, orientation) {
     if (!report.conversationScrollable) issues.push('conversation did not become its own scroll region');
     if (!report.composerVisible) issues.push(`composer is outside viewport (${report.composerTop}–${report.composerBottom}px)`);
     if (report.composerPosition === 'fixed' || report.composerPosition === 'sticky') issues.push(`composer must stay in normal flow, got position ${report.composerPosition}`);
+    if (report.objectiveResize !== 'none') issues.push(`message input must not be manually resizable, got resize ${report.objectiveResize}`);
+    if (report.objectiveHeight > 125) issues.push(`message input is too tall at rest: ${report.objectiveHeight}px`);
+    if (!report.menuTogglePresent || !report.menuItemsPresent) issues.push('account three-dot menu controls are missing');
     if (report.filesButtonPosition === 'fixed') issues.push('files button must not float over the conversation');
     if (report.filesDrawerPosition === 'fixed') issues.push('files drawer must be anchored to the app shell, not the viewport');
     if (issues.length) throw new Error(`${orientation} layout failed: ${issues.join('; ')}. Report: ${JSON.stringify(report)}`);
