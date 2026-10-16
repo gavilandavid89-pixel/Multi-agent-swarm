@@ -66,17 +66,20 @@ test('invite screen keeps login as an explicit alternative without switching aft
 
   assert.equal(get('invite-gate-form').classList.contains('hidden'), false);
   assert.equal(get('show-login').classList.contains('hidden'), false);
+  assert.equal(get('show-key-login').classList.contains('hidden'), true);
 
   await app.fire('invite-gate-form', 'submit');
 
   assert.equal(get('invite-gate-form').classList.contains('hidden'), false);
   assert.equal(get('access-form').classList.contains('hidden'), true);
   assert.equal(get('show-login').classList.contains('hidden'), false);
+  assert.equal(get('show-key-login').classList.contains('hidden'), true);
   assert.match(get('register-status').textContent, /invitación no es válida/i);
 
   await app.fire('show-login', 'click');
   assert.equal(get('invite-gate-form').classList.contains('hidden'), true);
   assert.equal(get('access-form').classList.contains('hidden'), false);
+  assert.equal(get('show-key-login').classList.contains('hidden'), false);
 });
 
 test('valid invite opens registration and hides the login alternative during signup', async () => {
@@ -93,6 +96,7 @@ test('valid invite opens registration and hides the login alternative during sig
   assert.equal(get('invite-gate-form').classList.contains('hidden'), true);
   assert.equal(get('register-form').classList.contains('hidden'), false);
   assert.equal(get('show-login').classList.contains('hidden'), true);
+  assert.equal(get('show-key-login').classList.contains('hidden'), true);
 });
 
 test('authenticated workspace locks the page and scrolls only chat content on portrait and landscape', () => {
