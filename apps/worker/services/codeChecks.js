@@ -161,7 +161,7 @@ export async function checkJavascriptSyntax(delivery) {
     }
   }
   const browser = html ? await runBrowserSmokeCheck(files) : { checked: false, ok: true, message: '' };
-  if (browser.checked && !browser.ok) issues.push(browser.message);
+  if (!browser.ok) issues.push(browser.message);
   for (const [name, file] of files) {
     if (name === 'package.json') {
       try {
