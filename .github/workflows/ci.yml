@@ -37,5 +37,10 @@ jobs:
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
           npm --prefix apps/worker audit --audit-level=high --no-fund
-      - name: Build worker image and run Chromium/Xvfb smoke test
+      - name: Run Chromium/Xvfb browser smoke test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node apps/worker/scripts/browser-smoke-test.mjs
+      - name: Build worker Docker image
         run: docker build -f apps/worker/Dockerfile apps/worker
