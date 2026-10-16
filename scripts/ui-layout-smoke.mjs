@@ -88,7 +88,7 @@ try {
       `--user-data-dir=${path.join(profile, orientation)}`,
       `--window-size=${width},${height}`, '--virtual-time-budget=1500', '--dump-dom', url
     ]);
-    const encoded = dom.match(/<pre id="layout-result" hidden="">?([A-Za-z0-9+/=]*)<\/pre>/);
+    const encoded = dom.match(/<pre id="layout-result"[^>]*>([A-Za-z0-9+/=]*)<\/pre>/);
     if (!encoded?.[1]) throw new Error(`Chromium did not return a layout report for ${orientation}.`);
     const report = JSON.parse(Buffer.from(encoded[1], 'base64').toString('utf8'));
     const issues = [];
