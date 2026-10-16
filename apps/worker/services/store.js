@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { randomUUID, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
+import { generateTaskTitle } from './taskTitle.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -56,7 +57,7 @@ function unseal(blob) {
   return JSON.parse(inflateRawSync(compressed).toString('utf8'));
 }
 const toIso = value => value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-const toPublic = row => ({ id: row.id, status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at), error: row.error || null });
+const toPublic = row => ({ id: row.id, title: row.title || 'Nueva tarea', status: row.status, stage: row.stage, progress: row.progress, attempt: row.attempt, createdAt: toIso(row.created_at), updatedAt: toIso(row.updated_at), error: row.error || null });
 const artifactsRoot = path.resolve(process.env.ARTIFACTS_DIR || './data/artifacts');
 const MAX_ARTIFACTS = 40;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
@@ -64,11 +65,12 @@ const MAX_ARTIFACT_TOTAL = 2 * 1024 * 1024;
 
 export async function initStore() {
   await pool.query(`CREATE TABLE IF NOT EXISTS jobs (
-    id TEXT PRIMARY KEY, status TEXT NOT NULL, stage TEXT NOT NULL,
+    id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, stage TEXT NOT NULL,
     progress INTEGER NOT NULL DEFAULT 0, attempt INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL, error TEXT,
     encrypted_payload BYTEA NOT NULL
   )`);
+  await pool.query("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''");
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_updated_idx ON jobs(updated_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_created_idx ON jobs(created_at DESC)');
   // Importa registros de SQLite local si existieran, sin pisar el historial ya presente en PostgreSQL.
@@ -79,9 +81,11 @@ export async function initStore() {
       legacy = new Database(legacyPath, { readonly: true, fileMustExist: true });
       const rows = legacy.prepare('SELECT id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload FROM jobs').all();
       for (const row of rows) {
+        let title = `Tarea ${String(row.id).slice(0, 8)}`;
+        try { title = generateTaskTitle(unseal(row.encrypted_payload).objective); } catch {}
         await pool.query(
-          'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING',
-          [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]
+          'INSERT INTO jobs (id,title,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING',
+          [row.id,title,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]
         );
       }
       if (rows.length) console.info('[worker][history_migration]', JSON.stringify({ imported: rows.length }));
@@ -89,8 +93,14 @@ export async function initStore() {
       if (!/no such table: jobs|SQLITE_CANTOPEN/.test(String(error?.message || error))) throw error;
     } finally { try { legacy?.close(); } catch {} }
   }
+  const { rows: untitledRows } = await pool.query("SELECT id, encrypted_payload FROM jobs WHERE title = '' OR title IS NULL");
+  for (const row of untitledRows) {
+    let title = `Tarea ${String(row.id).slice(0, 8)}`;
+    try { title = generateTaskTitle(unseal(row.encrypted_payload).objective); } catch {}
+    await pool.query("UPDATE jobs SET title=$2 WHERE id=$1 AND (title='' OR title IS NULL)", [row.id, title]);
+  }
   await pool.query('SELECT 1');
-  console.info('[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.');
+  console.info('[worker][storage_ready] PostgreSQL conectado; historial cifrado y títulos de tareas habilitados.');
 }
 function safeArtifactPath(value) {
   let candidate = String(value || '').trim().replace(/^\x60|\x60$/g, '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').replace(/^\.\//, '').replace(/\\/g, '/');
@@ -135,8 +145,9 @@ export async function createJob(objective, requestedTokenBudget, userId = null) 
   const rawDefault = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
   const defaultBudget = Number.isFinite(rawDefault) ? Math.min(1000000, Math.max(4000, rawDefault)) : 1000000;
   const tokenBudget = Number.isFinite(Number(requestedTokenBudget)) ? Math.min(1000000, Math.max(4000, Math.round(Number(requestedTokenBudget) / 1000) * 1000)) : defaultBudget;
-  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
-  await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
+  const title = generateTaskTitle(objective);
+  const row = { id: randomUUID(), title, status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, title, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
+  await pool.query('INSERT INTO jobs (id,title,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [row.id,row.title,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
   return toPublic(row);
 }
 /**
@@ -171,15 +182,15 @@ export async function createContinuationJob(sourceId) {
     const timestamp = closedAt;
     const childId = randomUUID();
     const childRow = {
-      id: childId, status: 'queued', stage: 'Continuación automática · recuperando checkpoint',
+      id: childId, title: source.title || generateTaskTitle(sourcePayload.objective), status: 'queued', stage: 'Continuación automática · recuperando checkpoint',
       progress: Math.min(Number(source.progress) || 0, 90),
       attempt: Number(source.attempt) || 0,
       created_at: timestamp, updated_at: timestamp, error: null,
-      encrypted_payload: seal(payload)
+      encrypted_payload: seal({ ...payload, title: source.title || generateTaskTitle(sourcePayload.objective) })
     };
     await client.query(
-      'INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
-      [childRow.id,childRow.status,childRow.stage,childRow.progress,childRow.attempt,childRow.created_at,childRow.updated_at,childRow.error,childRow.encrypted_payload]
+      'INSERT INTO jobs (id,title,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      [childRow.id,childRow.title,childRow.status,childRow.stage,childRow.progress,childRow.attempt,childRow.created_at,childRow.updated_at,childRow.error,childRow.encrypted_payload]
     );
     sourcePayload.continuedByJobId = childId;
     sourcePayload.continuedAt = timestamp;
