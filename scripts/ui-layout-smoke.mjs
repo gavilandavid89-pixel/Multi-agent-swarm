@@ -22,6 +22,11 @@ if (!appSource.includes("event.key === 'Enter' && !event.shiftKey") || !appSourc
 if (!appSource.includes("window.addEventListener('orientationchange'") || !appSource.includes('visualViewport?.addEventListener')) {
   throw new Error('Mobile viewport must resync after orientation and visual viewport changes.');
 }
+if (!appSource.includes("if (resetScroll && !document.body.classList.contains('auth-gate'))") ||
+    !appSource.includes("window.addEventListener('orientationchange', () => scheduleViewportSync(true)") ||
+    !appSource.includes("window.addEventListener('resize', () => scheduleViewportSync())")) {
+  throw new Error('Mobile keyboard/viewport resizing must not force scroll-to-top; only orientation changes may reset the page position.');
+}
 if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
   throw new Error('Task history must be reachable from the three-dot menu and moved to its drawer.');
 }
