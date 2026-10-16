@@ -157,7 +157,7 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
   $('artifacts-kicker').textContent = bundleReady ? 'ENTREGA VALIDADA' : jobStatus === 'needs_review' ? 'ARCHIVOS · REQUIEREN CORRECCIÓN' : 'ARCHIVOS GENERADOS · EN PROCESO';
   $('download-bundle').disabled = items.length === 0;
   $('download-bundle').textContent = bundleReady ? 'Descargar proyecto completo (.zip) ↓' : jobStatus === 'needs_review' || jobStatus === 'failed' ? 'Descargar ZIP · revisión pendiente ↓' : 'Descargar ZIP · entrega sin validar ↓';
-  const signature = JSON.stringify(items.map(file => [file.index, file.path, file.size, file.version || file.updatedAt || '']));
+  const signature = JSON.stringify({ jobId, files: items.map(file => [file.index, file.path, file.size, file.version || file.updatedAt || '']) });
   const artifactsChanged = signature !== state.artifactsSignature;
   if (artifactsChanged) state.artifactsSignature = signature;
   if (artifactsChanged) {
