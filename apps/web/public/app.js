@@ -11,7 +11,7 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
 function showApp() { document.body.classList.remove('auth-gate'); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -848,6 +848,9 @@ function syncRegistrationAvailability() {
   const invite = $('register-invite').value.trim();
   const submit = $('register-form').querySelector('button[type="submit"]');
   submit.disabled = invite.length < 20;
+  // The invite gate owns its own validation message. Do not show a registration warning
+  // while the user is merely entering a code on the first screen.
+  if ($('register-form').classList.contains('hidden')) return;
   $('register-status').textContent = invite.length < 20
     ? 'Necesitás un enlace o código de invitación válido. Crear una cuenta nunca otorga permisos de administrador.'
     : '';
