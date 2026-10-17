@@ -134,11 +134,15 @@ const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url || '/', 'http://viewer.local');
   if (requestUrl.pathname === '/' && requestUrl.searchParams.has('ticket')) {
     const claims = parseSigned(requestUrl.searchParams.get('ticket'));
-    if (!claims || claims.aud !== 'swarm-desktop-viewer') {
+    const now = Date.now();
+    for (const [jti, expiry] of ticketSessions) if (expiry <= now) ticketSessions.delete(jti);
+    if (!claims || claims.aud !== 'swarm-desktop-viewer' || typeof claims.jti !== 'string' || !claims.jti || ticketSessions.has(claims.jti)) {
       res.writeHead(401, { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('El enlace de administrador venció o no es válido. Volvé a abrir el escritorio desde Swarm.\\n');
       return;
     }
+    // Consume each short-lived Bridge ticket once to prevent replay.
+    ticketSessions.set(claims.jti, claims.exp);
     const cookie = signedSession({ sub: claims.sub, role: 'admin', aud: 'swarm-desktop-viewer' });
     res.writeHead(303, { Location: '/', 'Set-Cookie': `swarm_admin_viewer=${cookie}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=3600`, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
     res.end();
