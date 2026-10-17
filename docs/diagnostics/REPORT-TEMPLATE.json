@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "reportId": null,
+  "occurredAt": "2026-01-01T00:00:00.000Z",
+  "service": "worker",
+  "environment": "production",
+  "severity": "error",
+  "category": "browser_tool_timeout",
+  "summary": "Browser action timed out before completion could be confirmed",
+  "error": {
+    "name": "TimeoutError",
+    "message": "Sanitized message without secrets",
+    "stack": "Optional sanitized stack trace; maximum 8 KiB"
+  },
+  "correlation": {
+    "taskId": null,
+    "checkpoint": null,
+    "requestId": null,
+    "traceId": null
+  },
+  "operation": {
+    "name": "navigate",
+    "attempt": 1,
+    "elapsedMs": 60000,
+    "retryable": true,
+    "idempotencyKey": null
+  },
+  "runtime": {
+    "coldStartSuspected": true,
+    "serviceReady": false,
+    "httpStatus": null
+  },
+  "reproduction": {
+    "steps": [],
+    "expected": "Expected behavior",
+    "actual": "Observed behavior"
+  },
+  "evidence": {
+    "logReferences": [],
+    "artifactReferences": []
+  },
+  "triage": {
+    "status": "pending",
+    "attempts": 0,
+    "analysis": null,
+    "likelyCause": null,
+    "nextTests": [],
+    "resolvedAt": null
+  }
+}

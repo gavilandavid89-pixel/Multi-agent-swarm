@@ -30,6 +30,14 @@ El entorno de ejecución de los agentes es independiente de la vista previa de l
 
 La imagen del Worker incluye Chromium + Xvfb y `codeChecks.js` usa ese entorno para un smoke test aislado de HTML. **Eso no equivale todavía a un runner general para ejecutar código arbitrario de los agentes con salida a Internet controlada.** La arquitectura descrita arriba es el objetivo de implementación, no una capacidad que deba considerarse desplegada. No habilitar red indiscriminada en el proceso actual de Chromium: el control real debe imponerse en el límite del contenedor/runner y su pasarela de red.
 
+## Diagnóstico de errores para investigación con IA
+
+Los fallos del sistema deben producir reportes estructurados con contexto suficiente para que una IA los investigue después, sin depender de copiar logs manualmente. El contrato, la plantilla JSON y el flujo de triage están en [docs/diagnostics/README.md](docs/diagnostics/README.md) y [docs/diagnostics/REPORT-TEMPLATE.json](docs/diagnostics/REPORT-TEMPLATE.json).
+
+El reporte debe incluir hora UTC, servicio, categoría/severidad, tarea y checkpoint si existen, operación/tiempo/reintento, estado de arranque en frío, resumen sanitizado, pasos para reproducir y referencias a evidencia. Nunca incluir tokens, contraseñas, cookies, cabeceras de autorización ni URLs con credenciales. Los reportes se deben persistir en almacenamiento operativo restringido, deduplicar y vincular al checkpoint; el análisis de IA queda en una cola posterior para no bloquear la tarea original.
+
+**Estado:** por ahora se agregó el contrato y la plantilla. El colector autenticado, almacenamiento durable, cola de triage y análisis automático aún deben implementarse en Bridge/Worker. No se debe interpretar la existencia de estos documentos como si ya estuviera activa la captura automática de errores.
+
 ## Desarrollo local
 
 Requiere Node.js 22.x (coincide con el runtime de Render y CI).
