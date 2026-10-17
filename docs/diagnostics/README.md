@@ -2,7 +2,7 @@
 
 ## Estado
 
-El colector persistente ya existe en `apps/worker`: `POST /internal/diagnostics`, `GET /internal/diagnostics` y `GET /internal/diagnostics/:id` y `PATCH /internal/diagnostics/:id/triage`. Estas rutas están detrás de la autenticación interna Bridge→Worker. El endpoint PATCH persiste estado (`queued`, `investigating`, `investigated`, `resolved`, `ignored`), análisis acotado, causa probable y próximas pruebas; incrementa el contador al marcar `investigating`. Los informes se guardan en PostgreSQL en `diagnostic_reports`; los errores de escritura devuelven `503` para reintentos seguros.
+El colector persistente ya existe en `apps/worker` y el worker registra automáticamente los fallos inesperados de ejecución de tareas: `POST /internal/diagnostics`, `GET /internal/diagnostics` y `GET /internal/diagnostics/:id` y `PATCH /internal/diagnostics/:id/triage`. Estas rutas están detrás de la autenticación interna Bridge→Worker. El endpoint PATCH persiste estado (`queued`, `investigating`, `investigated`, `resolved`, `ignored`), análisis acotado, causa probable y próximas pruebas; incrementa el contador al marcar `investigating`. Los informes se guardan en PostgreSQL en `diagnostic_reports`; los errores de escritura devuelven `503` para reintentos seguros.
 
 El colector todavía no dispara un agente investigador ni expone una UI de revisión. El estado `queued` significa que el informe está almacenado y espera la siguiente fase, no que ya fue analizado.
 
