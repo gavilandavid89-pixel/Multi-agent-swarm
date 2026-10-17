@@ -28,9 +28,18 @@ function voteModel(agentName) {
 function buildContext(payload, requestedProposal) {
   const validation = payload.validation || {};
   const findings = Array.isArray(validation.findings) ? validation.findings.slice(0, 8).map(item => clip(item, 240)).join('\n- ') : '';
+  const decisions = Array.isArray(payload.committeeDecisions) ? payload.committeeDecisions.slice(-6).map(item =>
+    '- ' + clip(item.proposal, 220) + ' | resultado: ' + clip(item.outcome, 80) + ' | motivo: ' + clip(item.rationale || item.summary, 260) + ' | aplicada automáticamente: no'
+  ).join('\n') : '';
+  const priorVotes = Array.isArray(payload.improvementVotes) ? payload.improvementVotes.filter(item => ['completed', 'partial'].includes(item.status)).slice(-3).map(item =>
+    '- ' + clip(item.proposal, 180) + ' => ' + clip(item.outcome, 60) + ' (' + clip(item.summary, 220) + ')'
+  ).join('\n') : '';
   return [
+    'REGLA DE PRIORIDAD: el objetivo original y los requisitos explícitos del usuario son la fuente de verdad. Una propuesta del comité no puede reemplazarlos ni contradecirlos.',
     'OBJETIVO ORIGINAL:',
     clip(payload.objective, 850),
+    decisions ? 'DECISIONES PREVIAS DEL COMITÉ (consultivas; no implican cambios aplicados):\n' + decisions : '',
+    priorVotes ? 'VOTACIONES RECIENTES:\n' + priorVotes : '',
     'RESULTADO / ESTRATEGIA COMPARTIDA:',
     clip(payload.strategy || payload.result?.summary || '', 850),
     'RESULTADO DE VALIDACIÓN:',
@@ -151,7 +160,8 @@ async function executeVote(jobId, proposal, voteId) {
   const voteRecord = {
     id: voteId,
     proposal,
-    status: summary.answered === ballots.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
+    kind: 'vote',
+    status: summary.answered === agents.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
     createdAt: currentVote.createdAt || completedAt,
     completedAt,
     deadlineAt,
@@ -170,8 +180,14 @@ async function executeVote(jobId, proposal, voteId) {
   const history = existingIndex >= 0
     ? previousHistory.map(item => item.id === voteId ? voteRecord : item).slice(-10)
     : [...previousHistory, voteRecord].slice(-10);
+  const previousDecisions = Array.isArray(fresh.payload.committeeDecisions) ? fresh.payload.committeeDecisions : [];
+  const decision = {
+    id: voteId, kind: 'vote', proposal, outcome: voteRecord.outcome,
+    rationale: voteRecord.summary, status: voteRecord.status, createdAt: completedAt,
+    applied: false, requiresHumanReview: true
+  };
   await updateJob(jobId, {
-    payload: { improvementVotes: history, transcript }
+    payload: { improvementVotes: history, transcript, committeeDecisions: [...previousDecisions, decision].slice(-20) }
   });
   console.info('[worker][improvement_vote_completed]', JSON.stringify({
     jobId, voteId: voteRecord.id, outcome: voteRecord.outcome,
