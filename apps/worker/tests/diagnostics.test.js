@@ -1,0 +1,49 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:5432/test';
+process.env.HISTORY_ENCRYPTION_KEY ||= '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+const { normalizeDiagnosticReport } = await import('../services/store.js');
+
+test('normalizes report fields and bounds untrusted values', () => {
+  const result = normalizeDiagnosticReport({
+    reportId: 'report_12345678', occurredAt: '2026-10-17T12:00:00Z', service: 'runner', environment: 'test',
+    severity: 'critical', category: 'timeout', summary: 'runner timed out',
+    error: { name: 'TimeoutError', message: 'secret=supersecret failed', stack: 'x'.repeat(12000) },
+    correlation: { taskId: 'task-123', checkpoint: 'browser-test' },
+    operation: { name: 'browser-test', attempt: 200, elapsedMs: 999999999, retryable: true },
+    reproduction: { steps: Array.from({ length: 20 }, (_, i) => `step-${i}`), expected: 'loaded', actual: 'timeout' },
+    runtime: { coldStartSuspected: true, serviceReady: false, httpStatus: 503 },
+    evidence: { logReferences: ['log-1'], artifactReferences: ['artifact-1'] }
+  });
+  assert.equal(result.reportId, 'report_12345678');
+  assert.equal(result.status, undefined);
+  assert.equal(result.severity, 'critical');
+  assert.equal(result.report.error.message, 'secret=[REDACTED] failed');
+  assert.equal(result.report.error.stack.length, 8000);
+  assert.equal(result.report.operation.attempt, 100);
+  assert.equal(result.report.operation.elapsedMs, 86400000);
+  assert.equal(result.report.reproduction.steps.length, 12);
+  assert.equal(result.report.runtime.httpStatus, 503);
+  assert.deepEqual(result.report.evidence.logReferences, ['log-1']);
+  assert.equal(result.taskId, 'task-123');
+});
+
+test('redacts URL credentials and API key-like values', () => {
+  const result = normalizeDiagnosticReport({
+    summary: 'failed https://alice:pass123@example.com/path api_key=secret-value sk-abcdefghijklmnopqrstuvwxyz',
+    error: { message: 'failed https://alice:pass123@example.com/path api_key=secret-value sk-abcdefghijklmnopqrstuvwxyz' }
+  });
+  const serialized = JSON.stringify(result.report);
+  assert.equal(serialized.includes('pass123'), false);
+  assert.equal(serialized.includes('secret-value'), false);
+  assert.equal(serialized.includes('sk-abcdefghijklmnopqrstuvwxyz'), false);
+});
+
+test('uses safe defaults for invalid enum values and invalid report IDs', () => {
+  const result = normalizeDiagnosticReport({ reportId: 'bad id', severity: 'urgent', category: 'arbitrary', environment: 'prod' });
+  assert.match(result.reportId, /^[a-f0-9-]{36}$/i);
+  assert.equal(result.severity, 'error');
+  assert.equal(result.category, 'unknown');
+  assert.equal(result.environment, 'unknown');
+});
