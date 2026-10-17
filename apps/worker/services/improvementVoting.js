@@ -69,7 +69,7 @@ async function persistVoteProgress(jobId, voteId, ballots, deadlineAt) {
   const index = history.findIndex(item => item.id === voteId);
   if (index < 0) return;
   const tally = summarizeImprovementVotes(ballots);
-  const updated = { ...history[index], votes: ballots.slice(), tally: tally.tally, answered: tally.answered, total: agents.length, deadlineAt, summary: 'Deliberación en curso: ' + ballots.length + '/' + agents.length + ' agentes respondieron. El objetivo original sigue siendo prioritario.' };
+  const updated = { ...history[index], votes: ballots.slice(), tally: tally.tally, answered: tally.answered, total: agents.length - 1, deadlineAt, summary: 'Deliberación en curso: ' + ballots.length + '/' + (agents.length - 1) + ' especialistas respondieron. El objetivo original sigue siendo prioritario.' };
   const nextHistory = history.map((item, i) => i === index ? updated : item).slice(-10);
   await updateJob(jobId, { payload: { improvementVotes: nextHistory } });
 }
@@ -112,7 +112,7 @@ async function executeVote(jobId, proposal, voteId) {
     const response = await raceDeadline(consultarModelo({
       model: voteModel(agent.name), temperature: 0.1, maxTokens: 220, onRetry,
       messages: [
-        { role: 'system', content: 'Sos ' + agent.name + ' en una votación técnica independiente del comité Swarm. Tu rol: ' + agent.role + ' Respondé en español y en máximo 70 palabras, usando solo el contexto dado. No repitas el objetivo ni resumas toda la propuesta. No afirmes que implementaste ni probaste cambios. La decisión no se aplica automáticamente. Formato obligatorio: VOTO: APOYAR/RECHAZAR/ABSTENERSE; JUSTIFICACIÓN: razón concreta; RIESGO: principal riesgo; CONDICIÓN: comprobación previa.' },
+        { role: 'system', content: 'Sos ' + agent.name + ' en una votación técnica independiente del comité Swarm. Tu rol: ' + agent.role + ' Respondé en español y en máximo 70 palabras, usando solo el contexto dado. No repitas el objetivo ni resumas toda la propuesta. No afirmes que implementaste ni probaste cambios. La decisión no se aplica automáticamente. Usá cuatro líneas exactas: VOTO: APOYAR o RECHAZAR o ABSTENERSE; JUSTIFICACIÓN: razón concreta; RIESGO: principal riesgo; CONDICIÓN: comprobación previa. La primera línea debe contener únicamente el voto.' },
         { role: 'user', content: context }
       ]
     }), remainingMs);
