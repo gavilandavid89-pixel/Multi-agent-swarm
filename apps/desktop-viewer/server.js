@@ -67,7 +67,7 @@ function challenge(res) {
 function startDesktop() {
   start('Xvfb', [display, '-screen', '0', '1440x900x24', '-nolisten', 'tcp', '-ac']);
   start('x11vnc', ['-display', display, '-localhost', '-forever', '-shared', '-rfbport', String(vncPort), '-nopw']);
-  start('websockify', ['--web', '/usr/share/novnc', '127.0.0.1:' + upstreamPort, '127.0.0.1:5900']);
+  start('websockify', ['--web', '/usr/share/novnc', '127.0.0.1:' + upstreamPort, '127.0.0.1:' + vncPort]);
   start('chromium', [
     '--no-first-run',
     '--disable-dev-shm-usage',
