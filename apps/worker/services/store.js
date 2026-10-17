@@ -70,48 +70,6 @@ const MAX_ARTIFACTS = 40;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_ARTIFACT_TOTAL = 2 * 1024 * 1024;
 
-// Diagnostic metadata only: never emit connection strings, passwords, row values, or encrypted payloads.
-export async function inspectStoreSchema() {
-  const identity = await pool.query('SELECT current_database() AS database_name, current_user AS database_user, inet_server_addr()::text AS server_address, inet_server_port() AS server_port');
-  const schema = await pool.query(`SELECT t.table_schema, t.table_name, c.column_name, c.data_type, c.is_nullable
-    FROM information_schema.tables t
-    JOIN information_schema.columns c ON c.table_schema = t.table_schema AND c.table_name = t.table_name
-    WHERE t.table_type = 'BASE TABLE'
-      AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY t.table_schema, t.table_name, c.ordinal_position`);
-  const tables = [];
-  for (const row of schema.rows) {
-    let table = tables.find(item => item.schema === row.table_schema && item.name === row.table_name);
-    if (!table) { table = { schema: row.table_schema, name: row.table_name, columns: [] }; tables.push(table); }
-    table.columns.push({ name: row.column_name, type: row.data_type, nullable: row.is_nullable === 'YES' });
-  }
-  const constraints = await pool.query(`SELECT tc.table_schema, tc.table_name, tc.constraint_name, tc.constraint_type,
-      array_agg(kcu.column_name ORDER BY kcu.ordinal_position) FILTER (WHERE kcu.column_name IS NOT NULL) AS columns,
-      ccu.table_name AS referenced_table, array_agg(ccu.column_name ORDER BY kcu.ordinal_position) FILTER (WHERE ccu.column_name IS NOT NULL) AS referenced_columns
-    FROM information_schema.table_constraints tc
-    LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_catalog=kcu.constraint_catalog AND tc.constraint_schema=kcu.constraint_schema AND tc.constraint_name=kcu.constraint_name AND tc.table_schema=kcu.table_schema AND tc.table_name=kcu.table_name
-    LEFT JOIN information_schema.constraint_column_usage ccu ON tc.constraint_catalog=ccu.constraint_catalog AND tc.constraint_schema=ccu.constraint_schema AND tc.constraint_name=ccu.constraint_name AND tc.table_schema=ccu.table_schema AND tc.table_name=ccu.table_name
-    WHERE tc.table_schema NOT IN ('pg_catalog','information_schema')
-    GROUP BY tc.table_schema, tc.table_name, tc.constraint_name, tc.constraint_type, ccu.table_name
-    ORDER BY tc.table_schema, tc.table_name, tc.constraint_name`);
-  const indexes = await pool.query(`SELECT schemaname AS table_schema, tablename AS table_name, indexname AS index_name, indexdef AS definition
-    FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema')
-    ORDER BY schemaname, tablename, indexname`);
-  const objects = await pool.query(`SELECT n.nspname AS schema_name, c.relname AS object_name,
-      CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized_view' WHEN 'S' THEN 'sequence' WHEN 'f' THEN 'foreign_table' ELSE c.relkind::text END AS object_type
-    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND c.relkind IN ('v','m','S','f')
-    ORDER BY n.nspname,c.relname`);
-  const counts = [];
-  for (const table of tables) {
-    const quotedSchema = '"' + table.schema.replace(/"/g, '""') + '"';
-    const quotedName = '"' + table.name.replace(/"/g, '""') + '"';
-    const result = await pool.query(`SELECT count(*)::bigint AS row_count FROM ${quotedSchema}.${quotedName}`);
-    counts.push({ schema: table.schema, table: table.name, row_count: Number(result.rows[0].row_count) });
-  }
-  return { identity: { database_name: identity.rows[0].database_name, database_user: identity.rows[0].database_user }, tables, row_counts: counts, constraints: constraints.rows, indexes: indexes.rows, other_objects: objects.rows };
-}
-
 export async function initStore() {
   await pool.query(`CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, status TEXT NOT NULL, stage TEXT NOT NULL,
