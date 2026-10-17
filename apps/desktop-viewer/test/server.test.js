@@ -189,6 +189,16 @@ test('Bridge SSO tickets are signed, single-use, and disable Basic-auth bypass',
   });
   assert.equal(basicBypass.status, 401, 'Basic auth must not bypass Bridge role authorization in SSO mode');
 
+  const websocketDenied = await new Promise((resolve, reject) => {
+    const socket = net.connect(localPort, '127.0.0.1');
+    let response = '';
+    socket.setTimeout(1500, () => { socket.destroy(); reject(new Error('WebSocket auth check timed out')); });
+    socket.on('connect', () => socket.write('GET /websockify HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Version: 13\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n\\r\\n'));
+    socket.on('data', chunk => { response += chunk.toString(); socket.destroy(); resolve(response); });
+    socket.on('error', reject);
+  });
+  assert.match(websocketDenied, /^HTTP\\/1\\.1 401/, 'WebSocket upgrade must enforce the same admin session gate');
+
   const makeTicket = (claims, key = secret) => {
     const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
     return payload + '.' + createHmac('sha256', key).update(payload).digest('base64url');
