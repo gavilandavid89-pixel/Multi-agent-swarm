@@ -149,12 +149,12 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 
 ## Votación del comité sin interrumpir tareas
 
-El botón **Convocar votación en segundo plano** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los votos se ejecutan en segundo plano, usan tokens adicionales y se guardan dentro del historial cifrado de la tarea. La tarea principal no se pausa ni se modifica por votar.
+El botón **Iniciar votación** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los argumentos se guardan de forma incremental. Si la tarea está activa, el motor espera en el siguiente checkpoint seguro hasta que cierre la deliberación, y después continúa desde ese punto.
 
 - La votación es consultiva: no aplica cambios ni sustituye aprobación humana para acciones de impacto.
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
 - Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
-- Los argumentos se guardan de forma incremental en el historial cifrado y aparecen con el sondeo del chat. La deliberación tiene un límite de 60 segundos controlado por el Worker y puede cerrar con resultado parcial si no llegan todas las respuestas. La recuperación automática de deliberaciones abandonadas tras reinicios sigue pendiente.
+- Los argumentos se guardan de forma incremental en el historial cifrado y aparecen con el sondeo del chat. La deliberación tiene un límite de 60 segundos controlado por el Worker y puede cerrar con resultado parcial si no llegan todas las respuestas. Al arrancar, el Worker cierra como parcial o fallida toda votación que seguía en curso antes del reinicio, usando los argumentos ya guardados, y limpia la marca de pausa. Así no queda una tarea esperando una votación cuyo proceso ya no existe.
 
 
 ## Deliberación visible del comité
@@ -164,9 +164,9 @@ La votación consultiva muestra una franja azul marino con contorno amarillo, el
 - Cada argumento recibido se guarda en el payload cifrado de la tarea y en el transcript, de modo que el chat puede mostrar avances sin esperar a que terminen los seis agentes.
 - El límite de tiempo se calcula y valida en el Worker, no depende del reloj del navegador. Al agotarse, el resultado se cierra con las respuestas disponibles y se marca como parcial cuando faltan agentes.
 - La votación sigue siendo consultiva y no edita archivos ni aplica decisiones automáticamente. El objetivo original de la tarea continúa teniendo prioridad.
-- La deliberación implementada actualmente es no bloqueante: no pausa la tarea principal. Una pausa real debe integrarse con los puntos seguros del motor, guardar un checkpoint antes de detenerse y reanudar desde ese checkpoint; no se debe simular la pausa cambiando solo el estado visible porque el motor activo podría sobrescribirlo.
+- La pausa ocurre en el siguiente checkpoint del motor, no interrumpe una llamada de IA a mitad de ejecución. La tarea conserva su checkpoint y reanuda cuando la votación termina. Hay un límite operativo de espera para evitar bloqueos indefinidos.
 - La fecha límite cierra la deliberación, pero el cliente de proveedor actual no expone cancelación común para todas las APIs. Una solicitud ya enviada puede seguir terminando en el proveedor después del cierre; el sistema no debe prometer que ese cierre cancela el consumo del proveedor.
-- Al iniciar el Worker, se revisan las tareas persistidas y se cierran como parciales o fallidas las deliberaciones cuyo plazo ya venció; las que todavía tienen plazo vigente no se alteran. La coordinación de propuestas autónomas sin intervención del usuario y la pausa/reanudación real son trabajo pendiente. Hasta que esas rutas estén implementadas y probadas, no se presentan como funciones activas.
+- Al iniciar el Worker, toda deliberación que seguía en curso se cierra como parcial o fallida, incluso si su plazo todavía no había vencido, porque el proceso que la atendía ya no existe. La coordinación autónoma de nuevas propuestas y la cancelación real de llamadas de proveedor siguen pendientes.
 
 ### Flujo objetivo para coordinación autónoma
 
