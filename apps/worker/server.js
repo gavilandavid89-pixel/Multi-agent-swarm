@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact, saveDiagnosticReport, listDiagnosticReports, getDiagnosticReport } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -80,6 +80,34 @@ app.post('/internal/admin/import-legacy-apis', async (req, res) => {
   try { res.json(await importLegacyProvidersForUser(userId)); }
   catch (error) { console.error('[worker][legacy_api_import_failed]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudieron migrar las APIs heredadas.' }); }
 });
+
+app.post('/internal/diagnostics', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  if (JSON.stringify(body).length > 32000) return res.status(413).json({ error: 'El informe supera 32 KB.' });
+  if (!String(body.summary || body.error?.message || '').trim()) return res.status(400).json({ error: 'El informe necesita un resumen o mensaje de error.' });
+  try {
+    const result = await saveDiagnosticReport(body);
+    console.info('[worker][diagnostic_report_received]', JSON.stringify({ reportId: result.reportId, duplicate: result.duplicate, category: body.category || 'unknown', severity: body.severity || 'error' }));
+    res.status(result.duplicate ? 200 : 202).json({ ok: true, ...result, triage: 'queued' });
+  } catch (error) {
+    console.error('[worker][diagnostic_report_store_failed]', JSON.stringify({ code: error?.code || 'database' }));
+    res.status(503).json({ error: 'No se pudo guardar el informe de diagnóstico; se puede reintentar de forma segura.' });
+  }
+});
+app.get('/internal/diagnostics', async (req, res) => {
+  const status = ['queued','investigating','investigated','resolved','ignored'].includes(String(req.query.status || '')) ? String(req.query.status) : '';
+  try { res.json({ reports: await listDiagnosticReports({ limit: req.query.limit, offset: req.query.offset, status }) }); }
+  catch { res.status(503).json({ error: 'No se pudieron consultar los informes de diagnóstico.' }); }
+});
+app.get('/internal/diagnostics/:id', async (req, res) => {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(req.params.id)) return res.status(400).json({ error: 'ID de informe inválido.' });
+  try {
+    const report = await getDiagnosticReport(req.params.id);
+    if (!report) return res.status(404).json({ error: 'No existe ese informe.' });
+    res.json(report);
+  } catch { res.status(503).json({ error: 'No se pudo consultar el informe.' }); }
+});
+
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
 app.get('/internal/jobs', async (req, res, next) => {
   const requestedStatus = String(req.query.status || '');
