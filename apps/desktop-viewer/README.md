@@ -14,11 +14,18 @@ This service runs a dedicated Chromium desktop inside Xvfb and serves a noVNC vi
 
 Never commit the password or publish it in logs. Render terminates HTTPS at the public edge. With `DESKTOP_VIEWER_TICKET_SECRET` and Bridge `DESKTOP_VIEWER_URL` configured, the main app's Bridge validates the existing Bearer session and requires the real `admin` role before issuing a signed 30-second launch ticket. The viewer exchanges it for an hour-long HttpOnly, Secure, SameSite=Strict cookie, which protects both page and WebSocket access. In SSO mode, standalone Basic auth cannot bypass the Bridge role check. `/healthz` is intentionally unauthenticated and reveals only a generic readiness state.
 
+## Real agent activity feed
+
+The viewer dashboard at `/` embeds the protected Chromium/noVNC desktop and polls `/api/agent-activity` every five seconds. The viewer calls the Bridge server-to-server at `/internal/desktop-activity`; the Bridge checks `x-swarm-desktop-secret` in constant time and retrieves sanitized job/activity summaries from the Worker. Configure the same newly generated `DESKTOP_ACTIVITY_SHARED_SECRET` (32+ random characters) on Bridge and viewer. Set `DESKTOP_ACTIVITY_URL` on the viewer to the Bridge HTTPS origin. Do not reuse the SSO ticket secret for this feed. Without these variables, the desktop still opens but the activity panel reports that its feed is not configured.
+
 ## Endpoints
 
-- `GET /healthz`: minimal health response.
-- `GET /`: noVNC browser UI, requires authentication.
+- `GET /healthz`: minimal desktop readiness response.
+- `GET /`: authenticated dashboard with noVNC desktop and real agent activity feed.
+- `GET /vnc.html`: authenticated noVNC interface.
+- `GET /api/agent-activity`: authenticated, sanitized agent activity JSON.
 - `GET /websockify` WebSocket upgrade: authenticated desktop stream.
+- Bridge `GET /internal/desktop-activity`: service-to-service only; requires `x-swarm-desktop-secret`.
 
 ## Security limits
 
