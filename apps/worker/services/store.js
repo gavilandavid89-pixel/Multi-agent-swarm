@@ -175,7 +175,7 @@ export function normalizeDiagnosticReport(input = {}) {
     occurredAt: Number.isFinite(Date.parse(input.occurredAt)) ? new Date(input.occurredAt).toISOString() : new Date().toISOString(),
     service, environment, severity, category, summary, error, correlation, operation, reproduction, runtime, evidence
   };
-  const fingerprint = createHash('sha256').update(JSON.stringify([service, category, error?.name, error?.message || summary, operation.name])).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify([service, category, correlation.taskId || '', error?.name, error?.message || summary, operation.name])).digest('hex');
   return { reportId, report, severity, category, service, environment, summary, fingerprint, taskId: correlation.taskId || null };
 }
 export async function saveDiagnosticReport(input) {
