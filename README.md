@@ -232,6 +232,22 @@ Las comprobaciones automáticas deben ejecutarse en CI o en un contenedor de pru
 - **Permisos mínimos:** el workflow solo necesita permiso de lectura del repositorio. Las ejecuciones nuevas de una misma rama/PR cancelan las comprobaciones antiguas para no acumular procesos ni consumir recursos innecesarios.
 - **Pruebas sin coste de proveedor:** las pruebas unitarias y de navegador no necesitan claves de Gemini/Groq ni generan deliberaciones reales. Las pruebas E2E que llaman a proveedores se mantienen separadas porque pueden consumir tokens y requieren autorización/configuración explícita.
 
+### Acceso a red del runner de agentes
+
+**Decisión de arquitectura:** el runner dedicado de pruebas tendrá salida a internet controlada; no se aplicará una prohibición general de red a las pruebas que necesiten instalar dependencias, consultar documentación o verificar integraciones externas.
+
+Política prevista para ese runner:
+
+- Permitir HTTPS saliente para los destinos que necesite la tarea: repositorios de código, registros de paquetes y APIs externas autorizadas.
+- Denegar por defecto loopback, rangos privados, link-local, endpoints de metadatos de proveedores cloud y direcciones de redes internas/producción. Las excepciones deben ser explícitas, limitadas y auditables.
+- Aplicar el control en un proxy/gateway de salida o reglas de red del entorno, no solo mediante validación de URL en JavaScript. El gateway debe validar las direcciones resueltas y los destinos efectivos para mitigar DNS rebinding, redirecciones y resolución hacia IPs internas.
+- No montar secretos de producción en el runner. Para pruebas de integración, usar credenciales efímeras y de mínimo privilegio, solo si son necesarias y aprobadas para esa tarea.
+- Limitar duración, ancho de banda/descargas, CPU, memoria, procesos y almacenamiento temporal; registrar destino, resultado, duración y motivo de bloqueo sin guardar cabeceras sensibles ni tokens.
+- Mantener la vista previa de HTML/CSS/JS en Chromium aislada y sin red por defecto. La conectividad del runner de integración no debe habilitar automáticamente red para contenido web arbitrario.
+- Si una tarea necesita una API privada o un servicio interno, requerir una excepción concreta con alcance y credenciales temporales; no abrir toda la red privada al runner.
+
+**Estado actual:** esto define el comportamiento objetivo; no significa que ya exista un runner de ejecución arbitraria con egress controlado en producción. El código actual dispone de comprobaciones de sintaxis y una prueba de navegador restringida, pero todavía falta desplegar un servicio/contendor de runner separado y hacer cumplir la política de red a nivel de infraestructura.
+
 ### Límites y siguiente nivel de aislamiento
 
 Xvfb es un servidor gráfico virtual, no una máquina virtual. Chromium se ejecuta con las protecciones disponibles en el runtime; si el entorno impide su sandbox, el validador puede informar que la comprobación de navegador fue omitida y conservar las comprobaciones deterministas. No debe presentarse una prueba omitida como una prueba de navegador aprobada. Para ejecutar código arbitrario de agentes con un aislamiento fuerte, la siguiente mejora es un runner desechable dedicado con límites de CPU/memoria/PID, usuario no privilegiado, sistema de archivos de solo lectura salvo el directorio de trabajo, sin secretos montados y sin salida de red por defecto. El worker de producción no debe convertirse en un ejecutor general de código generado.
