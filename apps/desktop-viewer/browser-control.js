@@ -14,7 +14,7 @@ function send(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function safePublicUrl(raw) {
+export function safePublicUrl(raw) {
   let url;
   try { url = new URL(String(raw || '')); } catch { throw new Error('URL inválida.'); }
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Solo se permiten URLs HTTP y HTTPS.');
