@@ -12,7 +12,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('open-desktop-viewer')?.classList.toggle('hidden', !isAdmin); $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -1130,6 +1130,24 @@ if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(arti
 const historyPanel = document.querySelector('#dashboard-grid .history-panel') || document.querySelector('.history-panel');
 if (historyPanel && $('history-drawer-slot')) $('history-drawer-slot').append(historyPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+$('open-desktop-viewer')?.addEventListener('click', async () => {
+  const button = $('open-desktop-viewer');
+  if (state.user?.role !== 'admin') return;
+  const original = button.textContent;
+  // Open synchronously from the click gesture so mobile browsers do not block the popup after the API await.
+  const popup = window.open('about:blank', '_blank');
+  if (!popup) { alert('El navegador bloqueó la ventana. Permití ventanas emergentes para esta web y volvé a intentarlo.'); return; }
+  popup.opener = null;
+  button.disabled = true; button.textContent = 'Abriendo escritorio…';
+  try {
+    const result = await api('/api/admin/desktop-ticket', { method: 'POST', body: JSON.stringify({}) });
+    if (!result.url) throw new Error('El Bridge no devolvió el enlace del escritorio.');
+    popup.location.replace(result.url);
+  } catch (error) {
+    popup.close();
+    alert(error.message || 'No se pudo abrir el escritorio virtual.');
+  } finally { button.disabled = false; button.textContent = original; }
+});
 $('open-history-menu').addEventListener('click', () => {
   $('account-menu-items').classList.add('hidden');
   $('account-menu-toggle').setAttribute('aria-expanded', 'false');
