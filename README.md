@@ -153,7 +153,7 @@ El botón **Iniciar votación** registra la propuesta y devuelve el control a la
 
 - La votación es consultiva: no aplica cambios ni sustituye aprobación humana para acciones de impacto.
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
-- Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
+- Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens. Si una votación termina fallida sin votos válidos, se permite reintentar esa propuesta; las votaciones completadas o parciales siguen siendo reutilizables.
 - Los argumentos se guardan de forma incremental en el historial cifrado y aparecen con el sondeo del chat. La deliberación tiene un límite de 60 segundos controlado por el Worker y puede cerrar con resultado parcial si no llegan todas las respuestas. Al arrancar, el Worker cierra como parcial o fallida toda votación que seguía en curso antes del reinicio, usando los argumentos ya guardados, y limpia la marca de pausa. Así no queda una tarea esperando una votación cuyo proceso ya no existe.
 
 
