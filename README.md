@@ -145,3 +145,14 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 - Este registro permite verificar si `DATABASE_URL` del Worker apunta a `comite_database` y descubrir el esquema existente sin abrir el endpoint de diagnóstico al público ni cambiar la allowlist de la base.
 - **Temporalidad y limpieza:** una vez recogido el inventario desde los logs privados de Render y documentado el resultado real, retirar `inspectStoreSchema()`, su importación y la llamada de arranque, volver a desplegar y conservar en este README únicamente los hallazgos verificados. Revisar el log para asegurarse de que no aparezcan datos de filas; el diagnóstico diseñado solo emite metadatos de esquema.
 - La función `initStore()` ya crea `jobs`, índices de fecha/actualización y `job_request_idempotency` en la base de `DATABASE_URL`. Por eso es importante inspeccionar antes de llamar a `initStore()`; la existencia de esas tablas por sí sola no prueba que la base sea exclusiva del Swarm.
+
+
+### Hallazgos verificados de `comite-database` (17-10-2026)
+
+- El diagnóstico se ejecutó en el Worker desplegado y devolvió `current_database() = comite_database` y `current_user = comite_database_user`. Por tanto, **`DATABASE_URL` del Worker apunta efectivamente a la instancia Render llamada `comite-database`**; ya no es solo una hipótesis.
+- Antes de inicializar el almacén, el esquema visible contenía dos tablas de usuario en `public`:
+  - `jobs`: `id`, `status`, `stage`, `progress`, `attempt`, `created_at`, `updated_at`, `error`, `encrypted_payload`. El payload se guarda como `bytea` cifrado por la aplicación.
+  - `job_request_idempotency`: `idempotency_key`, `request_hash`, `job_id`, `created_at`; impide duplicar solicitudes y enlaza una clave con su tarea.
+- La coincidencia con las tablas que crea `apps/worker/services/store.js:initStore()` indica que esta base sí está funcionando como almacenamiento de tareas del Swarm. **No demuestra por sí sola que sea la base de datos del consejo de agentes como concepto**: en el esquema observado no aparecen tablas explícitas de agentes, miembros del comité, deliberaciones ni votos.
+- El primer inventario solo consultó metadatos de tablas y columnas; todavía no obtuvo recuentos, restricciones, índices ni contenido de filas. El siguiente despliegue amplía la inspección con recuentos exactos y metadatos de restricciones/índices/otros objetos. No imprime valores de filas ni el contenido cifrado.
+- La dirección privada del servidor no se conserva en esta documentación; los logs de Render deben tratarse como registros operativos privados.
