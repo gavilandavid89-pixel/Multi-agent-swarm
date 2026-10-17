@@ -49,6 +49,17 @@ const styleSource = readFileSync(path.join(publicDir, 'styles.css'), 'utf8');
 if (!styleSource.includes('touch-action:pan-y') || !styleSource.includes('.agent-vos .message-body') || !styleSource.includes('.jump-to-latest')) {
   throw new Error('Drawers must be touch-scrollable, user messages right-aligned, and latest-message navigation visible.');
 }
+// Regression guard: the user can speak from the main chat ("Vos") or inside a direct agent chat ("Usuario").
+// Both transcript identities must get the same right-aligned warm-green bubble, not the default gray agent bubble.
+const userBubbleRule = /body:not\\(\\.auth-gate\\) \\.agent-vos,\\s*body:not\\(\\.auth-gate\\) \\.agent-usuario\\s*\\{[^}]*align-self:flex-end[^}]*flex-direction:row-reverse/s;
+const userBubbleBodyRule = /body:not\\(\\.auth-gate\\) \\.agent-vos \\.message-body,\\s*body:not\\(\\.auth-gate\\) \\.agent-usuario \\.message-body\\s*\\{[^}]*linear-gradient\\(145deg,#294d3d,#203c31\\)/s;
+if (!userBubbleRule.test(styleSource) || !userBubbleBodyRule.test(styleSource)) {
+  throw new Error('Direct-chat user messages (agent "Usuario") must use the right-aligned warm-green user bubble style.');
+}
+const agentChatSource = readFileSync(path.join(root, 'apps/worker/services/agentChat.js'), 'utf8');
+if (!agentChatSource.includes("agent: 'Usuario'")) {
+  throw new Error('Direct-agent user messages must retain the "Usuario" identity covered by the user-bubble CSS regression test.');
+}
 
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
