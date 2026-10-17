@@ -97,14 +97,14 @@ app.post('/v1/check', auth, async (req, res) => {
   active++;
   try {
     const result = await withWorkspace(req.body?.files, async ({ id, workspace, files }) => {
-      const jsFiles = files.filter(f => /\\.(?:js|mjs|cjs)$/i.test(f.path));
+      const jsFiles = files.filter(f => /\.(?:js|mjs|cjs)$/i.test(f.path));
       const syntax = [];
       for (const file of jsFiles) {
         const checked = await runProcess(process.execPath, ['--check', path.resolve(workspace, file.path)], workspace, Math.min(MAX_RUNTIME_MS, 10000));
         syntax.push({ path: file.path, ok: checked.exitCode === 0 && !checked.timedOut, stderr: checked.stderr.slice(0, 3000), timedOut: checked.timedOut });
         if (!syntax.at(-1).ok) break;
       }
-      const htmlEntry = files.find(f => /(?:^|\\/)index\\.html?$/i.test(f.path)) || files.find(f => /\\.html?$/i.test(f.path));
+      const htmlEntry = files.find(f => /(?:^|\/)index\.html?$/i.test(f.path)) || files.find(f => /\.html?$/i.test(f.path));
       let browser = { checked: false, ok: true, message: 'No se entregó HTML; prueba visual omitida.' };
       if (htmlEntry && syntax.every(item => item.ok)) {
         const target = path.resolve(workspace, htmlEntry.path);
