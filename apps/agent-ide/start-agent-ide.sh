@@ -6,9 +6,13 @@ if [ -z "${PASSWORD:-}" ] || [ "${#PASSWORD}" -lt 24 ]; then
   exit 78
 fi
 
-if [ "${AGENT_IDE_DISABLE_TERMINAL:-false}" = 'true' ]; then
-  echo '[agent-ide] Terminal is disabled by configuration; this image is intended for private, trusted development workspaces only.' >&2
-fi
+mkdir -p "$HOME/.config/code-server" /tmp/agent-ide/user-data /tmp/agent-ide/extensions
+chmod 700 "$HOME/.config/code-server"
+escaped_password=$(printf '%s' "$PASSWORD" | sed "s/'/''/g")
+umask 077
+printf "bind-addr: 0.0.0.0:8080\nauth: password\npassword: '%s'\ncert: false\n disable-telemetry: true\n" "$escaped_password" > "$HOME/.config/code-server/config.yaml"
+chmod 600 "$HOME/.config/code-server/config.yaml"
+unset PASSWORD escaped_password
 
 exec code-server \
   --bind-addr 0.0.0.0:8080 \
