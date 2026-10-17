@@ -49,6 +49,7 @@ jobs:
       - run: npm ci --prefix apps/worker --no-audit --no-fund
       - run: npm --prefix apps/worker test
       - run: npm --prefix apps/worker run check
+      - run: sh -n apps/agent-ide/start-agent-ide.sh
 
   ide-image-build:
     runs-on: ubuntu-latest
