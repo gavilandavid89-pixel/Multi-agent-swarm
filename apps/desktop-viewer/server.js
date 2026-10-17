@@ -1,11 +1,13 @@
 import http from 'node:http';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHmac, randomBytes } from 'node:crypto';
 
 const port = Number(process.env.PORT || 3300);
 const username = process.env.VIEWER_ADMIN_USERNAME || '';
 const password = process.env.VIEWER_ADMIN_PASSWORD || '';
+const ticketSecret = process.env.DESKTOP_VIEWER_TICKET_SECRET || '';
+const ticketSessions = new Map();
 const upstreamPort = Number(process.env.NOVNC_INTERNAL_PORT || 6080);
 const vncPort = Number(process.env.VNC_INTERNAL_PORT || 5900);
 const chromiumDebugPort = Number(process.env.CHROMIUM_DEBUG_PORT || 9222);
@@ -44,7 +46,29 @@ function equalSecret(actual, expected) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function safeEqualText(a, b) {
+  const left = Buffer.from(String(a)); const right = Buffer.from(String(b));
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+function parseSigned(value) {
+  if (!ticketSecret || ticketSecret.length < 32 || typeof value !== 'string') return null;
+  const dot = value.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const payload = value.slice(0, dot); const signature = value.slice(dot + 1);
+  const expected = createHmac('sha256', ticketSecret).update(payload).digest('base64url');
+  if (!safeEqualText(signature, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (data.aud !== 'swarm-desktop-viewer' || data.role !== 'admin' || !Number.isFinite(data.exp) || data.exp <= Date.now()) return null;
+    return data;
+  } catch { return null; }
+}
 function authorized(req) {
+  const cookies = Object.fromEntries(String(req.headers.cookie || '').split(';').map(part => {
+    const index = part.indexOf('='); return index < 0 ? ['', ''] : [part.slice(0, index).trim(), part.slice(index + 1).trim()];
+  }).filter(([key]) => key));
+  const session = parseSigned(cookies.swarm_admin_viewer);
+  if (session) return true;
   if (!username || password.length < 24) return false;
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) return false;
@@ -53,6 +77,10 @@ function authorized(req) {
   const split = decoded.indexOf(':');
   if (split < 0) return false;
   return equalSecret(decoded.slice(0, split), username) && equalSecret(decoded.slice(split + 1), password);
+}
+function signedSession(data) {
+  const payload = Buffer.from(JSON.stringify({ ...data, exp: Date.now() + 60 * 60 * 1000 })).toString('base64url');
+  return payload + '.' + createHmac('sha256', ticketSecret).update(payload).digest('base64url');
 }
 
 function challenge(res) {
@@ -102,6 +130,19 @@ async function chromiumReady() {
 }
 
 const server = http.createServer(async (req, res) => {
+  const requestUrl = new URL(req.url || '/', 'http://viewer.local');
+  if (requestUrl.pathname === '/' && requestUrl.searchParams.has('ticket')) {
+    const claims = parseSigned(requestUrl.searchParams.get('ticket'));
+    if (!claims || claims.aud !== 'swarm-desktop-viewer') {
+      res.writeHead(401, { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('El enlace de administrador venció o no es válido. Volvé a abrir el escritorio desde Swarm.\\n');
+      return;
+    }
+    const cookie = signedSession({ sub: claims.sub, role: 'admin', aud: 'swarm-desktop-viewer' });
+    res.writeHead(303, { Location: '/', 'Set-Cookie': `swarm_admin_viewer=${cookie}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=3600`, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.end();
+    return;
+  }
   if (req.url === '/healthz') {
     const alive = failedProcesses.size === 0 && children.length === 4 && children.every(child => child.exitCode === null);
     const [vncReady, noVncReady, chromeReady] = await Promise.all([tcpReady(vncPort), tcpReady(upstreamPort), chromiumReady()]);
@@ -190,7 +231,7 @@ function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-if (!username || password.length < 24) {
+if ((!username || password.length < 24) && (!ticketSecret || ticketSecret.length < 32)) {
   console.error('VIEWER_ADMIN_USERNAME and VIEWER_ADMIN_PASSWORD (at least 24 characters) are required; refusing to start.');
   process.exit(1);
 }
