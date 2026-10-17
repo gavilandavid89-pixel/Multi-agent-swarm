@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, inspectStoreSchema, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -201,12 +201,6 @@ function shutdown() {
 }
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 async function start() {
-  try {
-    const report = await inspectStoreSchema();
-    console.info('[worker][database_schema_diagnostic]', JSON.stringify(report));
-  } catch (error) {
-    console.warn('[worker][database_schema_diagnostic_failed]', JSON.stringify({ code: error?.code || 'DATABASE_DIAGNOSTIC_FAILED' }));
-  }
   await initStore();
   server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`);
