@@ -147,7 +147,7 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 - El esquema coincide con el almacén de tareas/checkpoints del Worker. No hay tablas explícitas de integrantes, deliberaciones o votos; eso no prueba que no haya datos relacionados con el consejo dentro de payloads cifrados. No se leyeron ni descifraron filas de negocio.
 - La inspección temporal fue retirada del código tras recoger los metadatos; no cambió datos ni esquema. No renombrar, vaciar, migrar ni cambiar la URL de esta base sin definir la arquitectura y verificar una copia de seguridad.
 
-## Votación del comité sin interrumpir tareas
+## Votación del comité con checkpoint seguro
 
 El botón **Iniciar votación** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los argumentos se guardan de forma incremental. Si la tarea está activa, el motor espera en el siguiente checkpoint seguro hasta que cierre la deliberación, y después continúa desde ese punto.
 
