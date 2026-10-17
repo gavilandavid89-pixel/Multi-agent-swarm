@@ -113,6 +113,11 @@ test('viewer HTTP access requires the configured administrator credentials', asy
     failedProcesses: []
   });
 
+  await new Promise((resolve, reject) => probeServers[1].close(error => error ? reject(error) : resolve()));
+  const degraded = await fetch(`http://127.0.0.1:${port}/healthz`);
+  assert.equal(degraded.status, 503, 'health must fail when the noVNC listener is unavailable');
+  assert.equal((await degraded.json()).checks.noVnc, false);
+
   const anonymous = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(anonymous.status, 401);
   assert.match(anonymous.headers.get('www-authenticate') || '', /Swarm admin desktop/);
@@ -127,12 +132,4 @@ test('viewer HTTP access requires the configured administrator credentials', asy
   });
   assert.notEqual(admin.status, 401, 'valid administrator credentials must pass the authentication gate');
   assert.equal(admin.status, 502, 'the stub upstream is intentionally unavailable; authentication must still succeed');
-});
-
-
-test('health reports unhealthy when Chromium debug endpoint is unavailable', async t => {
-  const fake = await startProbeServer((_req, res) => { res.writeHead(503); res.end(); });
-  const portToCheck = fake;
-  const response = await fetch(`http://127.0.0.1:${portToCheck}/json/version`);
-  assert.equal(response.ok, false, 'probe fixture represents a failed Chromium readiness endpoint');
 });
