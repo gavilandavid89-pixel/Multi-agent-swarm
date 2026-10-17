@@ -26,5 +26,8 @@ jobs:
       - name: Check viewer syntax
         working-directory: apps/desktop-viewer
         run: npm run check
+      - name: Test administrator authentication gate
+        working-directory: apps/desktop-viewer
+        run: npm test
       - name: Build desktop viewer container
         run: docker build -f apps/desktop-viewer/Dockerfile apps/desktop-viewer
