@@ -193,7 +193,7 @@ test('Bridge SSO tickets are signed, single-use, and disable Basic-auth bypass',
     const socket = net.connect(localPort, '127.0.0.1');
     let response = '';
     socket.setTimeout(1500, () => { socket.destroy(); reject(new Error('WebSocket auth check timed out')); });
-    socket.on('connect', () => socket.write('GET /websockify HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\nSec-WebSocket-Version: 13\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n\\r\\n'));
+    socket.on('connect', () => socket.write('GET /websockify HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n'));
     socket.on('data', chunk => { response += chunk.toString(); socket.destroy(); resolve(response); });
     socket.on('error', reject);
   });
