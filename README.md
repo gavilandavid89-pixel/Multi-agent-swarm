@@ -9,8 +9,9 @@
 - `apps/web/public`: interfaz adaptable, historial bajo demanda y panel de actividad.
 - `apps/bridge`: API pública con sesiones por usuario, registro por invitación y aislamiento de tareas; reenvía las tareas al worker usando `WORKER_SHARED_SECRET`. `APP_ACCESS_KEY` solo crea el primer administrador cuando aún no hay cuentas.
 - `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, coordinación de coherencia entre archivos, desarrollo y validación. La imagen Docker incluye Chromium + Xvfb para comprobaciones de humo de HTML generado.
-- `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente.
+- `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente. También persiste informes estructurados de diagnóstico en `diagnostic_reports`, con deduplicación por ID/huella, límites de retención y estado inicial `queued`.
 - `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 30 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
+- `apps/worker/server.js`: endpoints internos autenticados para registrar y consultar diagnósticos (`POST/GET /internal/diagnostics` y `GET /internal/diagnostics/:id`); requieren el secreto Bridge→Worker y no son endpoints públicos.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
 ## Runner virtual exclusivo para agentes (no visible al usuario)
@@ -29,6 +30,12 @@ El entorno de ejecución de los agentes es independiente de la vista previa de l
 ### Estado actual (importante)
 
 La imagen del Worker incluye Chromium + Xvfb y `codeChecks.js` usa ese entorno para un smoke test aislado de HTML. **Eso no equivale todavía a un runner general para ejecutar código arbitrario de los agentes con salida a Internet controlada.** La arquitectura descrita arriba es el objetivo de implementación, no una capacidad que deba considerarse desplegada. No habilitar red indiscriminada en el proceso actual de Chromium: el control real debe imponerse en el límite del contenedor/runner y su pasarela de red.
+
+## Diagnósticos persistentes de agentes
+
+Los errores pueden enviarse al Worker por el canal interno autenticado. El informe se guarda en PostgreSQL, se limita a 32 KB en la entrada, elimina patrones comunes de secretos, conserva correlación con tarea/checkpoint y deduplica reportes repetidos durante una ventana de 10 minutos. La API devuelve `202` al guardar un informe nuevo y `200` para duplicados; un error de almacenamiento devuelve `503` para permitir reintento seguro.
+
+**Límite actual:** el colector persistente ya está implementado en esta rama, pero el análisis automático con IA, la UI para revisar diagnósticos y el marcado de resuelto todavía no están conectados. `queued` significa pendiente de investigación, no que la IA ya lo haya analizado. Ver `docs/diagnostics/README.md` y `docs/agent-ide/README.md`.
 
 ## Desarrollo local
 
