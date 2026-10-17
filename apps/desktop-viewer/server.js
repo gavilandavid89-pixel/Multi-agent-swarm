@@ -108,7 +108,7 @@ const server = http.createServer((req, res) => {
 
 server.on('upgrade', (req, client, head) => {
   if (!authorized(req)) {
-    client.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Swarm live desktop"\r\nConnection: close\r\n\r\n');
+    client.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Swarm admin desktop"\r\nConnection: close\r\n\r\n');
     client.destroy();
     return;
   }
