@@ -1,6 +1,7 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax } from './codeChecks.js';
+import { validateDeliverableIntegrity } from './deliverableValidation.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -206,6 +207,15 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
+        const integrity = validateDeliverableIntegrity({ objective, delivery, validation, syntax });
+        if (!integrity.ok) {
+          validation = {
+            ...validation,
+            verdict: 'NEEDS_CHANGES',
+            findings: [...(validation.findings || []), ...integrity.findings].slice(0, 30),
+            summary: 'La puerta determinista de integridad encontró problemas en la entrega. ' + String(validation.summary || '').slice(0, 3000)
+          };
+        }
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
         for (let i = transcript.length - 1; i >= 0; i--) {
