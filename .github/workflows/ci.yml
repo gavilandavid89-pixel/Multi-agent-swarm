@@ -14,7 +14,7 @@ on:
 jobs:
   syntax-and-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -34,8 +34,8 @@ jobs:
       SWARM_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/swarm_test?sslmode=disable
       SWARM_API_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Install worker dependencies
