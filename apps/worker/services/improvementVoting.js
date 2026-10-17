@@ -198,7 +198,7 @@ export async function voteOnImprovement(jobId, requestedProposal) {
   const current = inFlightVotes.get(jobId);
   if (current) {
     if (current.proposal === normalized) return { vote: current.record, reused: true, started: true };
-    throw Object.assign(new Error('Ya hay una votación en curso para esta tarea. Podés seguir trabajando; esperá a que termine antes de iniciar otra.'), { status: 409 });
+    throw Object.assign(new Error('Ya hay una votación en curso para esta tarea. El motor puede estar esperando en un checkpoint seguro; esperá a que termine antes de iniciar otra.'), { status: 409 });
   }
   const record = await getPayload(jobId);
   if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
@@ -212,7 +212,7 @@ export async function voteOnImprovement(jobId, requestedProposal) {
     id: voteId, proposal, kind: 'vote', status: 'running', createdAt: new Date().toISOString(), completedAt: null,
     deadlineAt: new Date(Date.now() + 60000).toISOString(), votes: [],
     tally: { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 }, outcome: 'EN_CURSO',
-    summary: 'Deliberación de hasta 60 segundos. Esta votación consultiva no pausa ni modifica la tarea principal.', answered: 0, total: agents.length
+    summary: 'Deliberación de hasta 60 segundos. Si la tarea está activa, el motor espera en el próximo checkpoint seguro; no se aplican cambios automáticamente.', answered: 0, total: agents.length
   };
   await updateJob(jobId, { payload: { improvementVotes: [...priorVotes, runningRecord].slice(-10) } });
   let promise;
