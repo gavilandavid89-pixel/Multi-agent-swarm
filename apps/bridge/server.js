@@ -13,7 +13,7 @@ const WORKER_BASE_URL = (process.env.WORKER_BASE_URL || '').replace(/\/$/, '');
 const WORKER_SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
 const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
 const DESKTOP_VIEWER_TICKET_SECRET = process.env.DESKTOP_VIEWER_TICKET_SECRET || '';
-const DESKTOP_VIEWER_URL = (process.env.DESKTOP_VIEWER_URL || '').replace(/\\/$/, '');
+const DESKTOP_VIEWER_URL = (process.env.DESKTOP_VIEWER_URL || '').replace(/\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 const configuredShutdownGrace = Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '20000', 10);
 const SHUTDOWN_GRACE_MS = Number.isFinite(configuredShutdownGrace) ? Math.min(30000, Math.max(1000, configuredShutdownGrace)) : 20000;
