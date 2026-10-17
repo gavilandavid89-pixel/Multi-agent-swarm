@@ -372,6 +372,18 @@ function renderImprovementVote(data) {
   if (!eligible) return;
   const votes = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
   const latest = votes[votes.length - 1];
+  const debateBanner = $('committee-debate-banner');
+  const debateActive = latest?.status === 'running';
+  document.body.classList.toggle('committee-debate-active', Boolean(debateActive));
+  if (debateBanner) {
+    debateBanner.classList.toggle('hidden', !debateActive);
+    if (debateActive) {
+      $('committee-debate-label').textContent = latest.kind === 'proposal' ? 'Propuesta en curso' : 'Votación en curso';
+      $('committee-debate-proposal').textContent = String(latest.proposal || 'El comité está deliberando.').slice(0, 220);
+      const secondsLeft = Math.max(0, Math.ceil((Date.parse(latest.deadlineAt || latest.createdAt || '') - Date.now()) / 1000));
+      $('committee-debate-timer').textContent = String(Math.floor(secondsLeft / 60)).padStart(2, '0') + ':' + String(secondsLeft % 60).padStart(2, '0');
+    }
+  }
   const result = $('improvement-vote-result');
   const status = $('improvement-vote-status');
   if (!latest) {
