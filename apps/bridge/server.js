@@ -1,4 +1,4 @@
-import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
+import { timingSafeEqual, randomBytes, randomUUID, createHmac } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
@@ -12,6 +12,8 @@ const PORT = Number(process.env.PORT || 3000);
 const WORKER_BASE_URL = (process.env.WORKER_BASE_URL || '').replace(/\/$/, '');
 const WORKER_SHARED_SECRET = process.env.WORKER_SHARED_SECRET || '';
 const APP_ACCESS_KEY = process.env.APP_ACCESS_KEY || '';
+const DESKTOP_VIEWER_TICKET_SECRET = process.env.DESKTOP_VIEWER_TICKET_SECRET || '';
+const DESKTOP_VIEWER_URL = (process.env.DESKTOP_VIEWER_URL || '').replace(/\\/$/, '');
 const IS_PROD = process.env.NODE_ENV === 'production';
 const configuredShutdownGrace = Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '20000', 10);
 const SHUTDOWN_GRACE_MS = Number.isFinite(configuredShutdownGrace) ? Math.min(30000, Math.max(1000, configuredShutdownGrace)) : 20000;
@@ -210,6 +212,15 @@ app.use('/api', async (req, res, next) => {
     req.user = user; req.sessionToken = token;
     next();
   } catch { res.status(503).json({ error: 'No se pudo validar la sesión.' }); }
+});
+app.post('/api/admin/desktop-ticket', (req, res) => {
+  if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Solo el administrador puede abrir el escritorio virtual.' });
+  if (DESKTOP_VIEWER_TICKET_SECRET.length < 32 || !DESKTOP_VIEWER_URL) {
+    return res.status(503).json({ error: 'El acceso integrado al escritorio todavía no está configurado.' });
+  }
+  const payload = Buffer.from(JSON.stringify({ sub: req.user.id, role: 'admin', aud: 'swarm-desktop-viewer', exp: Date.now() + 30_000, jti: randomBytes(16).toString('base64url') })).toString('base64url');
+  const signature = createHmac('sha256', DESKTOP_VIEWER_TICKET_SECRET).update(payload).digest('base64url');
+  res.set('Cache-Control', 'no-store').json({ url: `${DESKTOP_VIEWER_URL}/?ticket=${payload}.${signature}`, expiresInSeconds: 30 });
 });
 app.post('/api/auth/logout', async (req, res) => { try { await revokeSession(req.sessionToken); res.json({ ok: true }); } catch { res.status(503).json({ error: 'No se pudo cerrar la sesión.' }); } });
 app.get('/api/account', (req, res) => res.json({ user: req.user }));
