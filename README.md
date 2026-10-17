@@ -166,7 +166,7 @@ La votación consultiva muestra una franja azul marino con contorno amarillo, el
 - La votación sigue siendo consultiva y no edita archivos ni aplica decisiones automáticamente. El objetivo original de la tarea continúa teniendo prioridad.
 - La deliberación implementada actualmente es no bloqueante: no pausa la tarea principal. Una pausa real debe integrarse con los puntos seguros del motor, guardar un checkpoint antes de detenerse y reanudar desde ese checkpoint; no se debe simular la pausa cambiando solo el estado visible porque el motor activo podría sobrescribirlo.
 - La fecha límite cierra la deliberación, pero el cliente de proveedor actual no expone cancelación común para todas las APIs. Una solicitud ya enviada puede seguir terminando en el proveedor después del cierre; el sistema no debe prometer que ese cierre cancela el consumo del proveedor.
-- La recuperación de un registro que quedó en curso tras un reinicio del Worker, la coordinación de propuestas autónomas sin intervención del usuario y la pausa/reanudación real son trabajo pendiente. Hasta que esas rutas estén implementadas y probadas, no se presentan como funciones activas.
+- Al iniciar el Worker, se revisan las tareas persistidas y se cierran como parciales o fallidas las deliberaciones cuyo plazo ya venció; las que todavía tienen plazo vigente no se alteran. La coordinación de propuestas autónomas sin intervención del usuario y la pausa/reanudación real son trabajo pendiente. Hasta que esas rutas estén implementadas y probadas, no se presentan como funciones activas.
 
 ### Flujo objetivo para coordinación autónoma
 
