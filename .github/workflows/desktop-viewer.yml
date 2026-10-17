@@ -25,9 +25,12 @@ jobs:
           node-version: 22
       - name: Check viewer syntax
         working-directory: apps/desktop-viewer
-        run: npm run check
-      - name: Test administrator authentication gate
+        run: npm run check && node --check browser-control.js
+      - name: Test desktop viewer and browser-control safety
         working-directory: apps/desktop-viewer
         run: npm test
+      - name: Explicit browser-control safety regression tests
+        working-directory: apps/desktop-viewer
+        run: node --test test/browser-control.test.js
       - name: Build desktop viewer container
         run: docker build -f apps/desktop-viewer/Dockerfile apps/desktop-viewer

@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual, createHmac, randomBytes } from 'node:crypto';
+import { handleBrowserToolRequest } from './browser-control.js';
 
 const port = Number(process.env.PORT || 3300);
 const username = process.env.VIEWER_ADMIN_USERNAME || '';
@@ -134,6 +135,21 @@ async function chromiumReady() {
 
 const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url || '/', 'http://viewer.local');
+  if (requestUrl.pathname === '/internal/browser-tool') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { Allow: 'POST', 'Cache-Control': 'no-store' });
+      res.end('Method not allowed\\n');
+      return;
+    }
+    const suppliedSecret = req.headers['x-swarm-desktop-secret'] || '';
+    if (activitySecret.length < 32 || !equalSecret(String(suppliedSecret), activitySecret)) {
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: 'No autorizado.' }));
+      return;
+    }
+    await handleBrowserToolRequest(req, res);
+    return;
+  }
   if (requestUrl.pathname === '/' && requestUrl.searchParams.has('ticket')) {
     const claims = parseSigned(requestUrl.searchParams.get('ticket'));
     const now = Date.now();
