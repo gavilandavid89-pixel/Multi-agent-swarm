@@ -242,7 +242,7 @@ export async function recoverInterruptedVotes() {
       const record = await getPayload(job.id).catch(() => null);
       if (!record) continue;
       const votes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
-      const expired = votes.filter(item => { const deadline = Date.parse(item.deadlineAt || '') || (Date.parse(item.createdAt || '') + 60000); return item.status === 'running' && Number.isFinite(deadline) && deadline <= Date.now(); });
+      const expired = votes.filter(item => item.status === 'running');
       if (!expired.length) continue;
       const now = new Date().toISOString();
       const nextVotes = votes.map(item => {
