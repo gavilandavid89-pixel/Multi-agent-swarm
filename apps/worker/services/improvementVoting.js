@@ -128,7 +128,7 @@ async function executeVote(jobId, proposal, voteId) {
   // una lectura/escritura concurrente del payload podría sobrescribir votos recién guardados.
   let persistChain = Promise.resolve();
   const persistBallots = () => {
-    persistChain = persistChain.then(() => persistVoteProgress(jobId, voteId, ballots, deadlineAt));
+    persistChain = persistChain.catch(() => {}).then(() => persistVoteProgress(jobId, voteId, ballots, deadlineAt));
     return persistChain;
   };
   const pending = panelists.map(agent => askAgent(agent, panelDeadlineMs).then(async ballot => {
