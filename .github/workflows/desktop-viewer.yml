@@ -27,4 +27,4 @@ jobs:
         working-directory: apps/desktop-viewer
         run: npm run check
       - name: Build desktop viewer container
-        run: docker build -f apps/desktop-viewer/Dockerfile .
+        run: docker build -f apps/desktop-viewer/Dockerfile apps/desktop-viewer
