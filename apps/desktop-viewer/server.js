@@ -7,6 +7,8 @@ const port = Number(process.env.PORT || 3300);
 const username = process.env.VIEWER_ADMIN_USERNAME || '';
 const password = process.env.VIEWER_ADMIN_PASSWORD || '';
 const upstreamPort = Number(process.env.NOVNC_INTERNAL_PORT || 6080);
+const vncPort = Number(process.env.VNC_INTERNAL_PORT || 5900);
+const chromiumDebugPort = Number(process.env.CHROMIUM_DEBUG_PORT || 9222);
 const display = process.env.DISPLAY || ':99';
 const children = [];
 const failedProcesses = new Set();
@@ -64,7 +66,7 @@ function challenge(res) {
 
 function startDesktop() {
   start('Xvfb', [display, '-screen', '0', '1440x900x24', '-nolisten', 'tcp', '-ac']);
-  start('x11vnc', ['-display', display, '-localhost', '-forever', '-shared', '-rfbport', '5900', '-nopw']);
+  start('x11vnc', ['-display', display, '-localhost', '-forever', '-shared', '-rfbport', String(vncPort), '-nopw']);
   start('websockify', ['--web', '/usr/share/novnc', '127.0.0.1:' + upstreamPort, '127.0.0.1:5900']);
   start('chromium', [
     '--no-first-run',
@@ -74,20 +76,43 @@ function startDesktop() {
     '--no-default-browser-check',
     '--user-data-dir=/tmp/swarm-viewer-chrome',
     '--remote-debugging-address=127.0.0.1',
-    '--remote-debugging-port=9222',
+    `--remote-debugging-port=${chromiumDebugPort}`,
     '--window-size=1360,820',
     'about:blank'
   ], { env: { ...process.env, DISPLAY: display } });
 }
 
-const server = http.createServer((req, res) => {
+async function tcpReady(targetPort, timeoutMs = 350) {
+  return new Promise(resolve => {
+    const socket = net.connect({ host: '127.0.0.1', port: targetPort });
+    const finish = value => { socket.destroy(); resolve(value); };
+    socket.setTimeout(timeoutMs, () => finish(false));
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+  });
+}
+
+async function chromiumReady() {
+  try {
+    const response = await fetch(`http://127.0.0.1:${chromiumDebugPort}/json/version`, { signal: AbortSignal.timeout(500) });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return typeof data.Browser === 'string' && data.Browser.length > 0;
+  } catch { return false; }
+}
+
+const server = http.createServer(async (req, res) => {
   if (req.url === '/healthz') {
-    const ok = failedProcesses.size === 0 && children.length === 4 && children.every(child => child.exitCode === null);
+    const alive = failedProcesses.size === 0 && children.length === 4 && children.every(child => child.exitCode === null);
+    const [vncReady, noVncReady, chromeReady] = await Promise.all([tcpReady(vncPort), tcpReady(upstreamPort), chromiumReady()]);
+    const checks = { processes: alive, vnc: vncReady, noVnc: noVncReady, chromium: chromeReady };
+    const ok = Object.values(checks).every(Boolean);
     res.writeHead(ok ? 200 : 503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({
       ok,
       viewer: 'live-desktop',
       authenticated: Boolean(username && password.length >= 24),
+      checks,
       failedProcesses: [...failedProcesses]
     }));
     return;
