@@ -69,6 +69,7 @@ function authorized(req) {
   }).filter(([key]) => key));
   const session = parseSigned(cookies.swarm_admin_viewer);
   if (session) return true;
+  if (ticketSecret.length >= 32) return false; // Once SSO is configured, Basic auth must not bypass the Bridge admin role.
   if (!username || password.length < 24) return false;
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) return false;
@@ -232,7 +233,7 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 if ((!username || password.length < 24) && (!ticketSecret || ticketSecret.length < 32)) {
-  console.error('VIEWER_ADMIN_USERNAME and VIEWER_ADMIN_PASSWORD (at least 24 characters) are required; refusing to start.');
+  console.error('Configure DESKTOP_VIEWER_TICKET_SECRET (32+ chars) for Bridge SSO, or VIEWER_ADMIN_USERNAME plus VIEWER_ADMIN_PASSWORD (24+ chars) for standalone mode.');
   process.exit(1);
 }
 
