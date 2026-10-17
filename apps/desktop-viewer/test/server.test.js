@@ -74,7 +74,12 @@ test('viewer HTTP access requires the configured administrator credentials', asy
 
   const health = await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { ok: true, viewer: 'live-desktop', authenticated: true });
+  assert.deepEqual(await health.json(), {
+    ok: true,
+    viewer: 'live-desktop',
+    authenticated: true,
+    failedProcesses: []
+  });
 
   const anonymous = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(anonymous.status, 401);
