@@ -33,6 +33,8 @@ jobs:
         run: npm --prefix apps/bridge ci --no-audit --no-fund
       - name: Check JavaScript syntax and unit tests
         run: npm run check
+      - name: Run worker committee voting regression tests
+        run: npm --prefix apps/worker test
       - name: Audit direct and transitive dependencies
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
