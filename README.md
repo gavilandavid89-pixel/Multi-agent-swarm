@@ -220,3 +220,18 @@ Estas reglas son el objetivo de arquitectura, no una afirmación de que todas es
 - No ejecutar pruebas E2E de producción repetidamente sin intención: crean tareas reales y pueden consumir tokens.
 - No confundir el límite de tokens con un límite monetario: el coste depende del proveedor, del modelo y de sus tarifas de entrada/salida.
 
+## Entorno virtual reforzado para pruebas de agentes
+
+Las comprobaciones automáticas deben ejecutarse en CI o en un contenedor de prueba, nunca con credenciales reales ni acceso innecesario a servicios de producción.
+
+- **Aislamiento visual:** Chromium se ejecuta bajo Xvfb para probar HTML sin depender de una pantalla física. El smoke test verifica que la página se abra y que no aparezcan excepciones JavaScript observables; la prueba de layout comprueba contratos clave de la interfaz en Chromium.
+- **Aislamiento de red del navegador de entregas:** el validador de HTML bloquea la resolución DNS y configura un proxy local no enrutable para evitar que la vista previa acceda a destinos externos. Esto reduce el riesgo, pero no equivale a un sandbox de sistema operativo ni debe tratarse como una barrera contra código hostil por sí sola.
+- **Directorio temporal por ejecución:** los archivos de una entrega se copian a un directorio temporal, con permisos restrictivos, y se eliminan al terminar. Las rutas absolutas y los segmentos de traversal no se aceptan al extraer archivos de la entrega.
+- **Límite de tiempo:** la prueba del navegador tiene un tope de 30 segundos y mata el grupo de procesos al vencer. CI tiene un límite total de 15 minutos para que un proceso bloqueado no deje la validación esperando indefinidamente.
+- **Fallas visibles:** CI activa el modo estricto para rechazos de promesas no manejados; un fallo de sintaxis, regresión, auditoría de dependencias, prueba de navegador o construcción Docker debe impedir que la ejecución figure como exitosa.
+- **Permisos mínimos:** el workflow solo necesita permiso de lectura del repositorio. Las ejecuciones nuevas de una misma rama/PR cancelan las comprobaciones antiguas para no acumular procesos ni consumir recursos innecesarios.
+- **Pruebas sin coste de proveedor:** las pruebas unitarias y de navegador no necesitan claves de Gemini/Groq ni generan deliberaciones reales. Las pruebas E2E que llaman a proveedores se mantienen separadas porque pueden consumir tokens y requieren autorización/configuración explícita.
+
+### Límites y siguiente nivel de aislamiento
+
+Xvfb es un servidor gráfico virtual, no una máquina virtual. Chromium se ejecuta con las protecciones disponibles en el runtime; si el entorno impide su sandbox, el validador puede informar que la comprobación de navegador fue omitida y conservar las comprobaciones deterministas. No debe presentarse una prueba omitida como una prueba de navegador aprobada. Para ejecutar código arbitrario de agentes con un aislamiento fuerte, la siguiente mejora es un runner desechable dedicado con límites de CPU/memoria/PID, usuario no privilegiado, sistema de archivos de solo lectura salvo el directorio de trabajo, sin secretos montados y sin salida de red por defecto. El worker de producción no debe convertirse en un ejecutor general de código generado.
