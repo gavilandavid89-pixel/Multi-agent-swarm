@@ -164,7 +164,8 @@ async function executeVote(jobId, proposal, voteId) {
     completedAt,
     deadlineAt,
     votes: ballots,
-    ...summary
+    ...summary,
+    total: agents.length
   };
   const fresh = await getPayload(jobId);
   if (!fresh) throw Object.assign(new Error('La tarea dejó de existir durante la votación.'), { status: 404 });
