@@ -131,7 +131,7 @@ function sanitizeDiagnosticText(value, max = 2000) {
     .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED]')
     .slice(0, max);
 }
-function normalizeDiagnosticReport(input = {}) {
+export function normalizeDiagnosticReport(input = {}) {
   const reportId = typeof input.reportId === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(input.reportId) ? input.reportId : randomUUID();
   const severity = ['info','warning','error','critical'].includes(input.severity) ? input.severity : 'error';
   const category = ['runtime','network','database','browser','validation','dependency','timeout','unknown'].includes(input.category) ? input.category : 'unknown';
@@ -165,6 +165,10 @@ function normalizeDiagnosticReport(input = {}) {
     coldStartSuspected: input.runtime.coldStartSuspected === true,
     serviceReady: input.runtime.serviceReady === true,
     httpStatus: Number.isInteger(input.runtime.httpStatus) ? Math.max(0, Math.min(599, input.runtime.httpStatus)) : null
+  } : {};
+  const evidence = input.evidence && typeof input.evidence === 'object' ? {
+    logReferences: Array.isArray(input.evidence.logReferences) ? input.evidence.logReferences.slice(0, 20).map(x => sanitizeDiagnosticText(x, 200)) : [],
+    artifactReferences: Array.isArray(input.evidence.artifactReferences) ? input.evidence.artifactReferences.slice(0, 20).map(x => sanitizeDiagnosticText(x, 200)) : []
   } : {};
   const report = {
     schemaVersion: 1, reportId,
