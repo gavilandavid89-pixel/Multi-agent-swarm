@@ -133,3 +133,101 @@ test('viewer HTTP access requires the configured administrator credentials', asy
   assert.notEqual(admin.status, 401, 'valid administrator credentials must pass the authentication gate');
   assert.equal(admin.status, 502, 'the stub upstream is intentionally unavailable; authentication must still succeed');
 });
+
+
+test('Bridge SSO tickets are signed, single-use, and disable Basic-auth bypass', async t => {
+  const { createHmac, randomBytes } = await import('node:crypto');
+  const localProbes = [];
+  const localChildren = [];
+  const localStubDir = await mkdtemp(path.join(tmpdir(), 'swarm-viewer-sso-'));
+  const secret = randomBytes(32).toString('hex');
+  const localPort = await freePort();
+  const localVnc = await startLocalSocket(localProbes);
+  const localNoVnc = await startLocalSocket(localProbes);
+  const localDebug = await startLocalHttp(localProbes, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ Browser: 'Chromium/test' }));
+  });
+  for (const command of ['Xvfb', 'x11vnc', 'websockify', 'chromium']) {
+    const file = path.join(localStubDir, command);
+    await writeFile(file, '#!/bin/sh\nexec /bin/sleep 60\n');
+    await chmod(file, 0o755);
+  }
+  const proc = spawn(process.execPath, [serverPath], {
+    env: {
+      ...process.env, PATH: `${localStubDir}:${process.env.PATH || ''}`,
+      PORT: String(localPort), DESKTOP_VIEWER_TICKET_SECRET: secret,
+      VIEWER_ADMIN_USERNAME: username, VIEWER_ADMIN_PASSWORD: password,
+      DISPLAY: ':197', VNC_INTERNAL_PORT: String(localVnc),
+      NOVNC_INTERNAL_PORT: String(localNoVnc), CHROMIUM_DEBUG_PORT: String(localDebug)
+    },
+    stdio: ['ignore', 'ignore', 'pipe']
+  });
+  localChildren.push(proc);
+  let stderr = '';
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', chunk => { stderr += chunk; });
+  await waitForServer(`http://127.0.0.1:${localPort}/healthz`, proc).catch(error => { throw new Error(`${error.message}; stderr: ${stderr}`); });
+  t.after(async () => {
+    for (const processRef of localChildren) {
+      if (processRef.exitCode === null) {
+        processRef.kill('SIGTERM');
+        await Promise.race([once(processRef, 'exit'), new Promise(resolve => setTimeout(resolve, 2500))]);
+        if (processRef.exitCode === null) processRef.kill('SIGKILL');
+      }
+    }
+    await Promise.all(localProbes.map(server => new Promise(resolve => server.close(() => resolve()))));
+    await rm(localStubDir, { recursive: true, force: true });
+  });
+
+  const health = await fetch(`http://127.0.0.1:${localPort}/healthz`);
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).authenticated, true, 'SSO configuration counts as an authentication method');
+
+  const basicBypass = await fetch(`http://127.0.0.1:${localPort}/`, {
+    headers: { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` }
+  });
+  assert.equal(basicBypass.status, 401, 'Basic auth must not bypass Bridge role authorization in SSO mode');
+
+  const makeTicket = (claims, key = secret) => {
+    const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    return payload + '.' + createHmac('sha256', key).update(payload).digest('base64url');
+  };
+  const claims = { sub: 'admin-test', role: 'admin', aud: 'swarm-desktop-viewer', exp: Date.now() + 30_000, jti: randomBytes(16).toString('base64url') };
+  const invalidSignature = makeTicket(claims, randomBytes(32).toString('hex'));
+  const invalid = await fetch(`http://127.0.0.1:${localPort}/?ticket=${encodeURIComponent(invalidSignature)}`, { redirect: 'manual' });
+  assert.equal(invalid.status, 401, 'ticket signed with another secret must be rejected');
+
+  const ticket = makeTicket(claims);
+  const exchange = await fetch(`http://127.0.0.1:${localPort}/?ticket=${encodeURIComponent(ticket)}`, { redirect: 'manual' });
+  assert.equal(exchange.status, 303);
+  assert.equal(exchange.headers.get('location'), '/');
+  const cookie = exchange.headers.get('set-cookie') || '';
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /Secure/);
+  assert.match(cookie, /SameSite=Strict/);
+  assert.match(cookie, /Max-Age=3600/);
+
+  const replay = await fetch(`http://127.0.0.1:${localPort}/?ticket=${encodeURIComponent(ticket)}`, { redirect: 'manual' });
+  assert.equal(replay.status, 401, 'the same Bridge ticket must not be exchanged twice');
+
+  const expiredTicket = makeTicket({ ...claims, jti: randomBytes(16).toString('base64url'), exp: Date.now() - 1000 });
+  const expired = await fetch(`http://127.0.0.1:${localPort}/?ticket=${encodeURIComponent(expiredTicket)}`, { redirect: 'manual' });
+  assert.equal(expired.status, 401, 'expired tickets must be rejected');
+});
+
+async function startLocalSocket(servers) {
+  const server = net.createServer(socket => socket.end());
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  servers.push(server);
+  return server.address().port;
+}
+
+async function startLocalHttp(servers, handler) {
+  const server = http.createServer(handler);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  servers.push(server);
+  return server.address().port;
+}
