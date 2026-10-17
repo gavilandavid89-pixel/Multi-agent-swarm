@@ -167,46 +167,6 @@ const server = http.createServer(async (req, res) => {
   }
   if (!authorized(req)) return challenge(res);
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.writeHead(405, { Allow: 'GET, HEAD', 'Cache-Control': 'no-store' });
-    res.end('Method not allowed\\n');
-    return;
-  }
-  if (requestUrl.pathname === '/api/agent-activity') {
-    if (!activityUrl || activitySecret.length < 32) {
-      res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ ok: false, error: 'Feed de actividad no configurado.' }));
-      return;
-    }
-    try {
-      const upstreamResponse = await fetch(activityUrl + '/internal/desktop-activity', {
-        headers: { 'x-swarm-desktop-secret': activitySecret, accept: 'application/json' },
-        signal: AbortSignal.timeout(5000)
-      });
-      const body = await upstreamResponse.text();
-      res.writeHead(upstreamResponse.status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-      res.end(body.slice(0, 200000));
-    } catch {
-      res.writeHead(502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ ok: false, error: 'No se pudo recuperar la actividad del motor.' }));
-    }
-    return;
-  }
-  if (requestUrl.pathname === '/' || requestUrl.pathname === '/activity') {
-    const page = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Swarm · Escritorio y actividad</title><style>
-      *{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e6edf3;font:14px system-ui,sans-serif}header{padding:14px 18px;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}h1{font-size:17px;margin:0}small,.muted{color:#9da7b3}.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:12px;padding:12px;height:calc(100vh - 62px)}section{min-width:0;min-height:0;background:#151b23;border:1px solid #30363d;border-radius:10px;overflow:hidden}.section-title{padding:12px 14px;border-bottom:1px solid #30363d;font-weight:650}.desktop{width:100%;height:calc(100% - 45px);border:0;background:#080b10}.feed{height:calc(100% - 45px);overflow:auto;padding:10px}.job{border:1px solid #30363d;border-radius:8px;padding:10px;margin-bottom:9px;background:#10151c}.jobhead{display:flex;justify-content:space-between;gap:8px}.jobtitle{font-weight:650;overflow-wrap:anywhere}.status{font-size:11px;padding:3px 7px;border-radius:99px;background:#30363d;white-space:nowrap}.running{background:#164e63}.completed{background:#14532d}.failed,.needs_review{background:#7f1d1d}.stage{margin:7px 0;color:#aab4c0}.event{font-size:12px;border-left:2px solid #465363;padding:5px 8px;margin:5px 0;white-space:pre-wrap;overflow-wrap:anywhere}.empty{padding:16px;color:#9da7b3}.actions{display:flex;gap:8px;align-items:center}a{color:#7dd3fc}@media(max-width:850px){.layout{height:auto;grid-template-columns:1fr}.desktop{height:55vh}.feed{height:45vh}header{align-items:flex-start}}
-      </style></head><body><header><div><h1>SWARM / Escritorio virtual</h1><small>Sesión protegida · actividad real consultada al Bridge</small></div><div class="actions"><span id="updated" class="muted">Conectando…</span><a href="/vnc.html" target="_blank" rel="noopener">Abrir escritorio solo ↗</a></div></header><main class="layout"><section><div class="section-title">Chromium remoto · Xvfb / noVNC</div><iframe class="desktop" src="/vnc.html" title="Escritorio Chromium remoto" referrerpolicy="no-referrer"></iframe></section><section><div class="section-title">Actividad real de agentes · actualización cada 5 s</div><div id="feed" class="feed"><div class="empty">Cargando tareas del motor…</div></div></section></main><script>
-      const feed=document.getElementById('feed'),updated=document.getElementById('updated');const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-      async function refresh(){try{const r=await fetch('/api/agent-activity',{cache:'no-store'});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||'Feed no disponible');updated.textContent='Actualizado '+new Date(d.updatedAt||Date.now()).toLocaleTimeString();if(!d.jobs.length){feed.innerHTML='<div class="empty">El motor no informó tareas todavía.</div>';return}feed.innerHTML=d.jobs.map(j=>'<article class="job"><div class="jobhead"><div class="jobtitle">'+esc(j.title)+'</div><span class="status '+esc(j.status)+'">'+esc(j.status)+'</span></div><div class="stage">'+esc(j.stage)+' · '+esc(j.id)+'</div>'+((j.agents||[]).map(a=>'<div class="event"><b>'+esc(a.agent)+' · '+esc(a.type)+'</b> '+esc(a.at?new Date(a.at).toLocaleTimeString():'')+'<br>'+esc(a.summary)+'</div>').join('')||'<div class="muted">Sin eventos de conversación registrados.</div>')+'</article>').join('')}catch(e){updated.textContent='Feed sin conexión';feed.innerHTML='<div class="empty">'+esc(e.message)+'<br><small>Verificá la configuración segura de actividad en Bridge y visor.</small></div>'}}refresh();setInterval(refresh,5000);
-      </script></body></html>`;
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "frame-ancestors 'none'; default-src 'self' 'unsafe-inline'; frame-src 'self'; connect-src 'self'" });
-    res.end(page);
-    return;
-  }
-
-    res.writeHead(405, { Allow: 'GET, HEAD', 'Cache-Control': 'no-store' });
-    res.end('Method not allowed\n');
-    return;
-  }
   const upstream = http.request({
     host: '127.0.0.1',
     port: upstreamPort,
