@@ -4,6 +4,7 @@ import { getPayload, updateJob, recordTokenUsage, listJobs } from './store.js';
 import { parseImprovementVote, summarizeImprovementVotes } from './improvementVoteLogic.js';
 
 const inFlightVotes = new Map();
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const clip = (value, max = 1600) => String(value ?? '').slice(0, max);
 const agents = [
   { name: 'Arquitecto', role: 'Valora arquitectura, alcance, compatibilidad y costos de mantenimiento.' },
@@ -125,11 +126,14 @@ async function executeVote(jobId, proposal, voteId) {
 
   // Los cinco especialistas responden en paralelo. Se cierra la recepción en el segundo 40
   // para reservar una ventana independiente al Árbitro y margen para persistir el resultado.
+  let acceptingPanel = true;
   const pending = panelists.map(agent => askAgent(agent, panelDeadlineMs).then(async ballot => {
+    if (!acceptingPanel) return null;
     ballots.push(ballot);
     await persistVoteProgress(jobId, voteId, ballots, deadlineAt);
     return ballot;
   }).catch(async error => {
+    if (!acceptingPanel) return null;
     ballots.push({
       at: new Date().toISOString(), agent: agent.name, vote: 'ABSTENERSE',
       rationale: 'No se obtuvo una respuesta válida dentro de la ventana del panel; no equivale a apoyo ni rechazo.',
@@ -145,6 +149,8 @@ async function executeVote(jobId, proposal, voteId) {
     Promise.allSettled(pending),
     sleep(Math.max(0, panelDeadlineMs - Date.now()))
   ]);
+  acceptingPanel = false;
+  await Promise.allSettled(pending);
 
   // Evita que una respuesta tardía cambie el resultado después de cerrar el panel.
   const panelSnapshot = ballots.slice();
@@ -237,7 +243,7 @@ export async function voteOnImprovement(jobId, requestedProposal) {
     id: voteId, proposal, kind: 'vote', status: 'running', createdAt: new Date().toISOString(), completedAt: null,
     deadlineAt: new Date(Date.now() + 60000).toISOString(), votes: [],
     tally: { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 }, outcome: 'EN_CURSO',
-    summary: 'Deliberación de hasta 60 segundos. Si la tarea está activa, el motor espera en el próximo checkpoint seguro; no se aplican cambios automáticamente.', answered: 0, total: agents.length
+    summary: 'Deliberación de hasta 60 segundos. Si la tarea está activa, el motor espera en el próximo checkpoint seguro; no se aplican cambios automáticamente.', answered: 0, total: agents.length - 1
   };
   await updateJob(jobId, { payload: { improvementVotes: [...priorVotes, runningRecord].slice(-10) } });
   let promise;
