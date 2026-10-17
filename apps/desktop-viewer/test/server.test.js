@@ -197,7 +197,7 @@ test('Bridge SSO tickets are signed, single-use, and disable Basic-auth bypass',
     socket.on('data', chunk => { response += chunk.toString(); socket.destroy(); resolve(response); });
     socket.on('error', reject);
   });
-  assert.match(websocketDenied, /^HTTP\\/1\\.1 401/, 'WebSocket upgrade must enforce the same admin session gate');
+  assert.ok(websocketDenied.startsWith('HTTP/1.1 401'), 'WebSocket upgrade must enforce the same admin session gate');
 
   const makeTicket = (claims, key = secret) => {
     const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
