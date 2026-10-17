@@ -1,3 +1,5 @@
+# Render Blueprint: mantener estos campos sincronizados con los servicios del Dashboard.
+# Si los servicios no están gestionados por este Blueprint, actualizarlos manualmente en Render.
 services:
   - type: web
     name: swarm-bridge

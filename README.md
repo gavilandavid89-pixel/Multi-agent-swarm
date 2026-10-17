@@ -89,3 +89,34 @@ Los agentes cumplen roles distintos: Arquitecto propone; Escéptico intenta refu
 Gemini se prueba primero cuando está configurado; luego se prueban Groq y los proveedores adicionales de `AI_FALLBACK_PROVIDERS` en el orden declarado. Los proveedores alternativos deben implementar la API compatible con OpenAI Chat Completions (`POST /chat/completions`). Para cada uno, configurá la URL base HTTPS, el nombre de la variable de entorno que contiene su clave y un modelo válido para ese proveedor. Se puede definir un modelo único o modelos separados para razonamiento, programación y validación.
 
 Ante HTTP 408, 425, 429, 5xx o errores de red, el motor intenta la siguiente alternativa disponible en lugar de esperar primero todo el cooldown. Si todos fallan, persiste el checkpoint y programa una reanudación con backoff. No se puede cambiar automáticamente a proveedores cuyas credenciales no estén configuradas, ni evitar cuotas o límites del proveedor.
+
+## Sincronización de Render y comprobación de producción
+
+render.yaml es la configuración declarativa de referencia. Después de cambiarlo, sincronizá el Blueprint en Render si los servicios están vinculados a uno; si fueron creados por separado, los campos de configuración deben actualizarse desde cada servicio en el Dashboard. Un commit en GitHub no garantiza por sí solo que todos los campos del Dashboard se hayan sincronizado.
+
+### Valores esperados de los servicios
+
+- **swarm-bridge**: runtime Node, build `npm --prefix apps/bridge ci --no-audit --no-fund`, start `npm --prefix apps/bridge start`, health check path `/readyz`.
+- **swarm-worker**: runtime Docker, Dockerfile `./apps/worker/Dockerfile`, context `./apps/worker`, health check path `/readyz`.
+- Ambos servicios deben desplegar desde la rama `main`.
+
+### Variables y conexiones
+
+- `WORKER_BASE_URL` (solo Bridge): URL pública del servicio Worker, sin una barra final; actualmente el servicio de Render se publica en `https://swarm-worker-fgnz.onrender.com`.
+- `WORKER_SHARED_SECRET` (Bridge y Worker): el mismo secreto aleatorio de al menos 32 caracteres en ambos servicios.
+- `SWARM_DATABASE_URL` (Bridge y Worker): misma URL PostgreSQL para cuentas, sesiones, invitaciones y datos cifrados de APIs.
+- `SWARM_API_ENCRYPTION_KEY` (Bridge y Worker): misma clave hexadecimal de 64 caracteres; no reemplazarla sin un plan de migración, porque se usa para descifrar credenciales guardadas.
+- `DATABASE_URL` (Worker): PostgreSQL de tareas e historial del Worker; no confundir con `SWARM_DATABASE_URL`.
+- `HISTORY_ENCRYPTION_KEY` (Worker): clave hexadecimal de 64 caracteres para el historial cifrado. No regenerarla si ya hay datos cifrados.
+- `APP_ACCESS_KEY` (Bridge): clave de bootstrap; solo se usa para crear el primer administrador cuando todavía no existen cuentas.
+- `GEMINI_API_KEY`, `GROQ_API_KEY` y `AI_FALLBACK_PROVIDERS` (Worker): proveedores de IA; configurá al menos uno disponible.
+
+**No publiques los valores secretos ni los pegues en logs o capturas.** En Render, revisá nombres y valores enmascarados desde la pestaña Environment; no cambies las claves de cifrado ni las URLs de PostgreSQL hasta confirmar qué base usa cada variable.
+
+### Pasos para cerrar la diferencia de configuración
+
+1. En Render, abrí `swarm-bridge` → **Settings** y verificá el build command, start command y **Health Check Path** indicados arriba.
+2. Abrí `swarm-worker` → **Settings** y verificá Dockerfile, Docker context y **Health Check Path** `/readyz`.
+3. En cada servicio, abrí **Environment** y compará los nombres de variables con `render.yaml`; verificá especialmente que `WORKER_BASE_URL` apunte al Worker y que las dos variables compartidas coincidan exactamente entre Bridge y Worker.
+4. Después del deploy, abrí `https://swarm-bridge.onrender.com/readyz` y `https://swarm-worker-fgnz.onrender.com/readyz`. Ambos deben responder HTTP 200 y JSON con `"ok":true`. El endpoint del Bridge también debe indicar `"workerConfigured":true`.
+5. Si un endpoint devuelve 503, revisá los logs del servicio correspondiente y la conectividad a PostgreSQL antes de reintentar. No marques el despliegue como verificado hasta que ambos endpoints respondan correctamente.
