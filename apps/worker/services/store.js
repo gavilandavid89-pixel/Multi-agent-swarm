@@ -227,6 +227,30 @@ export async function getDiagnosticReport(reportId) {
   return row ? { reportId: row.report_id, occurredAt: toIso(row.occurred_at), receivedAt: toIso(row.received_at), severity: row.severity, category: row.category, service: row.service, environment: row.environment, summary: row.summary, taskId: row.task_id, status: row.status, attempts: row.attempts, report: row.report, triage: row.triage } : null;
 }
 
+
+export async function updateDiagnosticTriage(reportId, input = {}) {
+  const allowed = new Set(['queued', 'investigating', 'investigated', 'resolved', 'ignored']);
+  if (!allowed.has(input.status)) {
+    const error = new Error('Estado de triage inválido.');
+    error.status = 400;
+    throw error;
+  }
+  const triage = {
+    status: input.status,
+    analysis: sanitizeDiagnosticText(input.analysis || '', 6000),
+    likelyCause: sanitizeDiagnosticText(input.likelyCause || '', 1500),
+    nextTests: Array.isArray(input.nextTests) ? input.nextTests.slice(0, 12).map(item => sanitizeDiagnosticText(item, 500)) : [],
+    resolvedAt: input.status === 'resolved' ? new Date().toISOString() : null,
+    updatedAt: new Date().toISOString()
+  };
+  const { rows } = await pool.query(
+    'UPDATE diagnostic_reports SET status=$2, triage=$3::jsonb, attempts=attempts + CASE WHEN $2=\'investigating\' THEN 1 ELSE 0 END WHERE report_id=$1 RETURNING report_id,status,attempts,triage',
+    [reportId, input.status, JSON.stringify(triage)]
+  );
+  if (!rows[0]) return null;
+  return { reportId: rows[0].report_id, status: rows[0].status, attempts: rows[0].attempts, triage: rows[0].triage };
+}
+
 function safeArtifactPath(value) {
   let candidate = String(value || '').trim().replace(/^\x60|\x60$/g, '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').replace(/^\.\//, '').replace(/\\/g, '/');
   candidate = candidate.split(/[\r\n]/)[0].trim().replace(/^['"]|['"]$/g, '');
