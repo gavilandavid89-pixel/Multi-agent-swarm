@@ -253,13 +253,14 @@ export async function recoverInterruptedVotes() {
       const now = new Date().toISOString();
       const nextVotes = votes.map(item => {
         if (!expired.some(candidate => candidate.id === item.id)) return item;
-        const answered = Number(item.answered) || 0;
+        const summary = summarizeImprovementVotes(Array.isArray(item.votes) ? item.votes : []);
+        const answered = Number(summary.answered) || 0;
         return {
           ...item,
           status: answered > 0 ? 'partial' : 'failed',
-          outcome: answered > 0 ? (item.outcome === 'EN_CURSO' ? 'EMPATE' : item.outcome) : 'SIN_VOTOS_VALIDOS',
+          outcome: summary.outcome,
           completedAt: now,
-          summary: 'La deliberación quedó interrumpida por un reinicio del Worker. Se conserva el progreso guardado; revisá las respuestas antes de decidir.'
+          summary: 'La deliberación quedó interrumpida por un reinicio del Worker. ' + summary.summary + ' Se conserva el progreso guardado; revisá las respuestas antes de decidir.'
         };
       });
       const expiredIds = new Set(expired.map(item => item.id));
