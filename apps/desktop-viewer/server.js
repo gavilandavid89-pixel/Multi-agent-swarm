@@ -9,6 +9,7 @@ const password = process.env.VIEWER_ADMIN_PASSWORD || '';
 const upstreamPort = Number(process.env.NOVNC_INTERNAL_PORT || 6080);
 const display = process.env.DISPLAY || ':99';
 const children = [];
+const failedProcesses = new Set();
 let stopping = false;
 
 function log(event, details = {}) {
@@ -20,9 +21,17 @@ function start(command, args, options = {}) {
   children.push(child);
   child.stdout.on('data', data => log('process_stdout', { process: command, message: String(data).slice(0, 500) }));
   child.stderr.on('data', data => log('process_stderr', { process: command, message: String(data).slice(0, 500) }));
+  child.on('error', error => {
+    failedProcesses.add(command);
+    log('process_error', { process: command, error: String(error.message).slice(0, 200) });
+    if (!stopping) process.exitCode = 1;
+  });
   child.on('exit', (code, signal) => {
     log('process_exit', { process: command, code, signal });
-    if (!stopping && command !== 'chromium') process.exitCode = 1;
+    if (!stopping) {
+      failedProcesses.add(command);
+      process.exitCode = 1;
+    }
   });
   return child;
 }
@@ -73,8 +82,14 @@ function startDesktop() {
 
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ ok: true, viewer: 'live-desktop', authenticated: Boolean(username && password.length >= 24) }));
+    const ok = failedProcesses.size === 0 && children.length === 4 && children.every(child => child.exitCode === null);
+    res.writeHead(ok ? 200 : 503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({
+      ok,
+      viewer: 'live-desktop',
+      authenticated: Boolean(username && password.length >= 24),
+      failedProcesses: [...failedProcesses]
+    }));
     return;
   }
   if (!authorized(req)) return challenge(res);
