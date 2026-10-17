@@ -84,3 +84,10 @@ test('persists, deduplicates, lists and updates a diagnostic report in PostgreSQ
 test('rejects unsupported triage states', async () => {
   await assert.rejects(() => updateDiagnosticTriage('report_missing_123', { status: 'auto-deploy' }), { status: 400 });
 });
+
+test('keeps identical failures from different tasks separately correlatable', () => {
+  const common = { service: 'runner', category: 'runtime', summary: 'same failure', error: { name: 'Error', message: 'same failure' }, operation: { name: 'test' } };
+  const first = normalizeDiagnosticReport({ ...common, correlation: { taskId: 'task-alpha' } });
+  const second = normalizeDiagnosticReport({ ...common, correlation: { taskId: 'task-beta' } });
+  assert.notEqual(first.fingerprint, second.fingerprint);
+});
