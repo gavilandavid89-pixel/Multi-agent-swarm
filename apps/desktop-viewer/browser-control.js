@@ -140,9 +140,9 @@ export async function browserToolAction(input = {}) {
     });
   }
   if (action === 'click') {
+    const selector = String(input.selector || '').slice(0, 1000);
+    if (!selector) throw new Error('La acción click requiere selector CSS.');
     return withCdp(async sendCommand => {
-      const selector = String(input.selector || '').slice(0, 1000);
-      if (!selector) throw new Error('La acción click requiere selector CSS.');
       const result = await evaluate(sendCommand, selectorExpression(selector, `el.scrollIntoView({block:'center',inline:'center'}); el.click(); return {ok:true,tag:el.tagName,text:(el.innerText||el.getAttribute('aria-label')||'').trim().slice(0,200)};`));
       if (result?.ok === false) throw new Error(result.error);
       return { clicked: true, element: result, page: await evaluate(sendCommand, '({url:location.href,title:document.title})') };
