@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#292b2e">
   <title>Swarm · Chat de agentes</title>
-  <link rel="stylesheet" href="/styles.css?v=chat-shell-10">
+  <link rel="stylesheet" href="/styles.css?v=committee-debate-1">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -91,6 +91,7 @@
       </section>
       <section id="welcome-chat" class="welcome-chat" aria-live="polite"><div class="welcome-orb">✳</div><h2>Tu espacio de trabajo</h2><p>Escribí una orden global abajo para iniciar el trabajo. Después podés seguir la conversación o elegir un agente para consultarlo directamente.</p><span class="welcome-hint">Los avances, diagnósticos y archivos quedan asociados a cada tarea.</span></section>
       <section id="detail-panel" class="panel detail-panel hidden">
+        <aside id="committee-debate-banner" class="committee-debate-banner hidden" role="status" aria-live="polite"><div class="committee-debate-banner-main"><span class="committee-debate-pulse" aria-hidden="true"></span><div><strong id="committee-debate-label">Votación en curso</strong><p id="committee-debate-proposal">Los agentes están deliberando.</p></div></div><span id="committee-debate-timer" class="committee-debate-timer">01:00</span></aside>
         <div class="section-head"><div><p class="panel-kicker">AGENTES TRABAJANDO</p><h2 id="detail-title">Conversación de agentes</h2></div><div class="detail-actions"><span id="detail-live" class="live-label">Sincronizando</span><button id="copy-detail" class="button button-secondary" type="button">Copiar diagnóstico</button><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div></div>
         <div class="task-status"><div><strong id="detail-stage">Preparando tarea…</strong><span id="detail-status" class="status running">En curso</span></div><span id="detail-progress-label" class="muted tiny">Esperando actividad</span></div>
         <div id="detail-progress" class="progress-track" aria-hidden="true"><span id="detail-progress-fill"></span></div>
