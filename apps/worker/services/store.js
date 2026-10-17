@@ -79,6 +79,24 @@ export async function initStore() {
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_updated_idx ON jobs(updated_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_created_idx ON jobs(created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS diagnostic_reports (
+    report_id TEXT PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    severity TEXT NOT NULL,
+    category TEXT NOT NULL,
+    service TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    task_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    report JSONB NOT NULL,
+    triage JSONB,
+    attempts INTEGER NOT NULL DEFAULT 0
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS diagnostic_reports_status_idx ON diagnostic_reports(status, received_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS diagnostic_reports_fingerprint_idx ON diagnostic_reports(fingerprint, received_at DESC)');
   await pool.query(`CREATE TABLE IF NOT EXISTS job_request_idempotency (
     idempotency_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
     job_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL
@@ -104,6 +122,107 @@ export async function initStore() {
   await pool.query('SELECT 1');
   console.info('[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.');
 }
+
+const DIAGNOSTIC_MAX_REPORTS = 5000;
+function sanitizeDiagnosticText(value, max = 2000) {
+  return String(value ?? '')
+    .replace(/(?:bearer|token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
+    .replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/ig, 'https://[REDACTED]@')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED]')
+    .slice(0, max);
+}
+function normalizeDiagnosticReport(input = {}) {
+  const reportId = typeof input.reportId === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(input.reportId) ? input.reportId : randomUUID();
+  const severity = ['info','warning','error','critical'].includes(input.severity) ? input.severity : 'error';
+  const category = ['runtime','network','database','browser','validation','dependency','timeout','unknown'].includes(input.category) ? input.category : 'unknown';
+  const service = sanitizeDiagnosticText(input.service || 'unknown', 80);
+  const environment = ['development','test','staging','production','unknown'].includes(input.environment) ? input.environment : 'unknown';
+  const summary = sanitizeDiagnosticText(input.summary || input.error?.message || 'Error sin resumen', 500);
+  const error = input.error && typeof input.error === 'object' ? {
+    name: sanitizeDiagnosticText(input.error.name || 'Error', 100),
+    message: sanitizeDiagnosticText(input.error.message || summary, 1200),
+    stack: sanitizeDiagnosticText(input.error.stack || '', 8000)
+  } : null;
+  const correlation = input.correlation && typeof input.correlation === 'object' ? {
+    taskId: sanitizeDiagnosticText(input.correlation.taskId || '', 100),
+    checkpoint: sanitizeDiagnosticText(input.correlation.checkpoint || '', 120),
+    requestId: sanitizeDiagnosticText(input.correlation.requestId || '', 100),
+    traceId: sanitizeDiagnosticText(input.correlation.traceId || '', 100)
+  } : {};
+  const operation = input.operation && typeof input.operation === 'object' ? {
+    name: sanitizeDiagnosticText(input.operation.name || '', 120),
+    attempt: Math.max(0, Math.min(100, Number(input.operation.attempt) || 0)),
+    elapsedMs: Math.max(0, Math.min(86400000, Number(input.operation.elapsedMs) || 0)),
+    retryable: input.operation.retryable === true,
+    idempotencyKey: sanitizeDiagnosticText(input.operation.idempotencyKey || '', 100)
+  } : {};
+  const reproduction = input.reproduction && typeof input.reproduction === 'object' ? {
+    steps: Array.isArray(input.reproduction.steps) ? input.reproduction.steps.slice(0, 12).map(x => sanitizeDiagnosticText(x, 500)) : [],
+    expected: sanitizeDiagnosticText(input.reproduction.expected || '', 1000),
+    actual: sanitizeDiagnosticText(input.reproduction.actual || '', 1000)
+  } : {};
+  const runtime = input.runtime && typeof input.runtime === 'object' ? {
+    coldStartSuspected: input.runtime.coldStartSuspected === true,
+    serviceReady: input.runtime.serviceReady === true,
+    httpStatus: Number.isInteger(input.runtime.httpStatus) ? Math.max(0, Math.min(599, input.runtime.httpStatus)) : null
+  } : {};
+  const report = {
+    schemaVersion: 1, reportId,
+    occurredAt: Number.isFinite(Date.parse(input.occurredAt)) ? new Date(input.occurredAt).toISOString() : new Date().toISOString(),
+    service, environment, severity, category, summary, error, correlation, operation, reproduction, runtime
+  };
+  const fingerprint = createHash('sha256').update(JSON.stringify([service, category, error?.name, error?.message || summary, operation.name])).digest('hex');
+  return { reportId, report, severity, category, service, environment, summary, fingerprint, taskId: correlation.taskId || null };
+}
+export async function saveDiagnosticReport(input) {
+  const normalized = normalizeDiagnosticReport(input);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const prior = await client.query('SELECT report_id FROM diagnostic_reports WHERE report_id=$1 FOR UPDATE', [normalized.reportId]);
+    if (prior.rows[0]) {
+      await client.query('COMMIT');
+      return { reportId: normalized.reportId, duplicate: true, status: 'queued' };
+    }
+    const recent = await client.query(
+      "SELECT report_id FROM diagnostic_reports WHERE fingerprint=$1 AND received_at > now() - interval '10 minutes' ORDER BY received_at DESC LIMIT 1",
+      [normalized.fingerprint]
+    );
+    if (recent.rows[0]) {
+      await client.query('COMMIT');
+      return { reportId: recent.rows[0].report_id, duplicate: true, deduplicated: true };
+    }
+    await client.query(
+      'INSERT INTO diagnostic_reports(report_id,occurred_at,severity,category,service,environment,summary,fingerprint,task_id,status,report) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)',
+      [normalized.reportId, normalized.report.occurredAt, normalized.severity, normalized.category, normalized.service, normalized.environment, normalized.summary, normalized.fingerprint, normalized.taskId, 'queued', JSON.stringify(normalized.report)]
+    );
+    await client.query("DELETE FROM diagnostic_reports WHERE report_id IN (SELECT report_id FROM diagnostic_reports ORDER BY received_at DESC OFFSET $1)", [DIAGNOSTIC_MAX_REPORTS]);
+    await client.query('COMMIT');
+    return { reportId: normalized.reportId, duplicate: false, status: 'queued' };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
+}
+export async function listDiagnosticReports({ limit = 25, offset = 0, status = '' } = {}) {
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const values = status ? [status, safeLimit, safeOffset] : [safeLimit, safeOffset];
+  const where = status ? 'WHERE status=$1' : '';
+  const limitPos = status ? '$2' : '$1';
+  const offsetPos = status ? '$3' : '$2';
+  const { rows } = await pool.query(
+    `SELECT report_id,occurred_at,received_at,severity,category,service,environment,summary,task_id,status,attempts,triage FROM diagnostic_reports ${where} ORDER BY received_at DESC LIMIT ${limitPos} OFFSET ${offsetPos}`,
+    values
+  );
+  return rows.map(row => ({ reportId: row.report_id, occurredAt: toIso(row.occurred_at), receivedAt: toIso(row.received_at), severity: row.severity, category: row.category, service: row.service, environment: row.environment, summary: row.summary, taskId: row.task_id, status: row.status, attempts: row.attempts, triage: row.triage }));
+}
+export async function getDiagnosticReport(reportId) {
+  const { rows } = await pool.query('SELECT report_id,occurred_at,received_at,severity,category,service,environment,summary,task_id,status,attempts,report,triage FROM diagnostic_reports WHERE report_id=$1', [reportId]);
+  const row = rows[0];
+  return row ? { reportId: row.report_id, occurredAt: toIso(row.occurred_at), receivedAt: toIso(row.received_at), severity: row.severity, category: row.category, service: row.service, environment: row.environment, summary: row.summary, taskId: row.task_id, status: row.status, attempts: row.attempts, report: row.report, triage: row.triage } : null;
+}
+
 function safeArtifactPath(value) {
   let candidate = String(value || '').trim().replace(/^\x60|\x60$/g, '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').replace(/^\.\//, '').replace(/\\/g, '/');
   candidate = candidate.split(/[\r\n]/)[0].trim().replace(/^['"]|['"]$/g, '');
