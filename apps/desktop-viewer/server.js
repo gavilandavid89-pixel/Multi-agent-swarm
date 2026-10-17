@@ -198,13 +198,11 @@ const server = http.createServer(async (req, res) => {
 
 server.on('upgrade', (req, client, head) => {
   if (!authorized(req)) {
-    client.write('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Swarm admin desktop"\r\nConnection: close\r\n\r\n');
-    client.destroy();
+    client.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Swarm admin desktop"\r\nConnection: close\r\n\r\n');
     return;
   }
   if (!req.url?.startsWith('/websockify')) {
-    client.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-    client.destroy();
+    client.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
     return;
   }
   const upstream = net.connect(upstreamPort, '127.0.0.1', () => {
