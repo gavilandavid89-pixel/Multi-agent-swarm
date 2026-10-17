@@ -236,7 +236,7 @@ export async function voteOnImprovement(jobId, requestedProposal) {
   const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
   if (budgetPaused) throw Object.assign(new Error('La tarea está pausada por presupuesto. Ampliá el presupuesto o reanudá la tarea antes de convocar la votación.'), { status: 409 });
   const priorVotes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
-  const existing = [...priorVotes].reverse().find(item => String(item.proposal || '').trim().toLocaleLowerCase() === normalized && ['completed', 'partial', 'failed'].includes(item.status));
+  const existing = [...priorVotes].reverse().find(item => String(item.proposal || '').trim().toLocaleLowerCase() === normalized && ['completed', 'partial'].includes(item.status));
   if (existing) return { vote: existing, reused: true, started: false };
   const voteId = randomUUID();
   const runningRecord = {
