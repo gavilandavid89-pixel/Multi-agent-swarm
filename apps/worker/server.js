@@ -55,6 +55,22 @@ async function runJobWithAccountProviders(id) {
     return result;
   });
 }
+async function recordWorkerFailure(id, error) {
+  try {
+    await saveDiagnosticReport({
+      service: 'swarm-worker',
+      environment: ['development','test','staging','production'].includes(process.env.NODE_ENV) ? process.env.NODE_ENV : 'unknown',
+      severity: 'error',
+      category: 'runtime',
+      summary: String(error?.message || 'Falló la ejecución de una tarea').slice(0, 500),
+      error: { name: error?.name || 'Error', message: error?.message || 'Error sin mensaje', stack: error?.stack || '' },
+      correlation: { taskId: id, checkpoint: 'worker-job-execution' },
+      operation: { name: 'processJob', retryable: false }
+    });
+  } catch (storeError) {
+    console.error('[worker][diagnostic_capture_failed]', JSON.stringify({ jobId: id, code: storeError?.code || 'storage' }));
+  }
+}
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
   if (shuttingDown) return;
@@ -66,7 +82,7 @@ function pump() {
         const nextJobId = result.continuationJobId || id;
         const timer = setTimeout(() => enqueue(nextJobId), delay); timer.unref();
       }
-    }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
+    }).catch(async error => { console.error('[worker] fallo inesperado', JSON.stringify({ jobId: id, errorName: String(error?.name || 'Error').slice(0, 80) })); await recordWorkerFailure(id, error); }).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
 app.post('/internal/account/apis/:slot/test', async (req, res) => {
