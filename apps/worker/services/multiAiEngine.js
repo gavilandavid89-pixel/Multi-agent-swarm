@@ -9,6 +9,32 @@ import { recordAgentCheckpoint } from './agentMemory.js';
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function waitForCommitteeDebate(jobId, checkpointName) {
+  const started = Date.now();
+  let announced = false;
+  while (Date.now() - started < 78000) {
+    const record = await getPayload(jobId);
+    if (!record) return;
+    const votes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
+    const activeVote = [...votes].reverse().find(item => item.status === 'running');
+    if (!activeVote) {
+      if (announced) {
+        const fresh = await getPayload(jobId);
+        if (fresh && fresh.publicJob.status === 'running') await updateJob(jobId, { stage: checkpointName, payload: { committeePause: null } });
+      }
+      return;
+    }
+    if (!announced) {
+      announced = true;
+      const transcript = appendEntries(record.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'activity', content: 'Pausa segura en ' + checkpointName + ': esperando el cierre de la deliberación. El objetivo original se conserva.' }]);
+      await updateJob(jobId, { stage: 'Pausa segura: deliberación del comité', payload: { transcript, committeePause: { voteId: activeVote.id, checkpoint: checkpointName, startedAt: new Date().toISOString() } } });
+    }
+    await sleep(500);
+  }
+  const record = await getPayload(jobId);
+  if (record) await updateJob(jobId, { payload: { committeePause: null } });
+}
 function selectRepairContext(delivery, findings) {
   const source = String(delivery || '');
   const parts = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
@@ -104,7 +130,9 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   transcript.push({ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
   const checkpointPayload = { ...current.payload, ...extra };
   const memory = recordAgentCheckpoint(checkpointPayload, { agent, stage, content });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra, ...memory }, ...publicPatch });
+  const saved = await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra, ...memory }, ...publicPatch });
+  await waitForCommitteeDebate(jobId, stage);
+  return saved;
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
