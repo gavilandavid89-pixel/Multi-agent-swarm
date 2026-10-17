@@ -179,3 +179,44 @@ La votación consultiva muestra una franja azul marino con contorno amarillo, el
 7. Solo cambios de bajo riesgo, reversibles y comprobables podrán optar en el futuro a una autorización automática. Seguridad, secretos, permisos, borrado de datos, gastos, despliegues y requisitos explícitos del usuario necesitan controles reforzados o aprobación humana.
 
 Estados de referencia para la evolución: `proposed`, `reviewing`, `approved`, `rejected`, `needs_human`, `implementing`, `validating`, `applied`, `rolled_back` y `failed`. Deben persistirse junto con el identificador de debate, propuesta, argumentos, decisión, riesgos, pruebas y resultado de validación. Las propuestas repetidas deben deduplicarse y respetar límites de frecuencia y presupuesto.
+
+## Política de eficiencia de contexto y tokens
+
+El objetivo es evitar que cada agente vuelva a pagar por leer toda la conversación, todos los archivos y todas las decisiones en cada llamada. **Persistir contexto no significa reenviarlo completo al modelo.** El historial sirve para recuperar el trabajo; cada llamada debe recibir solo lo necesario para su etapa.
+
+### Protecciones que existen actualmente
+
+- El worker registra los tokens de entrada/salida reportados por el proveedor y deduplica cada evento de uso. Si el proveedor no informa el uso, se registra la llamada sin inventar una cantidad.
+- Antes de cada llamada se estima el tamaño de entrada y se reserva ese margen del presupuesto restante para limitar la salida solicitada. Es una guardia aproximada, no una medición exacta.
+- `MAX_TASK_TOKENS` limita el presupuesto acumulado por tarea; `MAX_OUTPUT_TOKENS_PER_CALL` limita la salida por llamada. Los valores por defecto documentados actualmente son altos (1.000.000 por tarea y 6.000 de salida por llamada), por lo que no deben interpretarse como objetivos de consumo ni como límites económicos recomendados.
+- Las fases completadas se guardan como checkpoints y normalmente se omiten al reanudar. Las correcciones intentan seleccionar los archivos citados por los hallazgos, en vez de corregir todo el proyecto.
+- El comité limita la propuesta y los resúmenes de contexto, conserva solo un conjunto pequeño de decisiones recientes y solicita respuestas cortas. Cada uno de sus seis agentes puede generar una llamada independiente; una votación completa no es gratuita.
+- Las tareas de continuación conservan el estado y la entrega para no reiniciar todo el flujo desde cero. El presupuesto de una tarea hija es independiente: hay que revisar el gasto acumulado de toda la cadena, no solo el saldo de la tarea actual.
+
+### Regla de diseño para los agentes
+
+1. **Objetivo inmutable, contexto mínimo:** mantener el pedido original y los requisitos explícitos como una referencia breve y estable; no volver a enviar la transcripción completa.
+2. **Memoria por etapa:** pasar al agente actual un resumen estructurado, las decisiones que afectan su trabajo, los contratos entre módulos relevantes y solo los fragmentos/archivos necesarios. No incluir automáticamente toda la salida de agentes anteriores.
+3. **Resumen incremental:** actualizar un resumen de trabajo con decisiones, motivos, restricciones, archivos modificados, pruebas pendientes y checkpoint. Evitar anexar repetidamente el mismo texto al resumen.
+4. **Lectura selectiva:** auditar y reparar por archivo o lote acotado; cargar un archivo completo solo cuando sea necesario. No mandar toda la entrega a cada agente si puede identificarse el subconjunto relevante.
+5. **Presupuesto antes de llamar:** estimar entrada + reservar margen de salida; si no cabe, reducir contexto, dividir el trabajo o pausar para revisión. No lanzar llamadas que claramente excedan el saldo.
+6. **Salida proporcional:** pedir formatos concretos y respuestas breves para clasificación, votos y auditorías; reservar salidas largas para código o entregables que lo requieren.
+7. **Sin llamadas duplicadas:** reutilizar checkpoints y resultados persistidos cuando la entrada no cambió. Reintentar solo ante errores recuperables y respetar cooldowns.
+8. **Medición por agente y etapa:** comparar tokens de entrada/salida, llamadas, reintentos, respuestas tardías y resultados útiles. No evaluar eficiencia solo por el total de tokens.
+9. **Límite global de la cadena:** la continuación no debe esconder el consumo histórico. Antes de crear nuevas tareas, mostrar el acumulado y exigir una decisión cuando el gasto total alcance el umbral de seguridad configurado.
+10. **No sacrificar calidad a ciegas:** reducir contexto mediante resúmenes verificables y referencias selectivas, no eliminando requisitos originales, advertencias de seguridad o contratos necesarios.
+
+### Limitación conocida / siguiente mejora
+
+Estas reglas son el objetivo de arquitectura, no una afirmación de que todas estén implementadas de punta a punta. Hoy el motor persiste checkpoints, reserva presupuesto por llamada y registra uso; sin embargo, varias etapas todavía pasan resultados anteriores completos (por ejemplo, propuesta, crítica, estrategia o entrega) como argumentos a los siguientes agentes. Las continuaciones también conservan la entrega previa. En tareas grandes, ese diseño puede repetir tokens de entrada aunque el historial esté guardado.
+
+**Próximo trabajo recomendado:** introducir un `contextBuilder` por rol y etapa con límites configurables, resúmenes incrementales y selección de archivos; registrar los tokens ahorrados frente al contexto anterior; agregar pruebas que comprueben que el contexto enviado no contiene transcripciones ni archivos irrelevantes; y bajar el presupuesto predeterminado de producción solo después de medir tareas representativas. No se debe considerar validada esta optimización hasta comprobar los tokens reales reportados por el proveedor.
+
+### Configuración prudente
+
+- Para limitar gasto durante pruebas, configurar `MAX_TASK_TOKENS` con un valor menor al máximo permitido y observar las tareas reales antes de subirlo.
+- Mantener `MAX_OUTPUT_TOKENS_PER_CALL` tan bajo como permita el tipo de tarea; las respuestas de código necesitan más margen que una clasificación o un voto.
+- Revisar el panel de consumo por modelo, agente, etapa e interacción después de cada prueba.
+- No ejecutar pruebas E2E de producción repetidamente sin intención: crean tareas reales y pueden consumir tokens.
+- No confundir el límite de tokens con un límite monetario: el coste depende del proveedor, del modelo y de sus tarifas de entrada/salida.
+
