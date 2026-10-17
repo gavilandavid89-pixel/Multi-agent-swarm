@@ -1063,15 +1063,15 @@ $('improvement-vote-form').addEventListener('submit', async event => {
   if (!proposal) return;
   const button = $('improvement-vote-submit');
   button.disabled = true;
-  button.textContent = 'Reuniendo votos…';
-  $('improvement-vote-status').textContent = 'Votación iniciada en segundo plano. La tarea principal continúa sin interrupción; consume tokens adicionales.';
+  button.textContent = 'Iniciando deliberación…';
+  $('improvement-vote-status').textContent = 'Deliberación iniciada. Los argumentos aparecerán en el chat; el cierre es de hasta 60 segundos y consume tokens adicionales.';
   try {
     const response = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/vote-improvement`, {
       method: 'POST', body: JSON.stringify({ proposal })
     });
     $('improvement-vote-status').textContent = response.reused
       ? (response.started ? 'Esa votación ya está en curso; la tarea continúa sin pausa.' : 'Ya existía una votación para esa propuesta; se recuperó sin consumir tokens.')
-      : 'Votación iniciada. Podés seguir trabajando mientras los agentes responden.';
+      : 'Deliberación iniciada. Podés ver cómo llegan los argumentos mientras la tarea sigue trabajando.';
     if (!response.reused) $('improvement-vote-proposal').value = '';
     await updateSelectedDetail();
     await loadJobs();
@@ -1079,7 +1079,7 @@ $('improvement-vote-form').addEventListener('submit', async event => {
     $('improvement-vote-status').textContent = `No se pudo completar la votación: ${error.message}`;
   } finally {
     button.disabled = false;
-    button.textContent = 'Convocar votación en segundo plano ↗';
+    button.textContent = 'Iniciar votación (máx. 60 s) ↗';
   }
 });
 $('agent-reply-form').addEventListener('submit', async event => {
