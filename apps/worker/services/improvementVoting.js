@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { consultarModelo } from './aiProviders.js';
-import { getPayload, updateJob, recordTokenUsage } from './store.js';
+import { getPayload, updateJob, recordTokenUsage, listJobs } from './store.js';
 import { parseImprovementVote, summarizeImprovementVotes } from './improvementVoteLogic.js';
 
 const inFlightVotes = new Map();
@@ -237,4 +237,44 @@ export async function voteOnImprovement(jobId, requestedProposal) {
     .finally(() => { if (inFlightVotes.get(jobId)?.promise === promise) inFlightVotes.delete(jobId); });
   inFlightVotes.set(jobId, { proposal: normalized, promise, record: runningRecord });
   return { vote: runningRecord, reused: false, started: true };
+}
+
+export async function recoverInterruptedVotes() {
+  let offset = 0;
+  let recovered = 0;
+  while (true) {
+    const page = await listJobs({ limit: 100, offset });
+    for (const job of page.jobs || []) {
+      const record = await getPayload(job.id).catch(() => null);
+      if (!record) continue;
+      const votes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
+      const expired = votes.filter(item => item.status === 'running' && Number.isFinite(Date.parse(item.deadlineAt)) && Date.parse(item.deadlineAt) <= Date.now());
+      if (!expired.length) continue;
+      const now = new Date().toISOString();
+      const nextVotes = votes.map(item => {
+        if (!expired.some(candidate => candidate.id === item.id)) return item;
+        const answered = Number(item.answered) || 0;
+        return {
+          ...item,
+          status: answered > 0 ? 'partial' : 'failed',
+          outcome: answered > 0 ? (item.outcome === 'EN_CURSO' ? 'EMPATE' : item.outcome) : 'SIN_VOTOS_VALIDOS',
+          completedAt: now,
+          summary: 'La deliberación quedó interrumpida por un reinicio del Worker. Se conserva el progreso guardado; revisá las respuestas antes de decidir.'
+        };
+      });
+      const expiredIds = new Set(expired.map(item => item.id));
+      const oldTranscript = Array.isArray(record.payload.transcript) ? record.payload.transcript : [];
+      const notices = expired.map(item => ({
+        at: now, agent: 'sistema', type: 'vote',
+        voteId: item.id,
+        content: 'Deliberación recuperada tras reinicio. La votación se cerró con las respuestas guardadas; no se aplicó ningún cambio automáticamente.'
+      }));
+      await updateJob(job.id, { payload: { improvementVotes: nextVotes, transcript: [...oldTranscript, ...notices].slice(-150) } });
+      recovered += expired.length;
+    }
+    offset += (page.jobs || []).length;
+    if (!page.hasMore || !(page.jobs || []).length) break;
+  }
+  if (recovered) console.info('[worker][improvement_vote_recovered]', JSON.stringify({ recovered }));
+  return recovered;
 }
