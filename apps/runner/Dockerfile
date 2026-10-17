@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 ENV NODE_ENV=production PORT=3200 RUNNER_WORKDIR=/tmp/swarm-runs
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium xvfb xauth ca-certificates \
+  && apt-get install -y --no-install-recommends chromium chromium-sandbox xvfb xauth ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /tmp/swarm-runs /tmp/runner-home \
   && chown -R node:node /tmp/swarm-runs /tmp/runner-home
