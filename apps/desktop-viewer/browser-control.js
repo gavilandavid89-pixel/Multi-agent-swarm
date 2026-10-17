@@ -179,10 +179,16 @@ export async function browserToolAction(input = {}) {
   }
   if (action === 'back') {
     return withCdp(async sendCommand => {
-      await sendCommand('Page.navigateToHistoryEntry', { entryId: await evaluate(sendCommand, 'history.length > 1 ? -1 : -1') }).catch(() => {});
-      await sendCommand('Runtime.evaluate', { expression: 'history.back()' });
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return evaluate(sendCommand, '({url:location.href,title:document.title})');
+      const before = await evaluate(sendCommand, 'location.href');
+      await evaluate(sendCommand, 'history.back()');
+      // A history navigation is asynchronous; poll briefly instead of assuming 500 ms is enough.
+      const deadline = Date.now() + 5000;
+      let current = before;
+      while (Date.now() < deadline && current === before) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        current = await evaluate(sendCommand, 'location.href');
+      }
+      return evaluate(sendCommand, '({url:location.href,title:document.title,changed:location.href !== '+JSON.stringify(before)+'})');
     });
   }
   if (action === 'wait') {
