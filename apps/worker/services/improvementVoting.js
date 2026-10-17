@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { consultarModelo } from './aiProviders.js';
 import { getPayload, updateJob, recordTokenUsage, listJobs } from './store.js';
-import { parseImprovementVote, summarizeImprovementVotes } from './improvementVoteLogic.js';
+import { findReusableImprovementVote, parseImprovementVote, summarizeImprovementVotes } from './improvementVoteLogic.js';
 
 const inFlightVotes = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -78,10 +78,7 @@ async function executeVote(jobId, proposal, voteId) {
   const record = await getPayload(jobId);
   if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
   const priorVotes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
-  const existing = [...priorVotes].reverse().find(item =>
-    String(item.proposal || '').trim().toLocaleLowerCase() === proposal.toLocaleLowerCase() &&
-    ['completed', 'partial'].includes(item.status)
-  );
+  const existing = findReusableImprovementVote(priorVotes, proposal);
   if (existing) return { vote: existing, reused: true };
 
   const context = buildContext(record.payload, proposal);
@@ -127,10 +124,17 @@ async function executeVote(jobId, proposal, voteId) {
   // Los cinco especialistas responden en paralelo. Se cierra la recepción en el segundo 40
   // para reservar una ventana independiente al Árbitro y margen para persistir el resultado.
   let acceptingPanel = true;
+  // Serializa las escrituras: las cinco respuestas pueden llegar casi simultáneamente y
+  // una lectura/escritura concurrente del payload podría sobrescribir votos recién guardados.
+  let persistChain = Promise.resolve();
+  const persistBallots = () => {
+    persistChain = persistChain.then(() => persistVoteProgress(jobId, voteId, ballots, deadlineAt));
+    return persistChain;
+  };
   const pending = panelists.map(agent => askAgent(agent, panelDeadlineMs).then(async ballot => {
     if (!acceptingPanel) return null;
     ballots.push(ballot);
-    await persistVoteProgress(jobId, voteId, ballots, deadlineAt);
+    await persistBallots();
     return ballot;
   }).catch(async error => {
     if (!acceptingPanel) return null;
@@ -139,7 +143,7 @@ async function executeVote(jobId, proposal, voteId) {
       rationale: 'No se obtuvo una respuesta válida dentro de la ventana del panel; no equivale a apoyo ni rechazo.',
       details: '', responseReceived: false, error: clip(error?.message || error, 240)
     });
-    await persistVoteProgress(jobId, voteId, ballots, deadlineAt).catch(() => {});
+    await persistBallots().catch(() => {});
     console.warn('[worker][improvement_vote_agent_error]', JSON.stringify({
       jobId, agent: agent.name, code: error?.code || null, message: clip(error?.message || error, 180)
     }));
@@ -236,7 +240,7 @@ export async function voteOnImprovement(jobId, requestedProposal) {
   const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
   if (budgetPaused) throw Object.assign(new Error('La tarea está pausada por presupuesto. Ampliá el presupuesto o reanudá la tarea antes de convocar la votación.'), { status: 409 });
   const priorVotes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
-  const existing = [...priorVotes].reverse().find(item => String(item.proposal || '').trim().toLocaleLowerCase() === normalized && ['completed', 'partial'].includes(item.status));
+  const existing = findReusableImprovementVote(priorVotes, normalized);
   if (existing) return { vote: existing, reused: true, started: false };
   const voteId = randomUUID();
   const runningRecord = {
