@@ -103,7 +103,11 @@ const server = http.createServer((req, res) => {
     port: upstreamPort,
     method: req.method,
     path: req.url,
-    headers: { ...req.headers, host: '127.0.0.1:' + upstreamPort, authorization: undefined }
+    headers: {
+      ...Object.fromEntries(Object.entries(req.headers)
+        .filter(([key]) => key.toLowerCase() !== 'authorization' && key.toLowerCase() !== 'proxy-authorization')),
+      host: '127.0.0.1:' + upstreamPort
+    }
   }, upstreamRes => {
     res.writeHead(upstreamRes.statusCode || 502, {
       ...upstreamRes.headers,
