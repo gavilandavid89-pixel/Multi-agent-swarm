@@ -2,6 +2,8 @@
 
 Last verified: 2026-10-17 (UTC)
 
+Latest checks: viewer CI #39069750223 SUCCESS (syntax, auth regression test, Docker build); Swarm CI #39069750226 SUCCESS (syntax/unit tests, committee regression, dependency audit, Chromium/Xvfb smoke test, worker Docker build).
+
 ## Current scope
 
 Repository: https://github.com/gavilandavid89-pixel/Multi-agent-swarm
@@ -35,6 +37,7 @@ Repository: https://github.com/gavilandavid89-pixel/Multi-agent-swarm
 
 1. The viewer's credentials are separate from the website's admin session. Do not describe it as integrated with the real admin role.
 2. The viewer is not connected to actual worker task events.
+3. The Bridge already has bearer-session authentication via `Authorization: Bearer <token>` and user records include a `role` field; login returns the role. Any viewer SSO integration should validate the bearer token against Bridge server-side and explicitly require `role === 'admin'`. Do not trust a role supplied by the browser. Avoid sending bearer tokens in URLs. A narrowly scoped short-lived exchange or authenticated Bridge endpoint is preferable to sharing the database/session secret with the viewer.
 3. CI success does not prove the image starts correctly on Render; deployment and post-deploy verification are still required.
 4. The runner is not deployed. Do not enable arbitrary code execution until a real sandbox and network/resource policy are verified.
 5. Do not bypass GitHub, Render, or other approval/security blocks. If blocked, document the exact required user action and continue independent work.
