@@ -113,7 +113,7 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 | `NODE_ENV` | `production` | — | Modo de producción |
 | `PORT` | `3100` (Render puede proporcionar el puerto runtime) | — | Puerto HTTP del contenedor |
 | `WORKER_SHARED_SECRET` | Mismo secreto que `swarm-bridge`, mínimo 32 caracteres | Bridge | Autenticación entre servicios |
-| `DATABASE_URL` | **PostgreSQL dedicado al Swarm para tareas/checkpoints/historial**, no debe apuntar a una base de otra aplicación sin decisión explícita. La conexión efectiva debe verificarse en Render; nunca registrar la URL completa | — | Persistencia PostgreSQL de `jobs`, `job_request_idempotency` e historial cifrado |
+| `DATABASE_URL` | Render PostgreSQL `comite-database`, base `comite_database` (confirmado desde el Worker; nunca publicar la URL completa) | — | Persistencia PostgreSQL de `jobs`, `job_request_idempotency` e historial cifrado |
 | `HISTORY_ENCRYPTION_KEY` | 64 caracteres hexadecimales (32 bytes), clave propia | — | Cifra/descifra los payloads de tareas e historial. Perderla impide recuperar los datos cifrados |
 | `SWARM_DATABASE_URL` | La misma URL Neon que Bridge: proyecto `billowing-scene-25888064`, rama `br-holy-feather-b5q9c9yd`, base `swarm` | Bridge | Acceso a cuentas y claves API administradas |
 | `SWARM_API_ENCRYPTION_KEY` | Mismo valor de 64 caracteres hexadecimales que Bridge | Bridge | Descifrado de claves API almacenadas |
@@ -128,31 +128,30 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 ### Estado verificado y puntos pendientes
 
 - Render identifica el Bridge como `https://swarm-bridge.onrender.com` y el Worker como `https://swarm-worker-fgnz.onrender.com`; ambos tienen health check `/readyz`.
-- Los logs del Worker registraron `[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.` el 16 y 17 de octubre de 2026. Esto confirma conexión, pero el log no identifica la base destino.
+- Los logs del Worker registraron `[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.` el 16 y 17 de octubre de 2026. El diagnóstico de solo lectura del 17-10-2026 confirmó que la base activa es `comite_database`, con usuario `comite_database_user`.
 - La base Neon `swarm` de la rama indicada contiene tablas de cuentas. La base Neon `swarm_history` consultada no tenía tablas de usuario al momento de la revisión.
 - En Render existe una instancia PostgreSQL llamada `comite-database`, base `comite_database`, usuario `comite_database_user`, estado disponible, plan Free, región Ohio y allowlist de IP vacía. El conector no pudo inspeccionar sus tablas porque Render bloquea conexiones externas con esa allowlist. El nombre por sí solo **no demuestra que sea ajena al Swarm**: el propietario indicó que “Comité” era el nombre que había elegido para la estructura/consejo de agentes. Debe evaluarse por su contenido y referencias de configuración, no por el nombre.
-- En una conversación anterior se indicó que `DATABASE_URL` del Worker apuntaba a `comite-database`. La configuración activa no pudo leerse desde el conector, por lo que ese destino queda como dato histórico pendiente de reconfirmar; no se debe reemplazar automáticamente.
+- La conexión efectiva de `DATABASE_URL` del Worker a `comite-database` quedó confirmada por la consulta de identidad ejecutada desde el propio Worker.
 - El código del Worker crea las tablas `jobs` y `job_request_idempotency` al iniciar en la base indicada por `DATABASE_URL`. Antes de cambiarla, verificar si `comite_database` contiene datos de tareas, checkpoints o tablas del sistema de agentes y hacer una copia de seguridad si corresponde.
 - **No cambiar ni borrar `comite-database` solo por el nombre.** Si resulta ser la base prevista para el Swarm, documentarla como tal y corregir este mapa. Si contiene datos compartidos o de otro sistema, no reutilizarla para el Worker sin migración planificada.
-- Los valores reales de secretos y URLs con credenciales no se imprimen en logs ni se versionan. Para confirmar el host/base efectiva, revisar de forma segura los detalles de la variable en Render o ejecutar una consulta de identidad desde el propio Worker que solo registre `current_database()`, `current_user` y el host saneado, nunca la URL ni la contraseña.
+- Los valores reales de secretos y URLs con credenciales no se imprimen en este README ni se versionan. La identidad de la base se confirmó sin registrar la URL ni la contraseña.
 
 
-## Diagnóstico seguro del esquema PostgreSQL (temporal)
+## Hallazgos verificados de `comite-database` (17-10-2026)
 
-- En el arranque, el Worker ejecuta una inspección de solo lectura **antes** de inicializar/crear sus tablas. Registra el resultado bajo `[worker][database_schema_diagnostic]`.
-- El diagnóstico informa `current_database()`, `current_user`, dirección/puerto del servidor PostgreSQL y el inventario de tablas propias de usuario con columnas, tipos y nulabilidad. No consulta ni imprime filas de negocio, payloads cifrados, contraseñas, URL de conexión ni claves.
-- Si la inspección falla, solo registra un código de error saneado bajo `[worker][database_schema_diagnostic_failed]`; el Worker continúa con su inicialización habitual.
-- Este registro permite verificar si `DATABASE_URL` del Worker apunta a `comite_database` y descubrir el esquema existente sin abrir el endpoint de diagnóstico al público ni cambiar la allowlist de la base.
-- **Temporalidad y limpieza:** una vez recogido el inventario desde los logs privados de Render y documentado el resultado real, retirar `inspectStoreSchema()`, su importación y la llamada de arranque, volver a desplegar y conservar en este README únicamente los hallazgos verificados. Revisar el log para asegurarse de que no aparezcan datos de filas; el diagnóstico diseñado solo emite metadatos de esquema.
-- La función `initStore()` ya crea `jobs`, índices de fecha/actualización y `job_request_idempotency` en la base de `DATABASE_URL`. Por eso es importante inspeccionar antes de llamar a `initStore()`; la existencia de esas tablas por sí sola no prueba que la base sea exclusiva del Swarm.
+- **Identidad confirmada desde el Worker:** `current_database() = comite_database`, `current_user = comite_database_user`. `DATABASE_URL` apunta a la instancia Render `comite-database`.
+- **Conteos observados en la inspección:** `jobs` tenía 6 filas y `job_request_idempotency` tenía 1. Los conteos cambian con el uso normal.
+- `jobs` contiene `id`, `status`, `stage`, `progress`, `attempt`, `created_at`, `updated_at`, `error` y `encrypted_payload` (`bytea` cifrado por la aplicación).
+- `job_request_idempotency` contiene `idempotency_key`, `request_hash`, `job_id` y `created_at`.
+- Integridad observada: claves primarias en `jobs.id` y `job_request_idempotency.idempotency_key`, unicidad en `job_request_idempotency.job_id`, e índices por creación/actualización de tareas. No se detectaron claves foráneas, vistas, secuencias ni otras tablas de usuario.
+- El esquema coincide con el almacén de tareas/checkpoints del Worker. No hay tablas explícitas de integrantes, deliberaciones o votos; eso no prueba que no haya datos relacionados con el consejo dentro de payloads cifrados. No se leyeron ni descifraron filas de negocio.
+- La inspección temporal fue retirada del código tras recoger los metadatos; no cambió datos ni esquema. No renombrar, vaciar, migrar ni cambiar la URL de esta base sin definir la arquitectura y verificar una copia de seguridad.
 
+## Votación del comité sin interrumpir tareas
 
-### Hallazgos verificados de `comite-database` (17-10-2026)
+El botón **Convocar votación en segundo plano** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los votos se ejecutan en segundo plano, usan tokens adicionales y se guardan dentro del historial cifrado de la tarea. La tarea principal no se pausa ni se modifica por votar.
 
-- El diagnóstico se ejecutó en el Worker desplegado y devolvió `current_database() = comite_database` y `current_user = comite_database_user`. Por tanto, **`DATABASE_URL` del Worker apunta efectivamente a la instancia Render llamada `comite-database`**; ya no es solo una hipótesis.
-- Antes de inicializar el almacén, el esquema visible contenía dos tablas de usuario en `public`:
-  - `jobs`: `id`, `status`, `stage`, `progress`, `attempt`, `created_at`, `updated_at`, `error`, `encrypted_payload`. El payload se guarda como `bytea` cifrado por la aplicación.
-  - `job_request_idempotency`: `idempotency_key`, `request_hash`, `job_id`, `created_at`; impide duplicar solicitudes y enlaza una clave con su tarea.
-- La coincidencia con las tablas que crea `apps/worker/services/store.js:initStore()` indica que esta base sí está funcionando como almacenamiento de tareas del Swarm. **No demuestra por sí sola que sea la base de datos del consejo de agentes como concepto**: en el esquema observado no aparecen tablas explícitas de agentes, miembros del comité, deliberaciones ni votos.
-- El primer inventario solo consultó metadatos de tablas y columnas; todavía no obtuvo recuentos, restricciones, índices ni contenido de filas. El siguiente despliegue amplía la inspección con recuentos exactos y metadatos de restricciones/índices/otros objetos. No imprime valores de filas ni el contenido cifrado.
-- La dirección privada del servidor no se conserva en esta documentación; los logs de Render deben tratarse como registros operativos privados.
+- La votación es consultiva: no aplica cambios ni sustituye aprobación humana para acciones de impacto.
+- La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
+- Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
+- El resultado aparece al refrescar el detalle de la tarea. Si el proceso del Worker se reinicia durante la votación, el registro puede quedar en estado `running`; una futura mejora debe incluir recuperación de votaciones abandonadas al arrancar.
