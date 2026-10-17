@@ -70,11 +70,7 @@ async function persistVoteProgress(jobId, voteId, ballots, deadlineAt) {
   const tally = summarizeImprovementVotes(ballots);
   const updated = { ...history[index], votes: ballots.slice(), tally: tally.tally, answered: tally.answered, total: agents.length, deadlineAt, summary: 'Deliberación en curso: ' + ballots.length + '/' + agents.length + ' agentes respondieron. El objetivo original sigue siendo prioritario.' };
   const nextHistory = history.map((item, i) => i === index ? updated : item).slice(-10);
-  const newBallot = ballots[ballots.length - 1];
-  const transcript = Array.isArray(fresh.payload.transcript) ? fresh.payload.transcript : [];
-  const alreadyRecorded = newBallot && transcript.some(entry => entry.voteId === voteId && entry.agent === newBallot.agent);
-  const nextTranscript = newBallot && !alreadyRecorded ? [...transcript, { at: new Date().toISOString(), agent: newBallot.agent, type: 'vote', voteId, content: 'ARGUMENTO EN VOTACIÓN · ' + newBallot.vote + '\n' + newBallot.rationale + (newBallot.error ? '\nNo respondió el proveedor: ' + newBallot.error : '') }].slice(-150) : transcript;
-  await updateJob(jobId, { payload: { improvementVotes: nextHistory, transcript: nextTranscript } });
+  await updateJob(jobId, { payload: { improvementVotes: nextHistory } });
 }
 
 async function executeVote(jobId, proposal, voteId) {
@@ -130,6 +126,7 @@ async function executeVote(jobId, proposal, voteId) {
       }), remainingMs);
       const parsed = parseImprovementVote(response);
       ballots.push({
+        at: new Date().toISOString(),
         agent: agent.name,
         vote: parsed.vote,
         rationale: parsed.rationale,
@@ -139,6 +136,7 @@ async function executeVote(jobId, proposal, voteId) {
       });
     } catch (error) {
       ballots.push({
+        at: new Date().toISOString(),
         agent: agent.name,
         vote: 'ABSTENERSE',
         rationale: 'No se pudo obtener un voto por un error del proveedor. No se debe interpretar como apoyo ni rechazo.',
@@ -170,11 +168,6 @@ async function executeVote(jobId, proposal, voteId) {
   };
   const fresh = await getPayload(jobId);
   if (!fresh) throw Object.assign(new Error('La tarea dejó de existir durante la votación.'), { status: 404 });
-  const existingTranscript = Array.isArray(fresh.payload.transcript) ? fresh.payload.transcript : [];
-  const transcript = [...existingTranscript, {
-    at: completedAt, agent: 'sistema', type: 'vote', voteId,
-    content: 'Votación de mejora: "' + clip(proposal, 260) + '". Resultado: ' + summary.outcome + '. A favor: ' + summary.tally.APOYAR + '; en contra: ' + summary.tally.RECHAZAR + '; abstenciones: ' + summary.tally.ABSTENERSE + '. ' + summary.summary
-  }].slice(-150);
   const previousHistory = Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : [];
   const existingIndex = previousHistory.findIndex(item => item.id === voteId);
   const history = existingIndex >= 0
@@ -187,7 +180,7 @@ async function executeVote(jobId, proposal, voteId) {
     applied: false, requiresHumanReview: true
   };
   await updateJob(jobId, {
-    payload: { improvementVotes: history, transcript, committeeDecisions: [...previousDecisions, decision].slice(-20) }
+    payload: { improvementVotes: history, committeeDecisions: [...previousDecisions, decision].slice(-20) }
   });
   console.info('[worker][improvement_vote_completed]', JSON.stringify({
     jobId, voteId: voteRecord.id, outcome: voteRecord.outcome,
