@@ -60,3 +60,14 @@ Repository: https://github.com/gavilandavid89-pixel/Multi-agent-swarm
 - Next step: one concrete action.
 
 Always re-read current repository and service state before continuing; this file is a checkpoint, not proof that external state has remained unchanged.
+
+
+## Work completed in the latest continuation (2026-10-17)
+
+- Updated `apps/desktop-viewer/server.js` so `/healthz` no longer treats live Node child processes as proof that the desktop works.
+- Readiness now probes the VNC TCP listener, noVNC/websockify TCP listener, and Chromium's DevTools `/json/version` endpoint. It returns HTTP 503 with per-component `checks` when any probe fails.
+- Made the VNC and Chromium debug ports configurable with `VNC_INTERNAL_PORT` and `CHROMIUM_DEBUG_PORT`; websockify now targets the configured VNC port rather than a hard-coded 5900.
+- Extended `apps/desktop-viewer/test/server.test.js` with local fake service probes and a regression assertion that health changes to 503 when the noVNC listener goes away.
+- Commits on `feature/live-agent-desktop-viewer`: `ddb0cbd59435504d82f9241e90b3fc5793d3c9fc`, `c9926866ea44641b223ef1525d89a865868f1021`, `5498c0f06a10259288f8b48acbd49f3b4840e899`, `50e8814469c45127edcbf5db58e1333fe32d3be4`.
+- PR #99 head now `50e8814469c45127edcbf5db58e1333fe32d3be4`. Workflow status for this latest head was not yet returned by the available PR-triggered run lookup at the time of this update; do not claim CI passed for these changes until confirmed.
+- This improves readiness evidence but does not yet probe the Xvfb display socket, federate viewer auth with the Bridge admin role, connect live Worker activity, or deploy the viewer.
