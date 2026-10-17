@@ -1,0 +1,30 @@
+name: Desktop viewer checks
+permissions:
+  contents: read
+concurrency:
+  group: desktop-viewer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop-viewer/**'
+      - '.github/workflows/desktop-viewer.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop-viewer/**'
+      - '.github/workflows/desktop-viewer.yml'
+jobs:
+  viewer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check viewer syntax
+        working-directory: apps/desktop-viewer
+        run: npm run check
+      - name: Build desktop viewer container
+        run: docker build -f apps/desktop-viewer/Dockerfile .
