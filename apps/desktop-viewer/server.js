@@ -157,7 +157,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok,
       viewer: 'live-desktop',
-      authenticated: Boolean(username && password.length >= 24),
+      authenticated: ticketSecret.length >= 32 || Boolean(username && password.length >= 24),
       checks,
       failedProcesses: [...failedProcesses]
     }));
