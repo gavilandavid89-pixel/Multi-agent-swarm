@@ -43,6 +43,31 @@ function buildContext(payload, requestedProposal) {
   ].filter(Boolean).join('\n\n');
 }
 
+
+function raceDeadline(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Object.assign(new Error('Se agotó el minuto de deliberación.'), { code: 'DEBATE_DEADLINE' })), Math.max(1, ms));
+    timer.unref?.();
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+
+async function persistVoteProgress(jobId, voteId, ballots, deadlineAt) {
+  const fresh = await getPayload(jobId);
+  if (!fresh) return;
+  const history = Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : [];
+  const index = history.findIndex(item => item.id === voteId);
+  if (index < 0) return;
+  const tally = summarizeImprovementVotes(ballots);
+  const updated = { ...history[index], votes: ballots.slice(), tally: tally.tally, answered: tally.answered, total: agents.length, deadlineAt, summary: 'Deliberación en curso: ' + ballots.length + '/' + agents.length + ' agentes respondieron. El objetivo original sigue siendo prioritario.' };
+  const nextHistory = history.map((item, i) => i === index ? updated : item).slice(-10);
+  const newBallot = ballots[ballots.length - 1];
+  const transcript = Array.isArray(fresh.payload.transcript) ? fresh.payload.transcript : [];
+  const alreadyRecorded = newBallot && transcript.some(entry => entry.voteId === voteId && entry.agent === newBallot.agent);
+  const nextTranscript = newBallot && !alreadyRecorded ? [...transcript, { at: new Date().toISOString(), agent: newBallot.agent, type: 'vote', voteId, content: 'ARGUMENTO EN VOTACIÓN · ' + newBallot.vote + '\n' + newBallot.rationale + (newBallot.error ? '\nNo respondió el proveedor: ' + newBallot.error : '') }].slice(-150) : transcript;
+  await updateJob(jobId, { payload: { improvementVotes: nextHistory, transcript: nextTranscript } });
+}
+
 async function executeVote(jobId, proposal, voteId) {
   const record = await getPayload(jobId);
   if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
@@ -55,7 +80,12 @@ async function executeVote(jobId, proposal, voteId) {
 
   const context = buildContext(record.payload, proposal);
   const ballots = [];
+  const currentVote = priorVotes.find(item => item.id === voteId) || {};
+  const deadlineAt = currentVote.deadlineAt || new Date(Date.now() + 60000).toISOString();
+  const deadlineMs = Date.parse(deadlineAt);
   for (const agent of agents) {
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) break;
     try {
       const onRetry = async info => {
         if (info?.usage) {
@@ -76,7 +106,7 @@ async function executeVote(jobId, proposal, voteId) {
           }));
         }
       };
-      const response = await consultarModelo({
+      const response = await raceDeadline(consultarModelo({
         model: voteModel(agent.name),
         temperature: 0.1,
         maxTokens: 320,
@@ -88,7 +118,7 @@ async function executeVote(jobId, proposal, voteId) {
           },
           { role: 'user', content: context }
         ]
-      });
+      }), remainingMs);
       const parsed = parseImprovementVote(response);
       ballots.push({
         agent: agent.name,
@@ -111,7 +141,9 @@ async function executeVote(jobId, proposal, voteId) {
         jobId, agent: agent.name, code: error?.code || null,
         message: clip(error?.message || error, 250)
       }));
+      if (error?.code === 'DEBATE_DEADLINE' || Date.now() >= deadlineMs) break;
     }
+    await persistVoteProgress(jobId, voteId, ballots, deadlineAt).catch(error => console.warn('[worker][improvement_vote_progress_deferred]', JSON.stringify({ jobId, voteId, message: clip(error?.message || error, 160) })));
   }
 
   const summary = summarizeImprovementVotes(ballots);
@@ -120,28 +152,19 @@ async function executeVote(jobId, proposal, voteId) {
     id: voteId,
     proposal,
     status: summary.answered === ballots.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
-    createdAt: completedAt,
+    createdAt: currentVote.createdAt || completedAt,
     completedAt,
+    deadlineAt,
     votes: ballots,
     ...summary
   };
   const fresh = await getPayload(jobId);
   if (!fresh) throw Object.assign(new Error('La tarea dejó de existir durante la votación.'), { status: 404 });
-  const transcript = [
-    ...(Array.isArray(fresh.payload.transcript) ? fresh.payload.transcript : []),
-    {
-      at: completedAt,
-      agent: 'sistema',
-      type: 'vote',
-      content: 'Votación de mejora: "' + clip(proposal, 260) + '". Resultado: ' + summary.outcome + '. A favor: ' + summary.tally.APOYAR + '; en contra: ' + summary.tally.RECHAZAR + '; abstenciones: ' + summary.tally.ABSTENERSE + '. ' + summary.summary
-    },
-    ...ballots.map(ballot => ({
-      at: completedAt,
-      agent: ballot.agent,
-      type: 'vote',
-      content: 'VOTO: ' + ballot.vote + '\n' + ballot.rationale + (ballot.error ? '\nError del proveedor: ' + ballot.error : '')
-    }))
-  ].slice(-150);
+  const existingTranscript = Array.isArray(fresh.payload.transcript) ? fresh.payload.transcript : [];
+  const transcript = [...existingTranscript, {
+    at: completedAt, agent: 'sistema', type: 'vote', voteId,
+    content: 'Votación de mejora: "' + clip(proposal, 260) + '". Resultado: ' + summary.outcome + '. A favor: ' + summary.tally.APOYAR + '; en contra: ' + summary.tally.RECHAZAR + '; abstenciones: ' + summary.tally.ABSTENERSE + '. ' + summary.summary
+  }].slice(-150);
   const previousHistory = Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : [];
   const existingIndex = previousHistory.findIndex(item => item.id === voteId);
   const history = existingIndex >= 0
@@ -176,9 +199,10 @@ export async function voteOnImprovement(jobId, requestedProposal) {
   if (existing) return { vote: existing, reused: true, started: false };
   const voteId = randomUUID();
   const runningRecord = {
-    id: voteId, proposal, status: 'running', createdAt: new Date().toISOString(), completedAt: null,
-    votes: [], tally: { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 }, outcome: 'EN_CURSO',
-    summary: 'La votación corre en segundo plano. La tarea principal no se pausa.', answered: 0, total: agents.length
+    id: voteId, proposal, kind: 'vote', status: 'running', createdAt: new Date().toISOString(), completedAt: null,
+    deadlineAt: new Date(Date.now() + 60000).toISOString(), votes: [],
+    tally: { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 }, outcome: 'EN_CURSO',
+    summary: 'Deliberación de hasta 60 segundos. Esta votación consultiva no pausa ni modifica la tarea principal.', answered: 0, total: agents.length
   };
   await updateJob(jobId, { payload: { improvementVotes: [...priorVotes, runningRecord].slice(-10) } });
   let promise;
