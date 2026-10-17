@@ -127,7 +127,7 @@ test('viewer HTTP access requires the configured administrator credentials', asy
   });
   assert.equal(invalid.status, 401);
 
-  const admin = await fetch(`http://127.0.0.1:${port}/`, {
+  const admin = await fetch(`http://127.0.0.1:${port}/vnc.html`, {
     headers: { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` }
   });
   assert.notEqual(admin.status, 401, 'valid administrator credentials must pass the authentication gate');
