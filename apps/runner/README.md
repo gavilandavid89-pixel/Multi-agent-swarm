@@ -15,6 +15,7 @@ Servicio HTTP interno para ejecutar pruebas de agentes en un contenedor separado
 ## Configuración
 
 - `RUNNER_SHARED_SECRET`: obligatorio, 32+ caracteres.
+- `RUNNER_ENABLE_EXECUTION`: por defecto `false`; `/v1/run` devuelve HTTP 503 hasta habilitarlo explícitamente después de aplicar y probar aislamiento real de red y recursos. No activarlo en un servicio público.
 - `PORT`: puerto HTTP, por defecto 3200.
 - `RUNNER_WORKDIR`: raíz temporal de tareas.
 - `RUNNER_MAX_BODY_BYTES`: límite de entrada (2 MB).
@@ -41,4 +42,4 @@ No usa shell, rechaza rutas que escapen del workspace, restringe los programas p
 
 ## Estado
 
-Esta es la primera implementación del servicio de ejecución, todavía no conectada al flujo de trabajos del swarm ni desplegada. La lista de comandos reduce superficie, pero no sustituye un sandbox de kernel. Antes de ejecutar código de agentes, desplegar con aislamiento de red y recursos y probarlo en un entorno desechable. El acceso a Internet requiere configurar y verificar el proxy de salida primero.
+El Worker puede enviar entregas formateadas a `POST /v1/check` cuando se configuran `AGENT_RUNNER_URL` y `AGENT_RUNNER_SHARED_SECRET`; si no están configuradas, conserva las comprobaciones locales. El runner aún no está desplegado ni conectado en producción. `/v1/run` está deshabilitado por defecto: la lista de comandos no sustituye un sandbox de kernel. Antes de habilitar ejecución arbitraria, desplegar en red privada con aislamiento de red y límites de recursos y probarlo en un entorno desechable. El acceso a Internet requiere una pasarela de salida verificada; no habilitar salida directa indiscriminada.
