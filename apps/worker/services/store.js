@@ -126,7 +126,7 @@ export async function initStore() {
 const DIAGNOSTIC_MAX_REPORTS = 5000;
 function sanitizeDiagnosticText(value, max = 2000) {
   return String(value ?? '')
-    .replace(/(?:bearer|token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
+    .replace(/(bearer|token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
     .replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/ig, 'https://[REDACTED]@')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED]')
     .slice(0, max);
