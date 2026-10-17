@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact, saveDiagnosticReport, listDiagnosticReports, getDiagnosticReport } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact, saveDiagnosticReport, listDiagnosticReports, getDiagnosticReport, updateDiagnosticTriage } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -106,6 +106,20 @@ app.get('/internal/diagnostics/:id', async (req, res) => {
     if (!report) return res.status(404).json({ error: 'No existe ese informe.' });
     res.json(report);
   } catch { res.status(503).json({ error: 'No se pudo consultar el informe.' }); }
+});
+
+
+app.patch('/internal/diagnostics/:id/triage', async (req, res) => {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(req.params.id)) return res.status(400).json({ error: 'ID de informe inválido.' });
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  try {
+    const result = await updateDiagnosticTriage(req.params.id, body);
+    if (!result) return res.status(404).json({ error: 'No existe ese informe.' });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    res.status(503).json({ error: 'No se pudo guardar el estado de investigación.' });
+  }
 });
 
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
