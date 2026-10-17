@@ -99,7 +99,7 @@ app.post('/internal/admin/import-legacy-apis', async (req, res) => {
 
 app.post('/internal/diagnostics', async (req, res) => {
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-  if (JSON.stringify(body).length > 32000) return res.status(413).json({ error: 'El informe supera 32 KB.' });
+  if (Buffer.byteLength(JSON.stringify(body), 'utf8') > 32000) return res.status(413).json({ error: 'El informe supera 32 KB.' });
   if (!String(body.summary || body.error?.message || '').trim()) return res.status(400).json({ error: 'El informe necesita un resumen o mensaje de error.' });
   try {
     const result = await saveDiagnosticReport(body);
