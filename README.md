@@ -11,7 +11,7 @@
 - `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, coordinación de coherencia entre archivos, desarrollo y validación. La imagen Docker incluye Chromium + Xvfb para comprobaciones de humo de HTML generado.
 - `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente. También persiste informes estructurados de diagnóstico en `diagnostic_reports`, con deduplicación por ID/huella, límites de retención y estado inicial `queued`.
 - `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 30 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
-- `apps/worker/server.js`: endpoints internos autenticados para registrar y consultar diagnósticos (`POST/GET /internal/diagnostics` y `GET /internal/diagnostics/:id`); requieren el secreto Bridge→Worker y no son endpoints públicos.
+- `apps/worker/server.js`: endpoints internos autenticados para registrar y consultar diagnósticos (`POST/GET /internal/diagnostics`, `GET /internal/diagnostics/:id` y `PATCH /internal/diagnostics/:id/triage`); requieren el secreto Bridge→Worker y no son endpoints públicos.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
 ## Runner virtual exclusivo para agentes (no visible al usuario)
