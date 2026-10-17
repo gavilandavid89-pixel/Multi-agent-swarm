@@ -107,7 +107,7 @@ app.post('/v1/check', auth, async (req, res) => {
       if (htmlEntry && syntax.every(item => item.ok)) {
         const target = path.resolve(workspace, htmlEntry.path);
         const args = ['-a', '-s', '-screen 0 1280x900x24 -nolisten tcp', process.env.CHROME_BIN || '/usr/bin/chromium',
-          '--headless=new', '--no-sandbox', '--disable-background-networking', '--disable-sync', '--disable-extensions',
+          '--headless=new', '--disable-background-networking', '--disable-sync', '--disable-extensions',
           '--disable-component-update', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
           '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND', '--proxy-server=http://127.0.0.1:9',
           '--proxy-bypass-list=<-loopback>', '--virtual-time-budget=1500', '--dump-dom', '--user-data-dir=' + path.join(workspace, '.chrome-profile'),
