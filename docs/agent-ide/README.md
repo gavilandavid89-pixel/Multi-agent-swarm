@@ -4,6 +4,12 @@
 
 El servicio `apps/desktop-viewer` ya ejecuta Chromium dentro de Xvfb y publica el escritorio mediante noVNC detrás de autenticación de administrador. Su herramienta interna permite navegar, inspeccionar DOM, hacer clic, introducir texto, pulsar teclas, desplazarse, volver atrás y capturar pantalla. **Todavía no es un IDE con editor de archivos, terminal, extensiones, depurador ni ejecución aislada por tarea.** No se debe describir como VS Code ni ejecutar código arbitrario dentro del contenedor compartido del visor.
 
+## Prototipo de imagen IDE
+
+`apps/agent-ide/Dockerfile` crea una imagen basada en Node 22 con code-server, Git, Python y herramientas de compilación. `start-agent-ide.sh` exige una variable `PASSWORD` de al menos 24 caracteres y arranca el editor en `/workspace`, con extensiones y datos de usuario temporales.
+
+**Esto es una imagen preparada, no un servicio desplegado ni integrado todavía.** No agregarla a `render.yaml` ni exponer el puerto 8080 públicamente hasta implementar y probar un gateway de autenticación, tickets de sesión de corta duración y políticas de workspace. La contraseña de code-server por sí sola no sustituye el aislamiento por tarea ni una política de red de salida. El workspace dentro del contenedor es temporal; no guardar allí checkpoints como única copia.
+
 ## Arquitectura objetivo
 
 1. **IDE web**: code-server/VS Code web en un servicio privado separado, con editor Monaco, explorador de archivos, búsqueda global, terminal, extensiones controladas, formato, lint, depuración y Git. Solo el administrador accede al escritorio humano; los agentes usan APIs internas específicas, no la sesión de navegador del administrador.
