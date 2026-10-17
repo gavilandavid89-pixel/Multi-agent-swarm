@@ -70,6 +70,24 @@ const MAX_ARTIFACTS = 40;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const MAX_ARTIFACT_TOTAL = 2 * 1024 * 1024;
 
+// Diagnostic metadata only: never emit connection strings, passwords, row values, or encrypted payloads.
+export async function inspectStoreSchema() {
+  const identity = await pool.query('SELECT current_database() AS database_name, current_user AS database_user, inet_server_addr()::text AS server_address, inet_server_port() AS server_port');
+  const schema = await pool.query(`SELECT t.table_schema, t.table_name, c.column_name, c.data_type, c.is_nullable
+    FROM information_schema.tables t
+    JOIN information_schema.columns c ON c.table_schema = t.table_schema AND c.table_name = t.table_name
+    WHERE t.table_type = 'BASE TABLE'
+      AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY t.table_schema, t.table_name, c.ordinal_position`);
+  const tables = [];
+  for (const row of schema.rows) {
+    let table = tables.find(item => item.schema === row.table_schema && item.name === row.table_name);
+    if (!table) { table = { schema: row.table_schema, name: row.table_name, columns: [] }; tables.push(table); }
+    table.columns.push({ name: row.column_name, type: row.data_type, nullable: row.is_nullable === 'YES' });
+  }
+  return { identity: identity.rows[0], tables };
+}
+
 export async function initStore() {
   await pool.query(`CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, status TEXT NOT NULL, stage TEXT NOT NULL,
