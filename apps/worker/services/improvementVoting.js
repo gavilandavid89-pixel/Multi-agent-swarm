@@ -264,7 +264,7 @@ export async function recoverInterruptedVotes() {
         voteId: item.id,
         content: 'Deliberación recuperada tras reinicio. La votación se cerró con las respuestas guardadas; no se aplicó ningún cambio automáticamente.'
       }));
-      await updateJob(job.id, { payload: { improvementVotes: nextVotes, transcript: [...oldTranscript, ...notices].slice(-150) } });
+      await updateJob(job.id, { payload: { improvementVotes: nextVotes, transcript: [...oldTranscript, ...notices].slice(-150), committeePause: null } });
       recovered += expired.length;
     }
     offset += (page.jobs || []).length;
