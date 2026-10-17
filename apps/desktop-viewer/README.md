@@ -5,8 +5,8 @@ This service runs a dedicated Chromium desktop inside Xvfb and serves a noVNC vi
 ## Required Render configuration
 
 - Runtime: Docker
-- Dockerfile: `apps/desktop-viewer/Dockerfile`
-- Docker context: repository root
+- Root Directory / build context: `apps/desktop-viewer`
+- Dockerfile path relative to that root: `Dockerfile`
 - `DESKTOP_VIEWER_TICKET_SECRET`: random secret of at least 32 characters; configure the identical value in Bridge and viewer to enable admin SSO
 - `VIEWER_ADMIN_USERNAME`: optional standalone admin login only when Bridge SSO is not configured
 - `VIEWER_ADMIN_PASSWORD`: optional standalone password of at least 24 characters only when Bridge SSO is not configured
