@@ -89,3 +89,49 @@ Los agentes cumplen roles distintos: Arquitecto propone; Escéptico intenta refu
 Gemini se prueba primero cuando está configurado; luego se prueban Groq y los proveedores adicionales de `AI_FALLBACK_PROVIDERS` en el orden declarado. Los proveedores alternativos deben implementar la API compatible con OpenAI Chat Completions (`POST /chat/completions`). Para cada uno, configurá la URL base HTTPS, el nombre de la variable de entorno que contiene su clave y un modelo válido para ese proveedor. Se puede definir un modelo único o modelos separados para razonamiento, programación y validación.
 
 Ante HTTP 408, 425, 429, 5xx o errores de red, el motor intenta la siguiente alternativa disponible en lugar de esperar primero todo el cooldown. Si todos fallan, persiste el checkpoint y programa una reanudación con backoff. No se puede cambiar automáticamente a proveedores cuyas credenciales no estén configuradas, ni evitar cuotas o límites del proveedor.
+
+
+## Mapa de variables de producción (Render)
+
+Este mapa documenta el destino lógico y el valor esperado de cada variable. **No se guardan contraseñas, tokens, URLs PostgreSQL con credenciales ni claves criptográficas reales en GitHub/README**: esos valores deben permanecer en Render Environment Groups/Environment. La guía describe los valores de configuración sin filtrar secretos.
+
+### Bridge — servicio `swarm-bridge`
+
+| Variable | Valor/destino esperado | Compartida con | Uso |
+|---|---|---|---|
+| `NODE_ENV` | `production` | — | Activa validaciones de producción |
+| `WORKER_BASE_URL` | `https://swarm-worker-fgnz.onrender.com` (sin barra final) | — | URL pública del Worker |
+| `WORKER_SHARED_SECRET` | Secreto aleatorio de al menos 32 caracteres; mismo valor que en Worker | Worker | Autenticación Bridge → Worker. No publicar el valor literal |
+| `APP_ACCESS_KEY` | Secreto aleatorio distinto, mínimo 32 caracteres | — | Bootstrap del primer administrador cuando no hay cuentas; no es la contraseña normal una vez creada la cuenta |
+| `SWARM_DATABASE_URL` | URL PostgreSQL de Neon, proyecto `billowing-scene-25888064`, rama de producción `br-holy-feather-b5q9c9yd`, base `swarm` | Worker | Cuentas, sesiones, invitaciones, claves API cifradas y propiedad de tareas. Mantener la URL completa privada |
+| `SWARM_API_ENCRYPTION_KEY` | 64 caracteres hexadecimales (32 bytes); mismo valor exacto en Bridge y Worker | Worker | Cifrado de claves API guardadas. No reutilizar `HISTORY_ENCRYPTION_KEY` |
+
+### Worker — servicio `swarm-worker-fgnz`
+
+| Variable | Valor/destino esperado | Compartida con | Uso |
+|---|---|---|---|
+| `NODE_ENV` | `production` | — | Modo de producción |
+| `PORT` | `3100` (Render puede proporcionar el puerto runtime) | — | Puerto HTTP del contenedor |
+| `WORKER_SHARED_SECRET` | Mismo secreto que `swarm-bridge`, mínimo 32 caracteres | Bridge | Autenticación entre servicios |
+| `DATABASE_URL` | **PostgreSQL dedicado al Swarm para tareas/checkpoints/historial**, no debe apuntar a una base de otra aplicación sin decisión explícita. La conexión efectiva debe verificarse en Render; nunca registrar la URL completa | — | Persistencia PostgreSQL de `jobs`, `job_request_idempotency` e historial cifrado |
+| `HISTORY_ENCRYPTION_KEY` | 64 caracteres hexadecimales (32 bytes), clave propia | — | Cifra/descifra los payloads de tareas e historial. Perderla impide recuperar los datos cifrados |
+| `SWARM_DATABASE_URL` | La misma URL Neon que Bridge: proyecto `billowing-scene-25888064`, rama `br-holy-feather-b5q9c9yd`, base `swarm` | Bridge | Acceso a cuentas y claves API administradas |
+| `SWARM_API_ENCRYPTION_KEY` | Mismo valor de 64 caracteres hexadecimales que Bridge | Bridge | Descifrado de claves API almacenadas |
+| `DATABASE_PATH` | `./data/swarm.sqlite` | — | Fuente SQLite heredada solo para importar datos locales si existe; no es el almacenamiento principal de producción |
+| `GEMINI_API_KEY` | Clave privada de Gemini en el Worker | — | Proveedor de IA principal cuando está configurado |
+| `GROQ_API_KEY` | Clave privada de Groq en el Worker | — | Proveedor alternativo |
+| `AI_FALLBACK_PROVIDERS` | JSON de proveedores adicionales; credenciales en variables aparte | — | Fallback de proveedores compatibles con OpenAI Chat Completions |
+| `WORKER_CONCURRENCY` | Entero entre 1 y 8; el código actual usa 1 por defecto | — | Máximo de tareas concurrentes |
+| `MAX_TASK_TOKENS` | Entero entre 4.000 y 1.000.000; por defecto 1.000.000 | — | Presupuesto acumulado por tarea |
+| `MAX_OUTPUT_TOKENS_PER_CALL` | Entero; el README del proyecto documenta 6.000 por defecto | — | Límite de salida por llamada |
+
+### Estado verificado y puntos pendientes
+
+- Render identifica el Bridge como `https://swarm-bridge.onrender.com` y el Worker como `https://swarm-worker-fgnz.onrender.com`; ambos tienen health check `/readyz`.
+- Los logs del Worker registraron `[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.` el 16 y 17 de octubre de 2026. Esto confirma conexión, pero el log no identifica la base destino.
+- La base Neon `swarm` de la rama indicada contiene tablas de cuentas. La base Neon `swarm_history` consultada no tenía tablas de usuario al momento de la revisión.
+- En Render existe una instancia PostgreSQL llamada `comite-database`, base `comite_database`, usuario `comite_database_user`, estado disponible, plan Free, región Ohio y allowlist de IP vacía. El conector no pudo inspeccionar sus tablas porque Render bloquea conexiones externas con esa allowlist. El nombre por sí solo **no demuestra que sea ajena al Swarm**: el propietario indicó que “Comité” era el nombre que había elegido para la estructura/consejo de agentes. Debe evaluarse por su contenido y referencias de configuración, no por el nombre.
+- En una conversación anterior se indicó que `DATABASE_URL` del Worker apuntaba a `comite-database`. La configuración activa no pudo leerse desde el conector, por lo que ese destino queda como dato histórico pendiente de reconfirmar; no se debe reemplazar automáticamente.
+- El código del Worker crea las tablas `jobs` y `job_request_idempotency` al iniciar en la base indicada por `DATABASE_URL`. Antes de cambiarla, verificar si `comite_database` contiene datos de tareas, checkpoints o tablas del sistema de agentes y hacer una copia de seguridad si corresponde.
+- **No cambiar ni borrar `comite-database` solo por el nombre.** Si resulta ser la base prevista para el Swarm, documentarla como tal y corregir este mapa. Si contiene datos compartidos o de otro sistema, no reutilizarla para el Worker sin migración planificada.
+- Los valores reales de secretos y URLs con credenciales no se imprimen en logs ni se versionan. Para confirmar el host/base efectiva, revisar de forma segura los detalles de la variable en Render o ejecutar una consulta de identidad desde el propio Worker que solo registre `current_database()`, `current_user` y el host saneado, nunca la URL ni la contraseña.
