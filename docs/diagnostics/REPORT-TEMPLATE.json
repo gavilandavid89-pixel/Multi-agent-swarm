@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "reportId": "uuid-or-stable-id",
+  "occurredAt": "2026-10-17T00:00:00.000Z",
+  "service": "agent-runner",
+  "environment": "test",
+  "severity": "error",
+  "category": "timeout",
+  "summary": "La prueba de navegador agotó el tiempo límite",
+  "error": {
+    "name": "TimeoutError",
+    "message": "Navigation timed out",
+    "stack": "sanitized stack trace"
+  },
+  "correlation": {
+    "taskId": "task-id",
+    "checkpoint": "browser-validation",
+    "requestId": "request-id",
+    "traceId": "trace-id"
+  },
+  "operation": {
+    "name": "browser-test",
+    "attempt": 1,
+    "elapsedMs": 20000,
+    "retryable": true,
+    "idempotencyKey": "run-id"
+  },
+  "runtime": {
+    "coldStartSuspected": true,
+    "serviceReady": false,
+    "httpStatus": 503
+  },
+  "reproduction": {
+    "steps": [
+      "Iniciar tarea de prueba",
+      "Abrir URL pública de staging"
+    ],
+    "expected": "La página termina de cargar",
+    "actual": "Timeout al esperar navegación"
+  },
+  "evidence": {
+    "logReferences": [
+      "log-reference"
+    ],
+    "artifactReferences": [
+      "artifact-reference"
+    ]
+  },
+  "triage": {
+    "status": "queued",
+    "attempts": 0,
+    "analysis": null,
+    "likelyCause": null,
+    "nextTests": [],
+    "resolvedAt": null
+  }
+}
