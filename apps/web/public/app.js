@@ -82,7 +82,23 @@ async function loadJobs({ append = false } = {}) {
 function renderConversation(data) {
   const conversation = $('conversation');
   const historyEntries = (Array.isArray(data.history) ? data.history : []).filter(entry => !(entry?.type === 'activity' && /termin[oó] su an[aá]lisis y comparti[oó] su respuesta|termin[oó] la revisi[oó]n; resultado de la auditor[ií]a a continuaci[oó]n/i.test(String(entry.content || ''))));
-  const entries = data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }, ...historyEntries] : historyEntries;
+  const voteRecords = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
+  const transcriptVoteIds = new Set(historyEntries.filter(entry => entry?.type === 'vote' && entry.voteId).map(entry => entry.voteId));
+  const liveVoteEntries = voteRecords.flatMap(vote => {
+    const ballots = (Array.isArray(vote.votes) ? vote.votes : []).map(ballot => ({
+      at: ballot.at || vote.createdAt || '', agent: ballot.agent || 'sistema', type: 'vote',
+      content: 'ARGUMENTO EN VOTACIÓN · ' + (ballot.vote || 'ABSTENERSE') + '\n' + (ballot.rationale || 'Sin justificación disponible.') + (ballot.error ? '\nNo respondió el proveedor: ' + ballot.error : '')
+    }));
+    const summary = vote.status !== 'running' && !transcriptVoteIds.has(vote.id) ? [{
+      at: vote.completedAt || vote.createdAt || '', agent: 'sistema', type: 'vote',
+      content: 'Votación de mejora: "' + String(vote.proposal || '').slice(0, 260) + '". Resultado: ' + (vote.outcome || 'SIN_VOTOS_VALIDOS') + '. ' + (vote.summary || 'Sin resumen disponible.')
+    }] : [];
+    return [...ballots, ...summary];
+  });
+  const entries = [
+    ...(data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }] : []),
+    ...historyEntries, ...liveVoteEntries
+  ].sort((a, b) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0));
   const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 48;
   const anchor = nearBottom ? null : [...conversation.querySelectorAll('[data-message-key]')].find(node => node.getBoundingClientRect().bottom > conversation.getBoundingClientRect().top + 2);
   const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
@@ -99,7 +115,7 @@ function renderConversation(data) {
     let node = existing.get(key);
     const isUser = ['vos', 'usuario', 'user', 'tú'].includes(agent.toLocaleLowerCase('es'));
     const isSystem = !isUser && (['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type));
-    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
+    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'vote' ? 'DEBATE' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
     const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
     if (!node) {
       node = document.createElement('article');
