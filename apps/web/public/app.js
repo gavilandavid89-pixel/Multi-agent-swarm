@@ -367,7 +367,7 @@ function renderImprovementVote(data) {
   if (!panel) return;
   const job = data.job || {};
   const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  const eligible = job.status === 'completed' || (job.status === 'needs_review' && !budgetPaused);
+  const eligible = ['queued', 'running', 'completed', 'failed'].includes(job.status) || (job.status === 'needs_review' && !budgetPaused);
   panel.classList.toggle('hidden', !eligible);
   if (!eligible) return;
   const votes = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
@@ -377,19 +377,19 @@ function renderImprovementVote(data) {
   if (!latest) {
     result.classList.add('hidden');
     result.innerHTML = '';
-    status.textContent = 'Votación opcional: usa hasta seis respuestas de agente y se registra por separado. La decisión final queda en tus manos.';
+    status.textContent = 'Podés convocar al comité sin detener la tarea. Los votos corren en segundo plano y consumen tokens adicionales; la decisión final queda en tus manos.';
     return;
   }
   result.classList.remove('hidden');
-  const title = latest.outcome === 'MAYORIA_A_FAVOR' ? 'Mayoría a favor' :
+  const title = latest.status === 'running' ? 'Votación en curso' : latest.outcome === 'MAYORIA_A_FAVOR' ? 'Mayoría a favor' :
     latest.outcome === 'MAYORIA_EN_CONTRA' ? 'Mayoría en contra' :
     latest.outcome === 'SIN_VOTOS_VALIDOS' ? 'Sin votos válidos' : 'Votación empatada';
-  const badgeClass = latest.outcome === 'MAYORIA_A_FAVOR' ? 'vote-support' :
+  const badgeClass = latest.status === 'running' ? 'vote-neutral' : latest.outcome === 'MAYORIA_A_FAVOR' ? 'vote-support' :
     latest.outcome === 'MAYORIA_EN_CONTRA' ? 'vote-oppose' : 'vote-neutral';
   const tally = latest.tally || {};
   const ballots = Array.isArray(latest.votes) ? latest.votes : [];
-  result.innerHTML = `<div class="vote-result-head"><div><p class="panel-kicker">RESULTADO ${escapeHtml(latest.status !== 'completed' ? 'INCOMPLETO' : 'REGISTRADO')}</p><h4>${escapeHtml(title)}</h4></div><span class="vote-outcome ${badgeClass}">${escapeHtml(latest.answered ?? 0)}/${escapeHtml(latest.total ?? ballots.length)} votos válidos</span></div><p class="vote-proposal">${escapeHtml(latest.proposal || '')}</p><p class="vote-summary">${escapeHtml(latest.summary || 'Sin resumen disponible.')}</p><div class="vote-tally"><span>A favor <strong>${Number(tally.APOYAR) || 0}</strong></span><span>En contra <strong>${Number(tally.RECHAZAR) || 0}</strong></span><span>Abstenciones <strong>${Number(tally.ABSTENERSE) || 0}</strong></span></div><div class="vote-ballots">${ballots.map(ballot => { const kind = ballot.vote === 'APOYAR' ? 'vote-support' : ballot.vote === 'RECHAZAR' ? 'vote-oppose' : 'vote-neutral'; return `<article class="vote-ballot"><div class="vote-ballot-head"><strong>${escapeHtml(ballot.agent || 'Agente')}</strong><span class="vote-choice ${kind}">${escapeHtml(ballot.vote || 'ABSTENERSE')}</span></div><p>${escapeHtml(ballot.rationale || 'Sin justificación.')}</p>${ballot.error ? `<p class="vote-error">No respondió el proveedor: ${escapeHtml(ballot.error)}</p>` : ''}</article>`; }).join('')}</div><p class="muted tiny">La votación es orientativa: no aplica ni confirma cambios. Tokens registrados en la etapa “Votación de mejora”.</p>`;
-  status.textContent = latest.status !== 'completed' ? 'La última votación fue parcial o no obtuvo respuestas válidas; revisá los errores. La misma propuesta no se repetirá automáticamente para evitar consumo duplicado.' : 'Última votación guardada. Podés someter otra propuesta; repetir la misma no consume tokens nuevamente.';
+  result.innerHTML = `<div class="vote-result-head"><div><p class="panel-kicker">${escapeHtml(latest.status === 'running' ? 'PROCESANDO EN SEGUNDO PLANO' : latest.status !== 'completed' ? 'RESULTADO INCOMPLETO' : 'RESULTADO REGISTRADO')}</p><h4>${escapeHtml(title)}</h4></div><span class="vote-outcome ${badgeClass}">${escapeHtml(latest.answered ?? 0)}/${escapeHtml(latest.total ?? ballots.length)} votos válidos</span></div><p class="vote-proposal">${escapeHtml(latest.proposal || '')}</p><p class="vote-summary">${escapeHtml(latest.summary || 'Sin resumen disponible.')}</p><div class="vote-tally"><span>A favor <strong>${Number(tally.APOYAR) || 0}</strong></span><span>En contra <strong>${Number(tally.RECHAZAR) || 0}</strong></span><span>Abstenciones <strong>${Number(tally.ABSTENERSE) || 0}</strong></span></div><div class="vote-ballots">${ballots.map(ballot => { const kind = ballot.vote === 'APOYAR' ? 'vote-support' : ballot.vote === 'RECHAZAR' ? 'vote-oppose' : 'vote-neutral'; return `<article class="vote-ballot"><div class="vote-ballot-head"><strong>${escapeHtml(ballot.agent || 'Agente')}</strong><span class="vote-choice ${kind}">${escapeHtml(ballot.vote || 'ABSTENERSE')}</span></div><p>${escapeHtml(ballot.rationale || 'Sin justificación.')}</p>${ballot.error ? `<p class="vote-error">No respondió el proveedor: ${escapeHtml(ballot.error)}</p>` : ''}</article>`; }).join('')}</div><p class="muted tiny">La votación es orientativa: no aplica ni confirma cambios. Tokens registrados en la etapa “Votación de mejora”.</p>`;
+  status.textContent = latest.status === 'running' ? 'Los agentes están votando en segundo plano. Podés seguir trabajando; el resultado aparecerá al actualizarse la tarea.' : latest.status !== 'completed' ? 'La última votación fue parcial o no obtuvo respuestas válidas; revisá los errores. La misma propuesta no se repetirá automáticamente para evitar consumo duplicado.' : 'Última votación guardada. Podés someter otra propuesta; repetir la misma no consume tokens nuevamente.';
 }
 function updateDetailView(data) {
   renderAgentMemory(data);
@@ -1052,14 +1052,14 @@ $('improvement-vote-form').addEventListener('submit', async event => {
   const button = $('improvement-vote-submit');
   button.disabled = true;
   button.textContent = 'Reuniendo votos…';
-  $('improvement-vote-status').textContent = 'Los seis agentes están evaluando la propuesta por turnos. Esto consume tokens adicionales; no cierres la tarea.';
+  $('improvement-vote-status').textContent = 'Votación iniciada en segundo plano. La tarea principal continúa sin interrupción; consume tokens adicionales.';
   try {
     const response = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/vote-improvement`, {
       method: 'POST', body: JSON.stringify({ proposal })
     });
     $('improvement-vote-status').textContent = response.reused
-      ? 'Ya existía una votación para esa propuesta; se recuperó sin consumir tokens.'
-      : 'Votación terminada. El resultado y las justificaciones están debajo.';
+      ? (response.started ? 'Esa votación ya está en curso; la tarea continúa sin pausa.' : 'Ya existía una votación para esa propuesta; se recuperó sin consumir tokens.')
+      : 'Votación iniciada. Podés seguir trabajando mientras los agentes responden.';
     if (!response.reused) $('improvement-vote-proposal').value = '';
     await updateSelectedDetail();
     await loadJobs();
@@ -1067,7 +1067,7 @@ $('improvement-vote-form').addEventListener('submit', async event => {
     $('improvement-vote-status').textContent = `No se pudo completar la votación: ${error.message}`;
   } finally {
     button.disabled = false;
-    button.textContent = 'Convocar votación ↗';
+    button.textContent = 'Convocar votación en segundo plano ↗';
   }
 });
 $('agent-reply-form').addEventListener('submit', async event => {
