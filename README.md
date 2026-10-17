@@ -135,3 +135,13 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 - El código del Worker crea las tablas `jobs` y `job_request_idempotency` al iniciar en la base indicada por `DATABASE_URL`. Antes de cambiarla, verificar si `comite_database` contiene datos de tareas, checkpoints o tablas del sistema de agentes y hacer una copia de seguridad si corresponde.
 - **No cambiar ni borrar `comite-database` solo por el nombre.** Si resulta ser la base prevista para el Swarm, documentarla como tal y corregir este mapa. Si contiene datos compartidos o de otro sistema, no reutilizarla para el Worker sin migración planificada.
 - Los valores reales de secretos y URLs con credenciales no se imprimen en logs ni se versionan. Para confirmar el host/base efectiva, revisar de forma segura los detalles de la variable en Render o ejecutar una consulta de identidad desde el propio Worker que solo registre `current_database()`, `current_user` y el host saneado, nunca la URL ni la contraseña.
+
+
+## Diagnóstico seguro del esquema PostgreSQL (temporal)
+
+- En el arranque, el Worker ejecuta una inspección de solo lectura **antes** de inicializar/crear sus tablas. Registra el resultado bajo `[worker][database_schema_diagnostic]`.
+- El diagnóstico informa `current_database()`, `current_user`, dirección/puerto del servidor PostgreSQL y el inventario de tablas propias de usuario con columnas, tipos y nulabilidad. No consulta ni imprime filas de negocio, payloads cifrados, contraseñas, URL de conexión ni claves.
+- Si la inspección falla, solo registra un código de error saneado bajo `[worker][database_schema_diagnostic_failed]`; el Worker continúa con su inicialización habitual.
+- Este registro permite verificar si `DATABASE_URL` del Worker apunta a `comite_database` y descubrir el esquema existente sin abrir el endpoint de diagnóstico al público ni cambiar la allowlist de la base.
+- **Temporalidad y limpieza:** una vez recogido el inventario desde los logs privados de Render y documentado el resultado real, retirar `inspectStoreSchema()`, su importación y la llamada de arranque, volver a desplegar y conservar en este README únicamente los hallazgos verificados. Revisar el log para asegurarse de que no aparezcan datos de filas; el diagnóstico diseñado solo emite metadatos de esquema.
+- La función `initStore()` ya crea `jobs`, índices de fecha/actualización y `job_request_idempotency` en la base de `DATABASE_URL`. Por eso es importante inspeccionar antes de llamar a `initStore()`; la existencia de esas tablas por sí sola no prueba que la base sea exclusiva del Swarm.
