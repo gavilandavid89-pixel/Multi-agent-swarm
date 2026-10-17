@@ -154,4 +154,28 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 - La votación es consultiva: no aplica cambios ni sustituye aprobación humana para acciones de impacto.
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
 - Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
-- El resultado aparece al refrescar el detalle de la tarea. Si el proceso del Worker se reinicia durante la votación, el registro puede quedar en estado `running`; una futura mejora debe incluir recuperación de votaciones abandonadas al arrancar.
+- Los argumentos se guardan de forma incremental en el historial cifrado y aparecen con el sondeo del chat. La deliberación tiene un límite de 60 segundos controlado por el Worker y puede cerrar con resultado parcial si no llegan todas las respuestas. La recuperación automática de deliberaciones abandonadas tras reinicios sigue pendiente.
+
+
+## Deliberación visible del comité
+
+La votación consultiva muestra una franja azul marino con contorno amarillo, el tema de la propuesta y un contador de hasta 60 segundos. Mientras está activa, el chat adopta una paleta azul para distinguir los mensajes del debate. El tema vuelve al aspecto normal cuando la votación termina.
+
+- Cada argumento recibido se guarda en el payload cifrado de la tarea y en el transcript, de modo que el chat puede mostrar avances sin esperar a que terminen los seis agentes.
+- El límite de tiempo se calcula y valida en el Worker, no depende del reloj del navegador. Al agotarse, el resultado se cierra con las respuestas disponibles y se marca como parcial cuando faltan agentes.
+- La votación sigue siendo consultiva y no edita archivos ni aplica decisiones automáticamente. El objetivo original de la tarea continúa teniendo prioridad.
+- La deliberación implementada actualmente es no bloqueante: no pausa la tarea principal. Una pausa real debe integrarse con los puntos seguros del motor, guardar un checkpoint antes de detenerse y reanudar desde ese checkpoint; no se debe simular la pausa cambiando solo el estado visible porque el motor activo podría sobrescribirlo.
+- La fecha límite cierra la deliberación, pero el cliente de proveedor actual no expone cancelación común para todas las APIs. Una solicitud ya enviada puede seguir terminando en el proveedor después del cierre; el sistema no debe prometer que ese cierre cancela el consumo del proveedor.
+- La recuperación de un registro que quedó en curso tras un reinicio del Worker, la coordinación de propuestas autónomas sin intervención del usuario y la pausa/reanudación real son trabajo pendiente. Hasta que esas rutas estén implementadas y probadas, no se presentan como funciones activas.
+
+### Flujo objetivo para coordinación autónoma
+
+1. El motor conserva el objetivo original, requisitos no negociables, archivos y último checkpoint.
+2. Un agente puede proponer una decisión técnica con impacto, riesgo, coste estimado y criterios verificables.
+3. Si la propuesta no bloquea el avance, el trabajo puede continuar mientras el comité delibera. Si existe un conflicto que impide avanzar, la futura integración debe pausar únicamente en un checkpoint seguro.
+4. La franja informa el tipo de debate y el tiempo restante. Los argumentos y votos se guardan a medida que llegan.
+5. Al cerrar el minuto, el Árbitro resume los argumentos disponibles. El resultado registra votos, fundamento, incertidumbre y pruebas requeridas; no se interpreta la mayoría como garantía de corrección.
+6. Las decisiones se adjuntan como contexto estructurado a las siguientes etapas y a las tareas de continuación. El objetivo del usuario nunca se sustituye por una propuesta del comité.
+7. Solo cambios de bajo riesgo, reversibles y comprobables podrán optar en el futuro a una autorización automática. Seguridad, secretos, permisos, borrado de datos, gastos, despliegues y requisitos explícitos del usuario necesitan controles reforzados o aprobación humana.
+
+Estados de referencia para la evolución: `proposed`, `reviewing`, `approved`, `rejected`, `needs_human`, `implementing`, `validating`, `applied`, `rolled_back` y `failed`. Deben persistirse junto con el identificador de debate, propuesta, argumentos, decisión, riesgos, pruebas y resultado de validación. Las propuestas repetidas deben deduplicarse y respetar límites de frecuencia y presupuesto.
