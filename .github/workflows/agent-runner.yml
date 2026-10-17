@@ -1,0 +1,40 @@
+name: Agent runner checks
+permissions:
+  contents: read
+concurrency:
+  group: agent-runner-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+on:
+  pull_request:
+    paths:
+      - 'apps/runner/**'
+      - 'apps/worker/services/agentRunnerClient.js'
+      - 'apps/worker/services/codeChecks.js'
+      - '.github/workflows/agent-runner.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/runner/**'
+      - 'apps/worker/services/agentRunnerClient.js'
+      - 'apps/worker/services/codeChecks.js'
+      - '.github/workflows/agent-runner.yml'
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Test runner source
+        working-directory: apps/runner
+        run: |
+          npm install --no-save --no-package-lock --no-audit --no-fund express@^4.21.2
+          npm run check
+      - name: Check worker syntax
+        run: |
+          node --check apps/worker/services/agentRunnerClient.js
+          node --check apps/worker/services/codeChecks.js
+      - name: Build runner container
+        run: docker build -f apps/runner/Dockerfile apps/runner
