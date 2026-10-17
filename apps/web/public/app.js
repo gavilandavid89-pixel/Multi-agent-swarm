@@ -82,7 +82,23 @@ async function loadJobs({ append = false } = {}) {
 function renderConversation(data) {
   const conversation = $('conversation');
   const historyEntries = (Array.isArray(data.history) ? data.history : []).filter(entry => !(entry?.type === 'activity' && /termin[oó] su an[aá]lisis y comparti[oó] su respuesta|termin[oó] la revisi[oó]n; resultado de la auditor[ií]a a continuaci[oó]n/i.test(String(entry.content || ''))));
-  const entries = data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }, ...historyEntries] : historyEntries;
+  const voteRecords = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
+  const transcriptVoteIds = new Set(historyEntries.filter(entry => entry?.type === 'vote' && entry.voteId).map(entry => entry.voteId));
+  const liveVoteEntries = voteRecords.flatMap(vote => {
+    const ballots = (Array.isArray(vote.votes) ? vote.votes : []).map(ballot => ({
+      at: ballot.at || vote.createdAt || '', agent: ballot.agent || 'sistema', type: 'vote',
+      content: 'ARGUMENTO EN VOTACIÓN · ' + (ballot.vote || 'ABSTENERSE') + '\n' + (ballot.rationale || 'Sin justificación disponible.') + (ballot.error ? '\nNo respondió el proveedor: ' + ballot.error : '')
+    }));
+    const summary = vote.status !== 'running' && !transcriptVoteIds.has(vote.id) ? [{
+      at: vote.completedAt || vote.createdAt || '', agent: 'sistema', type: 'vote',
+      content: 'Votación de mejora: "' + String(vote.proposal || '').slice(0, 260) + '". Resultado: ' + (vote.outcome || 'SIN_VOTOS_VALIDOS') + '. ' + (vote.summary || 'Sin resumen disponible.')
+    }] : [];
+    return [...ballots, ...summary];
+  });
+  const entries = [
+    ...(data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }] : []),
+    ...historyEntries, ...liveVoteEntries
+  ].sort((a, b) => (Date.parse(a.at || '') || 0) - (Date.parse(b.at || '') || 0));
   const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 48;
   const anchor = nearBottom ? null : [...conversation.querySelectorAll('[data-message-key]')].find(node => node.getBoundingClientRect().bottom > conversation.getBoundingClientRect().top + 2);
   const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
@@ -99,7 +115,7 @@ function renderConversation(data) {
     let node = existing.get(key);
     const isUser = ['vos', 'usuario', 'user', 'tú'].includes(agent.toLocaleLowerCase('es'));
     const isSystem = !isUser && (['sistema', 'Validador determinista'].includes(agent) || ['retry','error','check'].includes(type));
-    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
+    const label = type === 'thinking' ? 'TRABAJANDO' : type === 'vote' ? 'DEBATE' : type === 'activity' ? 'ACTIVIDAD' : type === 'retry' ? 'REINTENTO' : type === 'error' ? 'ERROR' : type === 'check' ? 'COMPROBACIÓN' : type === 'usage' ? 'TOKENS' : type === 'budget' ? 'PRESUPUESTO' : 'MENSAJE';
     const icon = agentIcons[agent] || (isSystem ? '✳' : '◈');
     if (!node) {
       node = document.createElement('article');
@@ -372,6 +388,18 @@ function renderImprovementVote(data) {
   if (!eligible) return;
   const votes = Array.isArray(data.improvementVotes) ? data.improvementVotes : [];
   const latest = votes[votes.length - 1];
+  const debateBanner = $('committee-debate-banner');
+  const debateActive = latest?.status === 'running';
+  document.body.classList.toggle('committee-debate-active', Boolean(debateActive));
+  if (debateBanner) {
+    debateBanner.classList.toggle('hidden', !debateActive);
+    if (debateActive) {
+      $('committee-debate-label').textContent = latest.kind === 'proposal' ? 'Propuesta en curso' : 'Votación en curso';
+      $('committee-debate-proposal').textContent = String(latest.proposal || 'El comité está deliberando.').slice(0, 220);
+      const secondsLeft = Math.max(0, Math.ceil((Date.parse(latest.deadlineAt || latest.createdAt || '') - Date.now()) / 1000));
+      $('committee-debate-timer').textContent = String(Math.floor(secondsLeft / 60)).padStart(2, '0') + ':' + String(secondsLeft % 60).padStart(2, '0');
+    }
+  }
   const result = $('improvement-vote-result');
   const status = $('improvement-vote-status');
   if (!latest) {
@@ -1051,15 +1079,15 @@ $('improvement-vote-form').addEventListener('submit', async event => {
   if (!proposal) return;
   const button = $('improvement-vote-submit');
   button.disabled = true;
-  button.textContent = 'Reuniendo votos…';
-  $('improvement-vote-status').textContent = 'Votación iniciada en segundo plano. La tarea principal continúa sin interrupción; consume tokens adicionales.';
+  button.textContent = 'Iniciando deliberación…';
+  $('improvement-vote-status').textContent = 'Deliberación iniciada. Los argumentos aparecerán en el chat; el cierre es de hasta 60 segundos y consume tokens adicionales.';
   try {
     const response = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/vote-improvement`, {
       method: 'POST', body: JSON.stringify({ proposal })
     });
     $('improvement-vote-status').textContent = response.reused
       ? (response.started ? 'Esa votación ya está en curso; la tarea continúa sin pausa.' : 'Ya existía una votación para esa propuesta; se recuperó sin consumir tokens.')
-      : 'Votación iniciada. Podés seguir trabajando mientras los agentes responden.';
+      : 'Deliberación iniciada. Podés ver cómo llegan los argumentos mientras la tarea sigue trabajando.';
     if (!response.reused) $('improvement-vote-proposal').value = '';
     await updateSelectedDetail();
     await loadJobs();
@@ -1067,7 +1095,7 @@ $('improvement-vote-form').addEventListener('submit', async event => {
     $('improvement-vote-status').textContent = `No se pudo completar la votación: ${error.message}`;
   } finally {
     button.disabled = false;
-    button.textContent = 'Convocar votación en segundo plano ↗';
+    button.textContent = 'Iniciar votación (máx. 60 s) ↗';
   }
 });
 $('agent-reply-form').addEventListener('submit', async event => {

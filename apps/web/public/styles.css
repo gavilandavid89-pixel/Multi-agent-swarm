@@ -159,7 +159,7 @@ textarea::placeholder,input::placeholder{color:#92989e}
 #detail-panel>.section-head{margin-bottom:7px}
 #detail-title{color:#f0f1f2}
 .detail-actions #copy-detail{display:none}
-.task-status,.progress-track,.token-budget,.detail-hint,#improvement-vote-panel,.agent-reply-panel{display:none!important}
+.task-status,.progress-track,.token-budget,.detail-hint,.agent-reply-panel{display:none!important}
 #conversation{display:flex;flex-direction:column;gap:13px;max-height:none;flex:1;min-height:260px;overflow:auto;padding:10px 3px 18px;scroll-behavior:smooth}
 .chat-message{max-width:92%;gap:9px}
 .message-body{background:#2f3432;border:1px solid #d4b55a;border-radius:5px 16px 16px 16px;padding:12px 15px}
@@ -552,3 +552,25 @@ body:not(.auth-gate) .agent-vos .agent-avatar { background:#3b7454;color:#e0ffe9
 .jump-to-latest.hidden { display:none!important; }
 .jump-to-latest:active { transform:translateX(-50%) scale(.98); }
 body:not(.auth-gate) .files-drawer iframe { max-width:100%; }
+
+
+/* Live committee deliberation: navy chat surface with yellow outlined timer banner. */
+.committee-debate-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;padding:13px 15px;border:2px solid #f2cc54;border-radius:13px;background:linear-gradient(110deg,#06172b,#0b2d4a 58%,#0b2440);box-shadow:0 0 0 1px #f2cc5418,0 8px 28px #020b18a8;color:#eef7ff}
+.committee-debate-banner-main{display:flex;align-items:center;gap:11px;min-width:0}
+.committee-debate-banner-main>div{min-width:0}
+.committee-debate-banner strong{display:block;font-size:13px;letter-spacing:.2px}
+#committee-debate-proposal{margin:3px 0 0;color:#bcd8ed;font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+.committee-debate-pulse{width:10px;height:10px;flex:0 0 10px;border-radius:50%;background:#56c7ff;box-shadow:0 0 0 5px #56c7ff22;animation:committee-pulse 1.4s ease-in-out infinite}
+.committee-debate-timer{flex:0 0 auto;padding:7px 10px;border:1px solid #f2cc54;border-radius:9px;background:#031426;color:#ffe58a;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:.8px}
+@keyframes committee-pulse{50%{opacity:.45;box-shadow:0 0 0 8px #56c7ff10}}
+body.committee-debate-active{background:radial-gradient(ellipse at 12% 0%,#12395b 0,transparent 44%),radial-gradient(ellipse at 100% 40%,#0b3151 0,transparent 40%),linear-gradient(145deg,#061321,#0b2034 55%,#071523)!important}
+body.committee-debate-active #detail-panel{background:linear-gradient(145deg,rgba(7,32,54,.98),rgba(5,20,36,.98));border-color:#3477a4}
+body.committee-debate-active #conversation{background:linear-gradient(180deg,#06182a,#0a2740);border:1px solid #3477a45c;border-radius:13px;padding:12px}
+body.committee-debate-active #conversation .message-body{background:#103653;border-color:#397da5}
+body.committee-debate-active #conversation .system-message .message-body{background:#08243a;border-color:#e3bd4a}
+body.committee-debate-active #conversation .message-text{color:#e1f1fc}
+body.committee-debate-active #conversation .message-heading strong{color:#8bd6ff}
+body.committee-debate-active #conversation .message-heading span{color:#f2d56f;border-color:#f2d56f55}
+body.committee-debate-active #conversation .agent-avatar{background:#124568;border-color:#4c9dc7;color:#d9f3ff}
+body.committee-debate-active .committee-debate-banner{position:relative}
+@media(max-width:600px){.committee-debate-banner{align-items:flex-start;padding:11px;gap:8px}.committee-debate-timer{font-size:14px;padding:6px 8px}#committee-debate-proposal{font-size:10px}}

@@ -5,7 +5,7 @@ import { initStore, createJob, createContinuationJob, getJob, getPayload, histor
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
-import { voteOnImprovement } from './services/improvementVoting.js';
+import { voteOnImprovement, recoverInterruptedVotes } from './services/improvementVoting.js';
 import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider, closeUserProvidersStore } from './services/userProviders.js';
 
 const app = express();
@@ -202,6 +202,7 @@ function shutdown() {
 process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 async function start() {
   await initStore();
+  await recoverInterruptedVotes().catch(error => console.warn('[worker][improvement_vote_recovery_deferred]', error?.message || error));
   server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`[worker] escuchando en 0.0.0.0:${PORT}; concurrencia=${MAX_CONCURRENCY}`);
     const provider = process.env.GEMINI_API_KEY ? 'Gemini' : (process.env.GROQ_API_KEY ? 'Groq' : 'ninguno');

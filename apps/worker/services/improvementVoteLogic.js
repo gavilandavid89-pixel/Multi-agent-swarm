@@ -14,6 +14,15 @@ export function parseImprovementVote(value) {
   return { vote, validFormat: Boolean(match), rationale: rationale || (match ? 'El agente no proporcionó argumentos adicionales.' : 'El agente no entregó un voto en el formato esperado.') };
 }
 
+export function findReusableImprovementVote(votes = [], proposal = '') {
+  const normalized = String(proposal || '').trim().toLocaleLowerCase();
+  if (!normalized) return null;
+  return [...(Array.isArray(votes) ? votes : [])].reverse().find(item =>
+    String(item?.proposal || '').trim().toLocaleLowerCase() === normalized &&
+    ['completed', 'partial'].includes(item?.status)
+  ) || null;
+}
+
 export function summarizeImprovementVotes(votes = []) {
   const tally = { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 };
   for (const item of Array.isArray(votes) ? votes : []) {

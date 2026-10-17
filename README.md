@@ -10,8 +10,25 @@
 - `apps/bridge`: API pública con sesiones por usuario, registro por invitación y aislamiento de tareas; reenvía las tareas al worker usando `WORKER_SHARED_SECRET`. `APP_ACCESS_KEY` solo crea el primer administrador cuando aún no hay cuentas.
 - `apps/worker`: cola de tareas, agentes de arquitectura, auditoría escéptica, arbitraje, coordinación de coherencia entre archivos, desarrollo y validación. La imagen Docker incluye Chromium + Xvfb para comprobaciones de humo de HTML generado.
 - `apps/worker/services/store.js`: historial comprimido y cifrado con AES-256-GCM en PostgreSQL; las escrituras de consumo de tokens se serializan y deduplican transaccionalmente.
-- `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 15 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
+- `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 30 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
 - `render.yaml`: definición inicial de los servicios separados en Render.
+
+## Runner virtual exclusivo para agentes (no visible al usuario)
+
+El entorno de ejecución de los agentes es independiente de la vista previa de la aplicación. **No se muestra ni se transmite al navegador del usuario**: los agentes pueden usar Chromium con Xvfb en una sesión gráfica virtual para abrir páginas, inspeccionar estados visuales, hacer capturas y comprobar interacciones. Xvfb proporciona pantalla virtual; por sí solo no es un sandbox ni una política de red.
+
+### Arquitectura requerida
+
+- **Runner de agentes:** entorno efímero por tarea, con código y dependencias de prueba aislados; salida de consola, errores, duración y resultado devueltos al orquestador.
+- **Herramientas visuales:** Chromium + Xvfb dentro del runner para pruebas headless/visuales, capturas y automatización. Los artefactos visuales se guardan como resultados de la tarea y solo se muestran al usuario si la interfaz decide presentarlos.
+- **Red de salida del runner:** acceso a Internet necesario para instalar dependencias y consultar documentación/APIs públicas, mediante una pasarela/proxy controlado. Política inicial: HTTPS permitido con límites de tiempo y descarga; bloquear loopback, IP privadas, link-local, metadata de nube, redes internas y servicios de producción. Revalidar destino tras DNS y redirecciones; el filtrado de URL por sí solo no es suficiente.
+- **Separación de secretos:** no heredar variables del proceso del Worker ni credenciales de producción. Usar credenciales temporales de mínimo privilegio solo cuando una prueba lo requiera expresamente; nunca imprimir cabeceras de autorización o tokens.
+- **Límites operativos:** ejecución como usuario sin privilegios, filesystem temporal, límites de CPU/memoria/procesos/descarga, timeout por prueba, límites de salida y limpieza incluso si se interrumpe la tarea.
+- **Vista previa del usuario:** sigue siendo un componente distinto. La política de red del runner no debe habilitar automáticamente acceso de red en HTML generado o en la vista previa pública.
+
+### Estado actual (importante)
+
+La imagen del Worker incluye Chromium + Xvfb y `codeChecks.js` usa ese entorno para un smoke test aislado de HTML. **Eso no equivale todavía a un runner general para ejecutar código arbitrario de los agentes con salida a Internet controlada.** La arquitectura descrita arriba es el objetivo de implementación, no una capacidad que deba considerarse desplegada. No habilitar red indiscriminada en el proceso actual de Chromium: el control real debe imponerse en el límite del contenedor/runner y su pasarela de red.
 
 ## Desarrollo local
 
@@ -147,11 +164,107 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 - El esquema coincide con el almacén de tareas/checkpoints del Worker. No hay tablas explícitas de integrantes, deliberaciones o votos; eso no prueba que no haya datos relacionados con el consejo dentro de payloads cifrados. No se leyeron ni descifraron filas de negocio.
 - La inspección temporal fue retirada del código tras recoger los metadatos; no cambió datos ni esquema. No renombrar, vaciar, migrar ni cambiar la URL de esta base sin definir la arquitectura y verificar una copia de seguridad.
 
-## Votación del comité sin interrumpir tareas
+## Votación del comité con checkpoint seguro
 
-El botón **Convocar votación en segundo plano** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los votos se ejecutan en segundo plano, usan tokens adicionales y se guardan dentro del historial cifrado de la tarea. La tarea principal no se pausa ni se modifica por votar.
+El botón **Iniciar votación** registra la propuesta y devuelve el control a la interfaz sin esperar los seis modelos. Los argumentos se guardan de forma incremental. Si la tarea está activa, el motor espera en el siguiente checkpoint seguro hasta que cierre la deliberación, y después continúa desde ese punto.
 
 - La votación es consultiva: no aplica cambios ni sustituye aprobación humana para acciones de impacto.
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
-- Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
-- El resultado aparece al refrescar el detalle de la tarea. Si el proceso del Worker se reinicia durante la votación, el registro puede quedar en estado `running`; una futura mejora debe incluir recuperación de votaciones abandonadas al arrancar.
+- Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens. Si una votación termina fallida sin votos válidos, se permite reintentar esa propuesta; las votaciones completadas o parciales siguen siendo reutilizables.
+- Los argumentos se guardan de forma incremental en el historial cifrado y aparecen con el sondeo del chat. Las escrituras de votos que llegan en paralelo se serializan para evitar que una respuesta sobrescriba otra por una carrera de lectura/escritura. La política de reutilización está aislada en una función determinista y cuenta con pruebas de regresión para formato, conteo, votos fallidos y reintentos. La deliberación tiene un límite de 60 segundos controlado por el Worker y puede cerrar con resultado parcial si no llegan todas las respuestas. Al arrancar, el Worker cierra como parcial o fallida toda votación que seguía en curso antes del reinicio, usando los argumentos ya guardados, y limpia la marca de pausa. Así no queda una tarea esperando una votación cuyo proceso ya no existe.
+
+
+## Deliberación visible del comité
+
+La votación consultiva muestra una franja azul marino con contorno amarillo, el tema de la propuesta y un contador de hasta 60 segundos. Mientras está activa, el chat adopta una paleta azul para distinguir los mensajes del debate. El tema vuelve al aspecto normal cuando la votación termina.
+
+- Cada argumento recibido se guarda en el payload cifrado de la tarea y en el transcript, de modo que el chat puede mostrar avances sin esperar a que terminen los seis agentes.
+- El límite de tiempo se calcula y valida en el Worker, no depende del reloj del navegador. Al agotarse, el resultado se cierra con las respuestas disponibles y se marca como parcial cuando faltan agentes.
+- La votación sigue siendo consultiva y no edita archivos ni aplica decisiones automáticamente. El objetivo original de la tarea continúa teniendo prioridad.
+- La pausa ocurre en el siguiente checkpoint del motor, no interrumpe una llamada de IA a mitad de ejecución. La tarea conserva su checkpoint y reanuda cuando la votación termina. Hay un límite operativo de espera para evitar bloqueos indefinidos.
+- La fecha límite cierra la deliberación, pero el cliente de proveedor actual no expone cancelación común para todas las APIs. Una solicitud ya enviada puede seguir terminando en el proveedor después del cierre; el sistema no debe prometer que ese cierre cancela el consumo del proveedor.
+- Al iniciar el Worker, toda deliberación que seguía en curso se cierra como parcial o fallida, incluso si su plazo todavía no había vencido, porque el proceso que la atendía ya no existe. La coordinación autónoma de nuevas propuestas y la cancelación real de llamadas de proveedor siguen pendientes.
+
+### Flujo objetivo para coordinación autónoma
+
+1. El motor conserva el objetivo original, requisitos no negociables, archivos y último checkpoint.
+2. Un agente puede proponer una decisión técnica con impacto, riesgo, coste estimado y criterios verificables.
+3. Si la propuesta no bloquea el avance, el trabajo puede continuar mientras el comité delibera. Si existe un conflicto que impide avanzar, la futura integración debe pausar únicamente en un checkpoint seguro.
+4. La franja informa el tipo de debate y el tiempo restante. Los argumentos y votos se guardan a medida que llegan.
+5. Al cerrar el minuto, el Árbitro resume los argumentos disponibles. El resultado registra votos, fundamento, incertidumbre y pruebas requeridas; no se interpreta la mayoría como garantía de corrección.
+6. Las decisiones se adjuntan como contexto estructurado a las siguientes etapas y a las tareas de continuación. El objetivo del usuario nunca se sustituye por una propuesta del comité.
+7. Solo cambios de bajo riesgo, reversibles y comprobables podrán optar en el futuro a una autorización automática. Seguridad, secretos, permisos, borrado de datos, gastos, despliegues y requisitos explícitos del usuario necesitan controles reforzados o aprobación humana.
+
+Estados de referencia para la evolución: `proposed`, `reviewing`, `approved`, `rejected`, `needs_human`, `implementing`, `validating`, `applied`, `rolled_back` y `failed`. Deben persistirse junto con el identificador de debate, propuesta, argumentos, decisión, riesgos, pruebas y resultado de validación. Las propuestas repetidas deben deduplicarse y respetar límites de frecuencia y presupuesto.
+
+## Política de eficiencia de contexto y tokens
+
+El objetivo es evitar que cada agente vuelva a pagar por leer toda la conversación, todos los archivos y todas las decisiones en cada llamada. **Persistir contexto no significa reenviarlo completo al modelo.** El historial sirve para recuperar el trabajo; cada llamada debe recibir solo lo necesario para su etapa.
+
+### Protecciones que existen actualmente
+
+- El worker registra los tokens de entrada/salida reportados por el proveedor y deduplica cada evento de uso. Si el proveedor no informa el uso, se registra la llamada sin inventar una cantidad.
+- Antes de cada llamada se estima el tamaño de entrada y se reserva ese margen del presupuesto restante para limitar la salida solicitada. Es una guardia aproximada, no una medición exacta.
+- `MAX_TASK_TOKENS` limita el presupuesto acumulado por tarea; `MAX_OUTPUT_TOKENS_PER_CALL` limita la salida por llamada. Los valores por defecto documentados actualmente son altos (1.000.000 por tarea y 6.000 de salida por llamada), por lo que no deben interpretarse como objetivos de consumo ni como límites económicos recomendados.
+- Las fases completadas se guardan como checkpoints y normalmente se omiten al reanudar. Las correcciones intentan seleccionar los archivos citados por los hallazgos, en vez de corregir todo el proyecto.
+- El comité limita la propuesta y los resúmenes de contexto, conserva solo un conjunto pequeño de decisiones recientes y solicita respuestas cortas. La votación usa cinco especialistas en paralelo, cierra la recepción alrededor del segundo 40 y reserva la ventana de los segundos 40–50 para que el Árbitro sintetice; los últimos 10 segundos quedan como margen para persistir y devolver el resultado. Esto es un presupuesto de tiempo, no una garantía de que un proveedor responda: las solicitudes ya enviadas no se pueden cancelar con la carrera temporal y podrían seguir consumiendo tokens. La síntesis del Árbitro es una llamada adicional, por lo que mejora el uso del tiempo pero no necesariamente reduce el coste de una votación.
+- Las tareas de continuación conservan el estado y la entrega para no reiniciar todo el flujo desde cero. El presupuesto de una tarea hija es independiente: hay que revisar el gasto acumulado de toda la cadena, no solo el saldo de la tarea actual.
+
+### Regla de diseño para los agentes
+
+1. **Objetivo inmutable, contexto mínimo:** mantener el pedido original y los requisitos explícitos como una referencia breve y estable; no volver a enviar la transcripción completa.
+2. **Memoria por etapa:** pasar al agente actual un resumen estructurado, las decisiones que afectan su trabajo, los contratos entre módulos relevantes y solo los fragmentos/archivos necesarios. No incluir automáticamente toda la salida de agentes anteriores.
+3. **Resumen incremental:** actualizar un resumen de trabajo con decisiones, motivos, restricciones, archivos modificados, pruebas pendientes y checkpoint. Evitar anexar repetidamente el mismo texto al resumen.
+4. **Lectura selectiva:** auditar y reparar por archivo o lote acotado; cargar un archivo completo solo cuando sea necesario. No mandar toda la entrega a cada agente si puede identificarse el subconjunto relevante.
+5. **Presupuesto antes de llamar:** estimar entrada + reservar margen de salida; si no cabe, reducir contexto, dividir el trabajo o pausar para revisión. No lanzar llamadas que claramente excedan el saldo.
+6. **Salida proporcional:** pedir formatos concretos y respuestas breves para clasificación, votos y auditorías; reservar salidas largas para código o entregables que lo requieren.
+7. **Sin llamadas duplicadas:** reutilizar checkpoints y resultados persistidos cuando la entrada no cambió. Reintentar solo ante errores recuperables y respetar cooldowns.
+8. **Medición por agente y etapa:** comparar tokens de entrada/salida, llamadas, reintentos, respuestas tardías y resultados útiles. No evaluar eficiencia solo por el total de tokens.
+9. **Límite global de la cadena:** la continuación no debe esconder el consumo histórico. Antes de crear nuevas tareas, mostrar el acumulado y exigir una decisión cuando el gasto total alcance el umbral de seguridad configurado.
+10. **No sacrificar calidad a ciegas:** reducir contexto mediante resúmenes verificables y referencias selectivas, no eliminando requisitos originales, advertencias de seguridad o contratos necesarios.
+
+### Limitación conocida / siguiente mejora
+
+Estas reglas son el objetivo de arquitectura, no una afirmación de que todas estén implementadas de punta a punta. Hoy el motor persiste checkpoints, reserva presupuesto por llamada y registra uso. Se redujeron los límites de contexto enviados entre varios roles (propuesta, crítica, estrategia, mapa de coherencia y entrega de reparación), conservando el inicio y el final del contenido para disminuir repeticiones sin perder siempre la conclusión. Aun así, varias etapas siguen pasando resultados anteriores dentro de esos límites y las continuaciones conservan la entrega previa. En tareas grandes, el diseño todavía puede repetir tokens de entrada aunque el historial esté guardado.
+
+**Próximo trabajo recomendado:** introducir un `contextBuilder` por rol y etapa con límites configurables, resúmenes incrementales y selección de archivos; registrar los tokens ahorrados frente al contexto anterior; agregar pruebas que comprueben que el contexto enviado no contiene transcripciones ni archivos irrelevantes; y bajar el presupuesto predeterminado de producción solo después de medir tareas representativas. No se debe considerar validada esta optimización hasta comprobar los tokens reales reportados por el proveedor.
+
+### Configuración prudente
+
+- Para limitar gasto durante pruebas, configurar `MAX_TASK_TOKENS` con un valor menor al máximo permitido y observar las tareas reales antes de subirlo.
+- Mantener `MAX_OUTPUT_TOKENS_PER_CALL` tan bajo como permita el tipo de tarea; las respuestas de código necesitan más margen que una clasificación o un voto.
+- Revisar el panel de consumo por modelo, agente, etapa e interacción después de cada prueba.
+- No ejecutar pruebas E2E de producción repetidamente sin intención: crean tareas reales y pueden consumir tokens.
+- No confundir el límite de tokens con un límite monetario: el coste depende del proveedor, del modelo y de sus tarifas de entrada/salida.
+
+## Entorno virtual reforzado para pruebas de agentes
+
+Las comprobaciones automáticas deben ejecutarse en CI o en un contenedor de prueba, nunca con credenciales reales ni acceso innecesario a servicios de producción.
+
+- **Aislamiento visual:** Chromium se ejecuta bajo Xvfb para probar HTML sin depender de una pantalla física. El smoke test verifica que la página se abra y que no aparezcan excepciones JavaScript observables; la prueba de layout comprueba contratos clave de la interfaz en Chromium.
+- **Aislamiento de red del navegador de entregas:** el validador de HTML bloquea la resolución DNS y configura un proxy local no enrutable para evitar que la vista previa acceda a destinos externos. Esto reduce el riesgo, pero no equivale a un sandbox de sistema operativo ni debe tratarse como una barrera contra código hostil por sí sola.
+- **Directorio temporal por ejecución:** los archivos de una entrega se copian a un directorio temporal, con permisos restrictivos, y se eliminan al terminar. Las rutas absolutas y los segmentos de traversal no se aceptan al extraer archivos de la entrega.
+- **Límite de tiempo:** la prueba del navegador tiene un tope de 30 segundos y mata el grupo de procesos al vencer. CI tiene un límite total de 15 minutos para que un proceso bloqueado no deje la validación esperando indefinidamente.
+- **Fallas visibles:** CI activa el modo estricto para rechazos de promesas no manejados; un fallo de sintaxis, regresión, auditoría de dependencias, prueba de navegador o construcción Docker debe impedir que la ejecución figure como exitosa.
+- **Permisos mínimos:** el workflow solo necesita permiso de lectura del repositorio. Las ejecuciones nuevas de una misma rama/PR cancelan las comprobaciones antiguas para no acumular procesos ni consumir recursos innecesarios.
+- **Pruebas sin coste de proveedor:** las pruebas unitarias y de navegador no necesitan claves de Gemini/Groq ni generan deliberaciones reales. Las pruebas E2E que llaman a proveedores se mantienen separadas porque pueden consumir tokens y requieren autorización/configuración explícita.
+
+### Acceso a red del runner de agentes
+
+**Decisión de arquitectura:** el runner dedicado de pruebas tendrá salida a internet controlada; no se aplicará una prohibición general de red a las pruebas que necesiten instalar dependencias, consultar documentación o verificar integraciones externas.
+
+Política prevista para ese runner:
+
+- Permitir HTTPS saliente para los destinos que necesite la tarea: repositorios de código, registros de paquetes y APIs externas autorizadas.
+- Denegar por defecto loopback, rangos privados, link-local, endpoints de metadatos de proveedores cloud y direcciones de redes internas/producción. Las excepciones deben ser explícitas, limitadas y auditables.
+- Aplicar el control en un proxy/gateway de salida o reglas de red del entorno, no solo mediante validación de URL en JavaScript. El gateway debe validar las direcciones resueltas y los destinos efectivos para mitigar DNS rebinding, redirecciones y resolución hacia IPs internas.
+- No montar secretos de producción en el runner. Para pruebas de integración, usar credenciales efímeras y de mínimo privilegio, solo si son necesarias y aprobadas para esa tarea.
+- Limitar duración, ancho de banda/descargas, CPU, memoria, procesos y almacenamiento temporal; registrar destino, resultado, duración y motivo de bloqueo sin guardar cabeceras sensibles ni tokens.
+- Mantener la vista previa de HTML/CSS/JS en Chromium aislada y sin red por defecto. La conectividad del runner de integración no debe habilitar automáticamente red para contenido web arbitrario.
+- Si una tarea necesita una API privada o un servicio interno, requerir una excepción concreta con alcance y credenciales temporales; no abrir toda la red privada al runner.
+
+**Estado actual:** esto define el comportamiento objetivo; no significa que ya exista un runner de ejecución arbitraria con egress controlado en producción. El código actual dispone de comprobaciones de sintaxis y una prueba de navegador restringida, pero todavía falta desplegar un servicio/contendor de runner separado y hacer cumplir la política de red a nivel de infraestructura.
+
+### Límites y siguiente nivel de aislamiento
+
+Xvfb es un servidor gráfico virtual, no una máquina virtual. Chromium se ejecuta con las protecciones disponibles en el runtime; si el entorno impide su sandbox, el validador puede informar que la comprobación de navegador fue omitida y conservar las comprobaciones deterministas. No debe presentarse una prueba omitida como una prueba de navegador aprobada. Para ejecutar código arbitrario de agentes con un aislamiento fuerte, la siguiente mejora es un runner desechable dedicado con límites de CPU/memoria/PID, usuario no privilegiado, sistema de archivos de solo lectura salvo el directorio de trabajo, sin secretos montados y sin salida de red por defecto. El worker de producción no debe convertirse en un ejecutor general de código generado.

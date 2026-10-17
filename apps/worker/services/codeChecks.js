@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runPrivateAgentChecks } from './agentRunnerClient.js';
 
 const runCheck = source => new Promise(resolve => {
   const child = spawn(process.execPath, ['--check', '--input-type=module'], { stdio: ['pipe', 'ignore', 'pipe'] });
@@ -172,6 +173,8 @@ export async function checkJavascriptSyntax(delivery) {
   }
   const browser = html ? await runBrowserSmokeCheck(files) : { checked: false, ok: true, message: '' };
   if (!browser.ok) issues.push(browser.message);
+  const privateRunner = await runPrivateAgentChecks(delivery);
+  if (!privateRunner.ok) issues.push(privateRunner.message);
   for (const [name, file] of files) {
     if (name === 'package.json') {
       try {
@@ -183,8 +186,9 @@ export async function checkJavascriptSyntax(delivery) {
       } catch {}
     }
   }
-  if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
+  if (issues.length) return { checked: sources.length > 0 || files.size > 0, ok: false, message: issues.slice(0, 20).join('\n').slice(0, 4000), filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked), privateRunnerChecked: Boolean(privateRunner.checked), privateRunnerConfigured: Boolean(privateRunner.configured) };
   if (!sources.length && !files.size) return { checked: false, ok: true, message: 'No se encontraron archivos o bloques de código verificables; la entrega solo recibió revisión de IA.' };
   const browserNote = browser.message ? ' ' + browser.message : '';
-  return { checked: true, ok: true, message: 'Comprobación determinista superada: ' + files.size + ' archivo(s) detectado(s), ' + sources.length + ' archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.' + browserNote, filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked) };
+  const runnerNote = privateRunner.message ? ' ' + privateRunner.message : '';
+  return { checked: true, ok: true, message: 'Comprobación determinista superada: ' + files.size + ' archivo(s) detectado(s), ' + sources.length + ' archivo(s)/bloque(s) JavaScript comprobado(s), JSON y referencias locales inspeccionados cuando correspondía.' + browserNote + runnerNote, filesChecked: files.size, javascriptChecked: sources.length, browserChecked: Boolean(browser.checked), privateRunnerChecked: Boolean(privateRunner.checked), privateRunnerConfigured: Boolean(privateRunner.configured) };
 }
