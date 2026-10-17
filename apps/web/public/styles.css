@@ -159,7 +159,7 @@ textarea::placeholder,input::placeholder{color:#92989e}
 #detail-panel>.section-head{margin-bottom:7px}
 #detail-title{color:#f0f1f2}
 .detail-actions #copy-detail{display:none}
-.task-status,.progress-track,.token-budget,.detail-hint,#improvement-vote-panel,.agent-reply-panel{display:none!important}
+.task-status,.progress-track,.token-budget,.detail-hint,.agent-reply-panel{display:none!important}
 #conversation{display:flex;flex-direction:column;gap:13px;max-height:none;flex:1;min-height:260px;overflow:auto;padding:10px 3px 18px;scroll-behavior:smooth}
 .chat-message{max-width:92%;gap:9px}
 .message-body{background:#2f3432;border:1px solid #d4b55a;border-radius:5px 16px 16px 16px;padding:12px 15px}
