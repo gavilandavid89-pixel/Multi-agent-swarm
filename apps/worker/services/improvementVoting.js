@@ -43,15 +43,9 @@ function buildContext(payload, requestedProposal) {
   ].filter(Boolean).join('\n\n');
 }
 
-async function executeVote(jobId, proposal) {
+async function executeVote(jobId, proposal, voteId) {
   const record = await getPayload(jobId);
   if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
-  const job = record.publicJob;
-  const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  if (!['completed', 'needs_review'].includes(job.status) || budgetPaused) {
-    throw Object.assign(new Error('La votación está disponible cuando la tarea terminó o quedó pendiente de revisión humana, no durante una ejecución o pausa de presupuesto.'), { status: 409 });
-  }
-
   const priorVotes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
   const existing = [...priorVotes].reverse().find(item =>
     String(item.proposal || '').trim().toLocaleLowerCase() === proposal.toLocaleLowerCase() &&
@@ -123,7 +117,7 @@ async function executeVote(jobId, proposal) {
   const summary = summarizeImprovementVotes(ballots);
   const completedAt = new Date().toISOString();
   const voteRecord = {
-    id: randomUUID(),
+    id: voteId,
     proposal,
     status: summary.answered === ballots.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
     createdAt: completedAt,
@@ -148,7 +142,11 @@ async function executeVote(jobId, proposal) {
       content: 'VOTO: ' + ballot.vote + '\n' + ballot.rationale + (ballot.error ? '\nError del proveedor: ' + ballot.error : '')
     }))
   ].slice(-150);
-  const history = [...(Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : []), voteRecord].slice(-10);
+  const previousHistory = Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : [];
+  const existingIndex = previousHistory.findIndex(item => item.id === voteId);
+  const history = existingIndex >= 0
+    ? previousHistory.map(item => item.id === voteId ? voteRecord : item).slice(-10)
+    : [...previousHistory, voteRecord].slice(-10);
   await updateJob(jobId, {
     payload: { improvementVotes: history, transcript }
   });
@@ -166,14 +164,37 @@ export async function voteOnImprovement(jobId, requestedProposal) {
   const normalized = proposal.toLocaleLowerCase();
   const current = inFlightVotes.get(jobId);
   if (current) {
-    if (current.proposal === normalized) return current.promise;
-    throw Object.assign(new Error('Ya hay una votación en curso para esta tarea. Esperá a que termine antes de iniciar otra.'), { status: 409 });
+    if (current.proposal === normalized) return { vote: current.record, reused: true, started: true };
+    throw Object.assign(new Error('Ya hay una votación en curso para esta tarea. Podés seguir trabajando; esperá a que termine antes de iniciar otra.'), { status: 409 });
   }
-  const promise = executeVote(jobId, proposal);
-  inFlightVotes.set(jobId, { proposal: normalized, promise });
-  try {
-    return await promise;
-  } finally {
-    if (inFlightVotes.get(jobId)?.promise === promise) inFlightVotes.delete(jobId);
-  }
+  const record = await getPayload(jobId);
+  if (!record) throw Object.assign(new Error('No existe esa tarea.'), { status: 404 });
+  const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
+  if (budgetPaused) throw Object.assign(new Error('La tarea está pausada por presupuesto. Ampliá el presupuesto o reanudá la tarea antes de convocar la votación.'), { status: 409 });
+  const priorVotes = Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [];
+  const existing = [...priorVotes].reverse().find(item => String(item.proposal || '').trim().toLocaleLowerCase() === normalized && ['completed', 'partial', 'failed'].includes(item.status));
+  if (existing) return { vote: existing, reused: true, started: false };
+  const voteId = randomUUID();
+  const runningRecord = {
+    id: voteId, proposal, status: 'running', createdAt: new Date().toISOString(), completedAt: null,
+    votes: [], tally: { APOYAR: 0, RECHAZAR: 0, ABSTENERSE: 0 }, outcome: 'EN_CURSO',
+    summary: 'La votación corre en segundo plano. La tarea principal no se pausa.', answered: 0, total: agents.length
+  };
+  await updateJob(jobId, { payload: { improvementVotes: [...priorVotes, runningRecord].slice(-10) } });
+  let promise;
+  promise = executeVote(jobId, proposal, voteId)
+    .catch(async error => {
+      console.error('[worker][improvement_vote_failed]', JSON.stringify({ jobId, voteId, message: clip(error?.message || error, 250) }));
+      const fresh = await getPayload(jobId).catch(() => null);
+      if (fresh) {
+        const history = Array.isArray(fresh.payload.improvementVotes) ? fresh.payload.improvementVotes : [];
+        await updateJob(jobId, { payload: { improvementVotes: history.map(item => item.id === voteId ? {
+          ...item, status: 'failed', outcome: 'SIN_VOTOS_VALIDOS', summary: 'La votación no pudo completarse: ' + clip(error?.message || error, 220),
+          completedAt: new Date().toISOString()
+        } : item) } }).catch(() => {});
+      }
+    })
+    .finally(() => { if (inFlightVotes.get(jobId)?.promise === promise) inFlightVotes.delete(jobId); });
+  inFlightVotes.set(jobId, { proposal: normalized, promise, record: runningRecord });
+  return { vote: runningRecord, reused: false, started: true };
 }
