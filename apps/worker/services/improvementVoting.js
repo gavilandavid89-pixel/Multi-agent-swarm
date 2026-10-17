@@ -88,84 +88,109 @@ async function executeVote(jobId, proposal, voteId) {
   const currentVote = priorVotes.find(item => item.id === voteId) || {};
   const deadlineAt = currentVote.deadlineAt || new Date(Date.now() + 60000).toISOString();
   const deadlineMs = Date.parse(deadlineAt);
-  for (const agent of agents) {
-    const remainingMs = deadlineMs - Date.now();
-    if (remainingMs <= 0) break;
-    try {
-      const onRetry = async info => {
-        if (info?.usage) {
-          const accounted = await recordTokenUsage(jobId, {
-            ...info,
-            agent: agent.name,
-            stage: 'Votación de mejora',
-            interaction: 'improvement-vote'
-          });
-          console.info('[worker][improvement_vote_usage]', JSON.stringify({
-            jobId, agent: agent.name, duplicateIgnored: Boolean(accounted.duplicate),
-            totalTokens: info.totalTokens || 0
-          }));
-        } else if (info?.reason) {
-          console.warn('[worker][improvement_vote_retry]', JSON.stringify({
-            jobId, agent: agent.name, retry: info.retry || null,
-            waitMs: info.wait || null, reason: clip(info.reason, 180)
-          }));
-        }
-      };
-      const response = await raceDeadline(consultarModelo({
-        model: voteModel(agent.name),
-        temperature: 0.1,
-        maxTokens: 320,
-        onRetry,
-        messages: [
-          {
-            role: 'system',
-            content: 'Sos ' + agent.name + ' en una votación técnica independiente del comité Swarm. Tu rol: ' + agent.role + ' Respondé en español, brevemente y basándote solo en el contexto proporcionado. No afirmes que implementaste ni probaste cambios. La decisión NO se aplica automáticamente. Primera línea obligatoria: VOTO: APOYAR, VOTO: RECHAZAR o VOTO: ABSTENERSE. Luego: JUSTIFICACIÓN: una razón concreta. RIESGO PRINCIPAL: un riesgo o "Ninguno identificado". CONDICIÓN: qué habría que comprobar antes de aprobar.'
-          },
-          { role: 'user', content: context }
-        ]
-      }), remainingMs);
-      const parsed = parseImprovementVote(response);
-      ballots.push({
-        at: new Date().toISOString(),
-        agent: agent.name,
-        vote: parsed.vote,
-        rationale: parsed.rationale,
-        details: clip(response, 2400),
-        responseReceived: parsed.validFormat,
-        error: null
-      });
-    } catch (error) {
-      ballots.push({
-        at: new Date().toISOString(),
-        agent: agent.name,
-        vote: 'ABSTENERSE',
-        rationale: 'No se pudo obtener un voto por un error del proveedor. No se debe interpretar como apoyo ni rechazo.',
-        details: '',
-        responseReceived: false,
-        error: clip(error?.message || error, 350)
-      });
-      console.warn('[worker][improvement_vote_agent_error]', JSON.stringify({
-        jobId, agent: agent.name, code: error?.code || null,
-        message: clip(error?.message || error, 250)
-      }));
-      if (error?.code === 'DEBATE_DEADLINE' || Date.now() >= deadlineMs) break;
-    }
-    await persistVoteProgress(jobId, voteId, ballots, deadlineAt).catch(error => console.warn('[worker][improvement_vote_progress_deferred]', JSON.stringify({ jobId, voteId, message: clip(error?.message || error, 160) })));
+  const panelists = agents.filter(agent => agent.name !== 'Árbitro');
+  const panelDeadlineMs = Math.min(deadlineMs - 20000, Date.now() + 38000);
+
+  async function askAgent(agent, deadline) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw Object.assign(new Error('Se cerró la ventana de respuestas del panel.'), { code: 'DEBATE_PANEL_CUTOFF' });
+    const onRetry = async info => {
+      if (info?.usage) {
+        const accounted = await recordTokenUsage(jobId, {
+          ...info, agent: agent.name, stage: 'Votación de mejora', interaction: 'improvement-vote'
+        });
+        console.info('[worker][improvement_vote_usage]', JSON.stringify({
+          jobId, agent: agent.name, duplicateIgnored: Boolean(accounted.duplicate), totalTokens: info.totalTokens || 0
+        }));
+      } else if (info?.reason) {
+        console.warn('[worker][improvement_vote_retry]', JSON.stringify({
+          jobId, agent: agent.name, retry: info.retry || null, waitMs: info.wait || null, reason: clip(info.reason, 180)
+        }));
+      }
+    };
+    const response = await raceDeadline(consultarModelo({
+      model: voteModel(agent.name), temperature: 0.1, maxTokens: 220, onRetry,
+      messages: [
+        { role: 'system', content: 'Sos ' + agent.name + ' en una votación técnica independiente del comité Swarm. Tu rol: ' + agent.role + ' Respondé en español y en máximo 70 palabras, usando solo el contexto dado. No repitas el objetivo ni resumas toda la propuesta. No afirmes que implementaste ni probaste cambios. La decisión no se aplica automáticamente. Formato obligatorio: VOTO: APOYAR/RECHAZAR/ABSTENERSE; JUSTIFICACIÓN: razón concreta; RIESGO: principal riesgo; CONDICIÓN: comprobación previa.' },
+        { role: 'user', content: context }
+      ]
+    }), remainingMs);
+    const parsed = parseImprovementVote(response);
+    return {
+      at: new Date().toISOString(), agent: agent.name, vote: parsed.vote,
+      rationale: parsed.rationale, details: clip(response, 900),
+      responseReceived: parsed.validFormat, error: null
+    };
   }
 
-  const summary = summarizeImprovementVotes(ballots);
+  // Los cinco especialistas responden en paralelo. Se cierra la recepción en el segundo 40
+  // para reservar una ventana independiente al Árbitro y margen para persistir el resultado.
+  const pending = panelists.map(agent => askAgent(agent, panelDeadlineMs).then(async ballot => {
+    ballots.push(ballot);
+    await persistVoteProgress(jobId, voteId, ballots, deadlineAt);
+    return ballot;
+  }).catch(async error => {
+    ballots.push({
+      at: new Date().toISOString(), agent: agent.name, vote: 'ABSTENERSE',
+      rationale: 'No se obtuvo una respuesta válida dentro de la ventana del panel; no equivale a apoyo ni rechazo.',
+      details: '', responseReceived: false, error: clip(error?.message || error, 240)
+    });
+    await persistVoteProgress(jobId, voteId, ballots, deadlineAt).catch(() => {});
+    console.warn('[worker][improvement_vote_agent_error]', JSON.stringify({
+      jobId, agent: agent.name, code: error?.code || null, message: clip(error?.message || error, 180)
+    }));
+    return null;
+  }));
+  await Promise.race([
+    Promise.allSettled(pending),
+    sleep(Math.max(0, panelDeadlineMs - Date.now()))
+  ]);
+
+  // Evita que una respuesta tardía cambie el resultado después de cerrar el panel.
+  const panelSnapshot = ballots.slice();
+  const panelSummary = summarizeImprovementVotes(panelSnapshot);
+  let arbiterNote = 'Árbitro: no hubo tiempo suficiente para sintetizar las respuestas.';
+  const arbiter = agents.find(agent => agent.name === 'Árbitro');
+  const arbiterStart = deadlineMs - 20000;
+  const arbiterDeadline = deadlineMs - 10000;
+  const arbiterInput = [
+    'Objetivo original (prioritario): ' + clip(record.payload.objective, 500),
+    'Mejora evaluada: ' + clip(proposal, 500),
+    'Votos recibidos:',
+    ...panelSnapshot.map(item => '- ' + item.agent + ': ' + item.vote + '; ' + clip(item.rationale, 180) + (item.error ? ' [sin respuesta válida]' : '')),
+    'Conteo provisional: ' + JSON.stringify(panelSummary.tally),
+    'Decidí brevemente qué riesgos o condiciones deben gobernar la decisión. No inventes evidencia, no cambies el objetivo original y no interpretes abstenciones como apoyo.'
+  ].join('\n');
+  if (Date.now() < arbiterStart) await sleep(arbiterStart - Date.now());
+  if (Date.now() < arbiterDeadline) {
+    try {
+      arbiterNote = 'Síntesis del Árbitro: ' + clip(await raceDeadline(consultarModelo({
+        model: voteModel(arbiter.name), temperature: 0.1, maxTokens: 180,
+        onRetry: async info => {
+          if (info?.usage) {
+            const accounted = await recordTokenUsage(jobId, { ...info, agent: arbiter.name, stage: 'Síntesis del comité', interaction: 'improvement-vote' });
+            console.info('[worker][improvement_vote_usage]', JSON.stringify({ jobId, agent: arbiter.name, duplicateIgnored: Boolean(accounted.duplicate), totalTokens: info.totalTokens || 0 }));
+          }
+        },
+        messages: [
+          { role: 'system', content: 'Sos el Árbitro técnico del comité Swarm. Sintetizá los votos recibidos en máximo 55 palabras. Indicá desacuerdos, riesgo principal y condición verificable. No vuelvas a votar ni afirmes que el cambio se aplicó.' },
+          { role: 'user', content: arbiterInput }
+        ]
+      }), Math.max(1, arbiterDeadline - Date.now())), 1100);
+    } catch (error) {
+      arbiterNote = 'Árbitro: no se obtuvo síntesis antes del límite; se conservan los votos parciales. ' + clip(error?.message || error, 160);
+    }
+  }
+
+  const summary = summarizeImprovementVotes(panelSnapshot);
   const completedAt = new Date().toISOString();
   const voteRecord = {
-    id: voteId,
-    proposal,
-    kind: 'vote',
-    status: summary.answered === agents.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
-    createdAt: currentVote.createdAt || completedAt,
-    completedAt,
-    deadlineAt,
-    votes: ballots,
-    ...summary,
-    total: agents.length
+    id: voteId, proposal, kind: 'vote',
+    status: summary.answered >= panelists.length ? 'completed' : summary.answered > 0 ? 'partial' : 'failed',
+    createdAt: currentVote.createdAt || completedAt, completedAt, deadlineAt,
+    votes: panelSnapshot, ...summary, total: panelists.length,
+    arbiterSummary: arbiterNote,
+    summary: clip(summary.summary + ' ' + arbiterNote, 1600)
   };
   const fresh = await getPayload(jobId);
   if (!fresh) throw Object.assign(new Error('La tarea dejó de existir durante la votación.'), { status: 404 });
