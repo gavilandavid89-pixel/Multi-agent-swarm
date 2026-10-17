@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -14,6 +15,10 @@ const password = 'test-password-that-is-longer-than-24-chars';
 let child;
 let port;
 let stubDir;
+const probeServers = [];
+let vncPort;
+let noVncPort;
+let debugPort;
 
 async function freePort() {
   const server = net.createServer();
@@ -22,6 +27,22 @@ async function freePort() {
   const address = server.address();
   await new Promise(resolve => server.close(resolve));
   return address.port;
+}
+
+async function startProbeServer(handler = (_req, res) => res.end('ok')) {
+  const server = http.createServer(handler);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  probeServers.push(server);
+  return server.address().port;
+}
+
+async function startProbeSocket() {
+  const server = net.createServer(socket => socket.end());
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  probeServers.push(server);
+  return server.address().port;
 }
 
 async function waitForServer(url, processRef) {
@@ -45,6 +66,12 @@ test('viewer HTTP access requires the configured administrator credentials', asy
     await chmod(file, 0o755);
   }
   port = await freePort();
+  vncPort = await startProbeSocket();
+  noVncPort = await startProbeSocket();
+  debugPort = await startProbeServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ Browser: 'Chromium/test' }));
+  });
   child = spawn(process.execPath, [serverPath], {
     env: {
       ...process.env,
@@ -52,7 +79,10 @@ test('viewer HTTP access requires the configured administrator credentials', asy
       PORT: String(port),
       VIEWER_ADMIN_USERNAME: username,
       VIEWER_ADMIN_PASSWORD: password,
-      DISPLAY: ':198'
+      DISPLAY: ':198',
+      VNC_INTERNAL_PORT: String(vncPort),
+      NOVNC_INTERNAL_PORT: String(noVncPort),
+      CHROMIUM_DEBUG_PORT: String(debugPort)
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -69,6 +99,7 @@ test('viewer HTTP access requires the configured administrator credentials', asy
       await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 2500))]);
       if (child.exitCode === null) child.kill('SIGKILL');
     }
+    await Promise.all(probeServers.map(server => new Promise(resolve => server.close(resolve))));
     if (stubDir) await rm(stubDir, { recursive: true, force: true });
   });
 
@@ -78,6 +109,7 @@ test('viewer HTTP access requires the configured administrator credentials', asy
     ok: true,
     viewer: 'live-desktop',
     authenticated: true,
+    checks: { processes: true, vnc: true, noVnc: true, chromium: true },
     failedProcesses: []
   });
 
@@ -95,4 +127,12 @@ test('viewer HTTP access requires the configured administrator credentials', asy
   });
   assert.notEqual(admin.status, 401, 'valid administrator credentials must pass the authentication gate');
   assert.equal(admin.status, 502, 'the stub upstream is intentionally unavailable; authentication must still succeed');
+});
+
+
+test('health reports unhealthy when Chromium debug endpoint is unavailable', async t => {
+  const fake = await startProbeServer((_req, res) => { res.writeHead(503); res.end(); });
+  const portToCheck = fake;
+  const response = await fetch(`http://127.0.0.1:${portToCheck}/json/version`);
+  assert.equal(response.ok, false, 'probe fixture represents a failed Chromium readiness endpoint');
 });
