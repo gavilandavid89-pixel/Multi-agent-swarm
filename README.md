@@ -13,6 +13,23 @@
 - `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 30 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
+## Runner virtual exclusivo para agentes (no visible al usuario)
+
+El entorno de ejecución de los agentes es independiente de la vista previa de la aplicación. **No se muestra ni se transmite al navegador del usuario**: los agentes pueden usar Chromium con Xvfb en una sesión gráfica virtual para abrir páginas, inspeccionar estados visuales, hacer capturas y comprobar interacciones. Xvfb proporciona pantalla virtual; por sí solo no es un sandbox ni una política de red.
+
+### Arquitectura requerida
+
+- **Runner de agentes:** entorno efímero por tarea, con código y dependencias de prueba aislados; salida de consola, errores, duración y resultado devueltos al orquestador.
+- **Herramientas visuales:** Chromium + Xvfb dentro del runner para pruebas headless/visuales, capturas y automatización. Los artefactos visuales se guardan como resultados de la tarea y solo se muestran al usuario si la interfaz decide presentarlos.
+- **Red de salida del runner:** acceso a Internet necesario para instalar dependencias y consultar documentación/APIs públicas, mediante una pasarela/proxy controlado. Política inicial: HTTPS permitido con límites de tiempo y descarga; bloquear loopback, IP privadas, link-local, metadata de nube, redes internas y servicios de producción. Revalidar destino tras DNS y redirecciones; el filtrado de URL por sí solo no es suficiente.
+- **Separación de secretos:** no heredar variables del proceso del Worker ni credenciales de producción. Usar credenciales temporales de mínimo privilegio solo cuando una prueba lo requiera expresamente; nunca imprimir cabeceras de autorización o tokens.
+- **Límites operativos:** ejecución como usuario sin privilegios, filesystem temporal, límites de CPU/memoria/procesos/descarga, timeout por prueba, límites de salida y limpieza incluso si se interrumpe la tarea.
+- **Vista previa del usuario:** sigue siendo un componente distinto. La política de red del runner no debe habilitar automáticamente acceso de red en HTML generado o en la vista previa pública.
+
+### Estado actual (importante)
+
+La imagen del Worker incluye Chromium + Xvfb y `codeChecks.js` usa ese entorno para un smoke test aislado de HTML. **Eso no equivale todavía a un runner general para ejecutar código arbitrario de los agentes con salida a Internet controlada.** La arquitectura descrita arriba es el objetivo de implementación, no una capacidad que deba considerarse desplegada. No habilitar red indiscriminada en el proceso actual de Chromium: el control real debe imponerse en el límite del contenedor/runner y su pasarela de red.
+
 ## Desarrollo local
 
 Requiere Node.js 22.x (coincide con el runtime de Render y CI).
