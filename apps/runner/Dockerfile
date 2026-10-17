@@ -7,6 +7,7 @@ RUN apt-get update \
   && mkdir -p /tmp/swarm-runs /tmp/runner-home \
   && chown -R node:node /tmp/swarm-runs /tmp/runner-home
 COPY --chown=node:node package.json ./
+RUN npm install --omit=dev --no-package-lock --no-audit --no-fund
 COPY --chown=node:node server.js ./
 COPY --chown=node:node tests ./tests
 RUN node --check server.js && node --test tests/*.test.js
