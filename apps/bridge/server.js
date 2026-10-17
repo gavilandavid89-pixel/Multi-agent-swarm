@@ -202,6 +202,37 @@ app.post('/api/auth/register', async (req, res) => {
     res.status(message.includes('invitación') ? 400 : message.includes('duplicate') ? 409 : 400).json({ error: message.includes('invitación') ? message : 'No se pudo crear la cuenta. Revisá el usuario o la invitación.' });
   }
 });
+
+const DESKTOP_ACTIVITY_SHARED_SECRET = process.env.DESKTOP_ACTIVITY_SHARED_SECRET || '';
+app.get('/internal/desktop-activity', async (req, res) => {
+  const supplied = req.get('x-swarm-desktop-secret') || '';
+  const expected = DESKTOP_ACTIVITY_SHARED_SECRET;
+  const a = Buffer.from(supplied); const b = Buffer.from(expected);
+  if (b.length < 32 || a.length !== b.length || !timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const result = await workerRequest('/internal/jobs?limit=25&offset=0');
+    const jobs = Array.isArray(result) ? result : (Array.isArray(result?.jobs) ? result.jobs : []);
+    const activity = jobs.slice(0, 25).map(job => ({
+      id: String(job?.id || '').slice(0, 80),
+      title: String(job?.title || job?.objective || 'Tarea sin título').slice(0, 180),
+      status: ['queued','running','completed','failed','needs_review'].includes(job?.status) ? job.status : 'unknown',
+      stage: String(job?.stage || job?.currentStage || 'Sin etapa registrada').slice(0, 120),
+      updatedAt: job?.updatedAt || job?.createdAt || null,
+      agents: Array.isArray(job?.history) ? job.history.slice(-8).map(entry => ({
+        agent: String(entry?.agent || 'sistema').slice(0, 80),
+        type: String(entry?.type || 'activity').slice(0, 40),
+        at: entry?.at || null,
+        summary: String(entry?.content || '').slice(0, 240)
+      })) : []
+    }));
+    res.set('Cache-Control', 'no-store').json({ ok: true, updatedAt: new Date().toISOString(), jobs: activity });
+  } catch (error) {
+    res.status(error.status || 502).json({ error: 'No se pudo consultar la actividad del motor.' });
+  }
+});
+
 app.use('/api', async (req, res, next) => {
   if (['/auth/login','/auth/key-login','/auth/register','/auth/validate-invite','/auth/bootstrap-status'].includes(req.path)) return next();
   const auth = req.get('authorization') || '';
