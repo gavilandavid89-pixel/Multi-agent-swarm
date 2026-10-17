@@ -1134,12 +1134,17 @@ $('open-desktop-viewer')?.addEventListener('click', async () => {
   const button = $('open-desktop-viewer');
   if (state.user?.role !== 'admin') return;
   const original = button.textContent;
+  // Open synchronously from the click gesture so mobile browsers do not block the popup after the API await.
+  const popup = window.open('about:blank', '_blank');
+  if (!popup) { alert('El navegador bloqueó la ventana. Permití ventanas emergentes para esta web y volvé a intentarlo.'); return; }
+  popup.opener = null;
   button.disabled = true; button.textContent = 'Abriendo escritorio…';
   try {
     const result = await api('/api/admin/desktop-ticket', { method: 'POST', body: JSON.stringify({}) });
     if (!result.url) throw new Error('El Bridge no devolvió el enlace del escritorio.');
-    window.open(result.url, '_blank', 'noopener,noreferrer');
+    popup.location.replace(result.url);
   } catch (error) {
+    popup.close();
     alert(error.message || 'No se pudo abrir el escritorio virtual.');
   } finally { button.disabled = false; button.textContent = original; }
 });
