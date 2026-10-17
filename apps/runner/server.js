@@ -8,6 +8,7 @@ import express from 'express';
 const app = express();
 const PORT = Number(process.env.PORT || 3200);
 const TOKEN = process.env.RUNNER_SHARED_SECRET || '';
+const EXECUTION_ENABLED = process.env.RUNNER_ENABLE_EXECUTION === 'true';
 const ROOT = path.resolve(process.env.RUNNER_WORKDIR || path.join(os.tmpdir(), 'swarm-runs'));
 const MAX_BODY = Number(process.env.RUNNER_MAX_BODY_BYTES || 2_000_000);
 const MAX_FILES = Number(process.env.RUNNER_MAX_FILES || 100);
@@ -22,7 +23,7 @@ app.use(express.json({ limit: MAX_BODY, strict: true }));
 function safeEqual(a, b) { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length > 0 && x.length === y.length && timingSafeEqual(x, y); }
 function auth(req, res, next) { if (!safeEqual(req.get('x-swarm-runner-secret') || '', TOKEN)) return res.status(401).json({ error: 'No autorizado.' }); next(); }
 function validRelativePath(name) {
-  if (typeof name !== 'string' || !name || name.length > 240 || name.includes('\\') || name.includes('\0')) return false;
+  if (typeof name !== 'string' || !name || name.length > 240 || name.includes('\\\\') || name.includes('\\0')) return false;
   if (name.startsWith('/') || /^[a-z]:/i.test(name)) return false;
   const parts = name.split('/');
   return parts.every(part => part && part !== '.' && part !== '..') && !parts.some(part => part === '.git' || part === 'node_modules');
@@ -79,8 +80,9 @@ async function withWorkspace(files, callback) {
     return await callback({ id, workspace, files });
   } finally { await fs.rm(workspace, { recursive: true, force: true }).catch(() => {}); }
 }
-app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'agent-runner', active, capacity: MAX_CONCURRENCY }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'agent-runner', active, capacity: MAX_CONCURRENCY, arbitraryExecutionEnabled: EXECUTION_ENABLED }));
 app.post('/v1/run', auth, async (req, res) => {
+  if (!EXECUTION_ENABLED) return res.status(503).json({ error: 'La ejecución arbitraria está deshabilitada hasta configurar aislamiento de red y recursos en la infraestructura.' });
   if (active >= MAX_CONCURRENCY) return res.status(429).json({ error: 'Runner ocupado; reintentar más tarde.' });
   if (!safeCommand(req.body?.command)) return res.status(400).json({ error: 'Comando no permitido. No se acepta shell ni una cadena de comandos.' });
   active++;
@@ -95,14 +97,14 @@ app.post('/v1/check', auth, async (req, res) => {
   active++;
   try {
     const result = await withWorkspace(req.body?.files, async ({ id, workspace, files }) => {
-      const jsFiles = files.filter(f => /\.(?:js|mjs|cjs)$/i.test(f.path));
+      const jsFiles = files.filter(f => /\\.(?:js|mjs|cjs)$/i.test(f.path));
       const syntax = [];
       for (const file of jsFiles) {
         const checked = await runProcess(process.execPath, ['--check', path.resolve(workspace, file.path)], workspace, Math.min(MAX_RUNTIME_MS, 10000));
         syntax.push({ path: file.path, ok: checked.exitCode === 0 && !checked.timedOut, stderr: checked.stderr.slice(0, 3000), timedOut: checked.timedOut });
         if (!syntax.at(-1).ok) break;
       }
-      const htmlEntry = files.find(f => /(?:^|\/)index\.html?$/i.test(f.path)) || files.find(f => /\.html?$/i.test(f.path));
+      const htmlEntry = files.find(f => /(?:^|\\/)index\\.html?$/i.test(f.path)) || files.find(f => /\\.html?$/i.test(f.path));
       let browser = { checked: false, ok: true, message: 'No se entregó HTML; prueba visual omitida.' };
       if (htmlEntry && syntax.every(item => item.ok)) {
         const target = path.resolve(workspace, htmlEntry.path);
@@ -121,4 +123,4 @@ app.post('/v1/check', auth, async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: String(error?.message || error).slice(0, 500) }); }
   finally { active--; }
 });
-app.listen(PORT, '0.0.0.0', () => console.log(JSON.stringify({ event: 'runner_ready', port: PORT, capacity: MAX_CONCURRENCY, network: 'must be restricted by container/network policy' })));
+app.listen(PORT, '0.0.0.0', () => console.log(JSON.stringify({ event: 'runner_ready', port: PORT, capacity: MAX_CONCURRENCY, network: 'must be restricted by container/network policy', arbitraryExecutionEnabled: EXECUTION_ENABLED })));
