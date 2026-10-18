@@ -160,7 +160,7 @@ function dockerArgs(job) {
   } else args.push('--network', 'none');
   // Keep the container alive while docker cp snapshots its size-limited tmpfs workspace.
   // The project command is passed separately to docker exec as argv, never through a host shell.
-  args.push(IMAGE, 'bash', '-c', 'cp -R -P /input/. /workspace/ && chmod -R a+rwX /workspace && touch /tmp/swarm-runner-ready && exec tail -f /dev/null');
+  args.push(IMAGE, 'bash', '-c', 'cp -R -P /input/. /workspace/ && chmod -R a+rwX,u-s,g-s,o-t /workspace && touch /tmp/swarm-runner-ready && exec tail -f /dev/null');
   return args;
 }
 function appendOutput(job, key, chunk) {
