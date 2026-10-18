@@ -13,8 +13,8 @@ function unavailable(message) {
 function containsSensitiveCredential(entries) {
   const patterns = [
     /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----/i,
-    /\\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\\b/,
-    /https?:\\/\\/[^/\\s:@]+:[^/\\s@]+@/i
+    /\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\b/,
+    /https?:\/\/[^/\s:@]+:[^/\s@]+@/i
   ];
   return entries.some(file => patterns.some(pattern => pattern.test(String(file.content || ''))));
 }
