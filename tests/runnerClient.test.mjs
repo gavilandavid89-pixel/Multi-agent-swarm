@@ -119,6 +119,16 @@ test('Worker refuses public HTTP runner endpoints and skips optional unconfigure
   assert.equal(rejected.infraError, true);
   assert.match(rejected.message, /HTTPS/);
 
+  for (const host of ['169.254.169.254', '100.100.100.200', '192.0.2.1', '224.0.0.1', '[fe80::1]', '[::ffff:169.254.169.254]']) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+      `const m=await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify(await m.runAgentCommand({files:[],command:['true']})))`],
+    { encoding: 'utf8', env: { PATH: process.env.PATH || '', AGENT_RUNNER_BASE_URL: 'http://' + host, AGENT_RUNNER_SHARED_SECRET: 'test-runner-secret-that-is-long-enough-32' } });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout.trim());
+    assert.equal(output.ok, false, host + ' must not be accepted as a plaintext runner host');
+    assert.match(output.message, /HTTPS/);
+  }
+
   const optional = spawnSync(process.execPath, ['--input-type=module', '-e',
     `const m=await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify(await m.runAgentCommand({files:[],command:['true']})))`],
   { encoding: 'utf8', env: { PATH: process.env.PATH || '', AGENT_RUNNER_REQUIRED: 'false' } });
