@@ -22,9 +22,19 @@ echo "PASS writable isolated workspace; host sentinel not inherited"
 cat > "$workspace/index.html" <<'HTML'
 <!doctype html><html><head><title>Sandbox browser smoke</title></head><body><main id="app">browser-ok</main></body></html>
 HTML
-sh scripts/run-agent-sandbox.sh "$workspace" xvfb-run -a chromium --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check --dump-dom file:///workspace/index.html > "$workspace/dom.out"
+# Confirm the X server starts and exposes a usable display before testing the browser.
+sh scripts/run-agent-sandbox.sh "$workspace" xvfb-run -a timeout --signal=TERM --kill-after=2s 10s xdpyinfo >/dev/null
+echo "PASS Xvfb starts a usable X11 display"
+
+# Headless Chromium has deterministic process lifetime; a separate timeout catches hangs
+# without consuming the runner's full 120-second outer deadline.
+sh scripts/run-agent-sandbox.sh "$workspace" timeout --signal=TERM --kill-after=3s 25s chromium \
+  --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
+  --disable-background-networking --disable-extensions --no-first-run \
+  --no-default-browser-check --user-data-dir=/tmp/swarm-chrome-profile \
+  --dump-dom file:///workspace/index.html > "$workspace/dom.out"
 grep -q 'browser-ok' "$workspace/dom.out"
-echo "PASS Chromium rendered HTML under Xvfb"
+echo "PASS Chromium rendered HTML with a bounded headless run"
 
 # Network must be unavailable inside the sandbox.
 sh scripts/run-agent-sandbox.sh "$workspace" node -e '
