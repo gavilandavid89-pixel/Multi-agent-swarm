@@ -4,19 +4,22 @@ This service is the authenticated control plane for short-lived, isolated code-e
 
 ## Deployment boundary
 
-Run this API on a dedicated execution host with Node.js 22 and a Docker daemon, or on an equivalent isolated runner host. It must not share the Worker host, production database credentials, provider API keys, or other secrets. The API process needs Docker access; treat that host as a dedicated security boundary. Prefer rootless Docker and a host firewall, and keep the Docker socket unavailable to job containers.
+Run this API on a dedicated execution host with Node.js 22 and a Docker daemon, or on an equivalent isolated runner host. It must not share the Worker host, production database credentials, provider API keys, or other secrets. The API process needs Docker access; treat that host as a dedicated security boundary. Configure a rootless Docker daemon for the dedicated service account rather than granting it access to a root-owned Docker socket; if rootful Docker is unavoidable, assume the API process is effectively host-root. Prefer a host firewall, and keep the Docker socket unavailable to job containers.
 
 Render's normal web container is not assumed to have a usable Docker daemon or permission to start sibling containers. Do not add this service to Render or enable Worker integration until a separate runner host has passed the smoke tests. The existing Render Free services remain unchanged.
 
 ## Start
 
 ```sh
-sudo install -d -o runner -g runner -m 0700 /var/lib/swarm-runner
+sudo useradd --system --create-home --home-dir /var/lib/swarm-runner --shell /usr/sbin/nologin swarm-runner
+sudo install -d -o swarm-runner -g swarm-runner -m 0700 /var/lib/swarm-runner
 cd apps/runner-api
 cp .env.example .env
 # Set RUNNER_SHARED_SECRET to a fresh 32+ character random secret, never commit it.
 node server.js
 ```
+
+Set `RUNNER_SHARED_SECRET` to the exact same random secret configured as `AGENT_RUNNER_SHARED_SECRET` on the Worker; it must be different from `WORKER_SHARED_SECRET`. Keep the API reachable only over a private network/firewall rule from the Worker.
 
 The host must already have `swarm-agent-runner:local` built from `apps/runner/Dockerfile`. Use a process supervisor (systemd or equivalent) to restart the API and restrict its inbound port to the Worker using a private network/firewall. Do not publish port 3200 to the public Internet.
 
