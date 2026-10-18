@@ -75,7 +75,6 @@ function validateRequest(body) {
   const workspaceId = body.workspaceId === undefined ? null : String(body.workspaceId);
   if (workspaceId !== null && !/^[0-9a-f-]{36}$/i.test(workspaceId)) throw Object.assign(new Error('workspaceId debe ser un UUID.'), { status: 400 });
   const resetWorkspace = body.resetWorkspace !== false;
-  if (!resetWorkspace && (!workspaceId || files.length)) throw Object.assign(new Error('Reutilizar workspace requiere workspaceId y files vacío.'), { status: 400 });
   const timeoutMs = Number(body.timeoutMs || 60000);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) throw Object.assign(new Error('timeoutMs debe estar entre 1000 y 120000.'), { status: 400 });
   if (!Array.isArray(body.files) || body.files.length > MAX_FILES) throw Object.assign(new Error('files debe contener como máximo 200 archivos.'), { status: 400 });
@@ -90,6 +89,7 @@ function validateRequest(body) {
     if (total > MAX_TOTAL_FILE_BYTES) throw Object.assign(new Error('El proyecto supera 2 MiB.'), { status: 413 });
     return { path: file.path, content: file.content };
   });
+  if (!resetWorkspace && (!workspaceId || files.length)) throw Object.assign(new Error('Reutilizar workspace requiere workspaceId y files vacío.'), { status: 400 });
   return { command, network, timeoutMs, files, workspaceId, resetWorkspace };
 }
 function publicJob(job) {
@@ -306,7 +306,8 @@ async function deleteJob(job) {
   if (job.idempotencyKey && idempotency.get(job.idempotencyKey) === job.id) idempotency.delete(job.idempotencyKey);
   await fsp.rm(path.join(STATE, job.id + '.json'), { force: true });
   await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
-  await fsp.rm(job.workspace, { recursive: true, force: true });
+  const workspaceStillReferenced = [...jobs.values()].some(other => other.workspaceId === job.workspaceId);
+  if (!workspaceStillReferenced) await fsp.rm(job.workspace, { recursive: true, force: true });
 }
 async function pump() {
   if (closing) return;
@@ -340,10 +341,15 @@ async function handle(req, res) {
     const workspaceId = body.workspaceId || id;
     if (workspaceBusy.has(workspaceId)) return json(res, 409, { error: 'Ya hay una ejecución en cola o activa para este workspace.' });
     const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, artifactSnapshot: [] };
-    await writeWorkspace(job, body.files, body.resetWorkspace);
-    jobs.set(id, job); if (key) idempotency.set(key, id);
     workspaceBusy.set(workspaceId, id);
-    await save(job); queue.push(id); void pump();
+    try {
+      await writeWorkspace(job, body.files, body.resetWorkspace);
+      jobs.set(id, job); if (key) idempotency.set(key, id);
+      await save(job); queue.push(id); void pump();
+    } catch (error) {
+      if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
+      throw error;
+    }
     return json(res, 202, publicJob(job));
   }
   const match = url.pathname.match(/^\/v1\/jobs\/([0-9a-f-]{36})(?:\/(files|cancel))?$/i);
@@ -391,6 +397,12 @@ async function initialize() {
     } catch {}
   }
   await pruneOldJobs();
+  const knownWorkspaces = new Set([...jobs.values()].map(job => job.workspaceId));
+  for (const entry of await fsp.readdir(WORKSPACES, { withFileTypes: true })) {
+    if (entry.isDirectory() && /^[0-9a-f-]{36}$/i.test(entry.name) && !knownWorkspaces.has(entry.name)) {
+      await fsp.rm(path.join(WORKSPACES, entry.name), { recursive: true, force: true });
+    }
+  }
   await pump();
   setInterval(() => { void pruneOldJobs().catch(() => {}); }, 10 * 60 * 1000).unref();
 }
