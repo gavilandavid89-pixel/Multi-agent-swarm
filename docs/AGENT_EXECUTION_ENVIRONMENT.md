@@ -150,7 +150,8 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 
 1. Probar construcción de imagen y comandos de ejemplo en CI aislado.
 2. Mantener las pruebas de timeout, límites de recursos, rutas sensibles y red: modo `none` y proxy con allowlist.
-3. Revisar `apps/runner/capabilities.json` cuando cambie la imagen; el CI verifica el inventario básico, no la corrección semántica de cada compilador.\n4. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
+3. Revisar `apps/runner/capabilities.json` cuando cambie la imagen; el CI verifica el inventario básico, no la corrección semántica de cada compilador.
+4. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
 5. Revisar el protocolo runner/worker ya implementado y ampliar los perfiles de ejecución según proyectos reales.
 6. Provisionar el host privado de ejecución, generar un secreto independiente y configurar el firewall antes de habilitar `AGENT_RUNNER_BASE_URL`.
 7. Mantener `AGENT_RUNNER_REQUIRED=false` hasta pasar pruebas en el host real; luego probar el flujo de corrección completo con tareas de ejemplo.
