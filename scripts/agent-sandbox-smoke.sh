@@ -253,7 +253,7 @@ echo "PASS runner accepts bounded debugger stdin and returns debugger output"
 # Verify stdout is visible from GET /v1/jobs/:id before the process exits.
 stream_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"88888888-8888-4888-8888-888888888888",resetWorkspace:true,
-  command:["node","-e","console.log('stream-start'); setTimeout(()=>console.log('stream-end'),3000)"],
+  command:["node","-e","console.log(\"stream-start\"); setTimeout(()=>console.log(\"stream-end\"),3000)"],
   network:"none",timeoutMs:10000
 }))')
 stream_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
@@ -287,7 +287,7 @@ echo "PASS runner exposes partial stdout while running and final output after ex
 # Verify active cancellation reaches a terminal cancelled state.
 cancel_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"99999999-9999-4999-8999-999999999999",resetWorkspace:true,
-  command:["node","-e","setInterval(()=>console.log('cancel-tick'),1000)"],
+  command:["node","-e","setInterval(()=>console.log(\"cancel-tick\"),1000)"],
   network:"none",timeoutMs:30000
 }))')
 cancel_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
