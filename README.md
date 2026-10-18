@@ -158,8 +158,9 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 
 ## Entorno aislado de ejecución para agentes
 
-La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos sin red, con límites de recursos, sistema raíz de solo lectura y montaje escribible limitado al directorio de trabajo. Incluye toolchains comunes de Node.js, Python, Java, Go, PHP, Ruby, C/C++ y Rust, además de Chromium/Xvfb.
+La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js, Python, Java, Go, PHP, Ruby, C/C++ y Rust, además de Chromium/Xvfb.
 
-- Diseño, capacidades, límites y uso: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Diseño, capacidades, límites, red restringida y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 - Frontera de seguridad y arquitectura objetivo del runner de producción: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
 - El runner experimental no está desplegado ni conectado al worker. Revisar y ejecutar pruebas de CI antes de integrar; no ejecutar código generado en el proceso del worker ni habilitar red libre para corregir dependencias ausentes.
