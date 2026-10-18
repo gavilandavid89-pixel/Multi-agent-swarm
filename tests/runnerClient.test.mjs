@@ -96,6 +96,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(seen[3].body.command[1], 'test');
   assert.equal(seen[3].body.network, 'none');
   assert.equal(seen[3].body.resetWorkspace, false);
+  // A changed delivery must not collide with a previous round's idempotency key.
   const requestsBeforeSecret = seen.length;
   const blocked = await runProjectToolchainChecks({
     taskId: '44444444-4444-4444-8444-444444444444',
