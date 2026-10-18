@@ -14,10 +14,10 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se h
 | Go | compilador y toolchain de Go |
 | PHP / Ruby | intérpretes y herramientas de proyecto |
 | C / C++ / Rust | GCC, G++, make, rustc y cargo |
-| Web UI | Chromium, Xvfb, xauth y fuentes básicas |
+| Web UI | Chromium, Xvfb, xauth, fuentes básicas y `/opt/swarm-runner/browser-smoke.mjs` |
 | Operación | git, bash, coreutils, findutils, pkg-config |
 
-La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker ejecuta comprobaciones de toolchain y perfiles de prueba en el runner; los fallos reales se convierten en hallazgos del ciclo correctivo. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados, filtrado de credenciales conocidas y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
+La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones estáticas, el Worker ejecuta perfiles de toolchain y pruebas de navegador dentro del runner; los fallos reales se convierten en hallazgos del ciclo correctivo. El modelo no recibe todavía un shell libre: la interfaz de herramientas directa para agentes queda como una capa futura sobre este cliente, con acciones nombradas y políticas controladas por el servidor. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados, filtrado de credenciales conocidas y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
 
 ### Perfiles de ejecución automática
 
@@ -31,7 +31,7 @@ La API `apps/runner-api` proporciona el plano de control autenticado y asíncron
 - PHP/Composer y Ruby/Bundler: cuando hay lockfile y scripts de test, prepara dependencias con egress restringido y ejecuta tests offline.
 - C/C++ y shell: comprobación sintáctica. Chromium/Xvfb está disponible para pruebas de navegador.
 
-La detección automática está pensada para manifiestos de la raíz del proyecto; monorepos con varios gestores, SDK de Godot/Android/.NET/CUDA y builds que superan el tmpfs necesitan perfiles/imágenes específicas. El límite de 256 MiB por workspace hace que proyectos de dependencias pesadas fallen de forma explícita en vez de consumir disco del host.
+La comprobación de HTML se ejecuta en el runner aislado con Chromium/Xvfb y una copia temporal del proyecto; el Worker no evalúa JavaScript HTML generado dentro de su propio contenedor. La detección automática está pensada para manifiestos de la raíz del proyecto; monorepos con varios gestores, SDK de Godot/Android/.NET/CUDA y builds que superan el tmpfs necesitan perfiles/imágenes específicas. El límite de 256 MiB por workspace hace que proyectos de dependencias pesadas fallen de forma explícita en vez de consumir disco del host.
 
 La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Godot, Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
 
