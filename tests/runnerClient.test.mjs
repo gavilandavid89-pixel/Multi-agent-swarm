@@ -9,14 +9,21 @@ const moduleUrl = new URL('../apps/worker/services/runnerClient.js', import.meta
 test('Worker client authenticates, sends idempotency, polls asynchronously, and parses toolchain results', async t => {
   const seen = [];
   const pollSecrets = [];
+  let readyAttempts = 0;
   const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const raw = Buffer.concat(chunks).toString('utf8');
     if (req.url === '/readyz' && req.method === 'GET') {
       pollSecrets.push(req.headers['x-swarm-runner-secret']);
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, docker: 'ready', image: 'ready' }));
+      readyAttempts += 1;
+      if (readyAttempts < 3) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, starting: true }));
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, docker: 'ready', image: 'ready' }));
+      }
       return;
     }
     if (req.url === '/v1/jobs' && req.method === 'POST') {
@@ -56,6 +63,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
     includeArtifacts: true
   });
   assert.equal(job.ok, true);
+  assert.equal(readyAttempts, 3, 'Worker should retry transient readiness responses');
   assert.equal(job.checked, true);
   assert.equal(job.exitCode, 0);
   assert.equal(seen[0].secret, 'test-runner-secret-that-is-long-enough-32');
