@@ -215,20 +215,28 @@ async function runJob(job) {
   active++;
   job.status = 'running'; job.startedAt = new Date().toISOString(); await save(job);
   const started = Date.now(); let timedOut = false; let cancelled = false; let timer; let currentChild = null;
+  let stopPromise = Promise.resolve();
   const cancel = () => {
     cancelled = true;
-    void killJobContainer(job);
-    try { currentChild?.kill('SIGTERM'); } catch {}
+    stopPromise = (async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await killJobContainer(job);
+      try { currentChild?.kill('SIGTERM'); } catch {}
+    })();
   };
   running.set(job.id, { cancel });
   timer = setTimeout(() => {
     timedOut = true;
-    void (async () => { await new Promise(resolve => setTimeout(resolve, 300)); await killJobContainer(job); })();
-    try { currentChild?.kill('SIGTERM'); } catch {}
-    setTimeout(() => { try { currentChild?.kill('SIGKILL'); } catch {} }, 3000).unref();
+    stopPromise = (async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await killJobContainer(job);
+      try { currentChild?.kill('SIGTERM'); } catch {}
+      setTimeout(() => { try { currentChild?.kill('SIGKILL'); } catch {} }, 3000).unref();
+    })();
   }, job.timeoutMs);
   try {
     if (job.network === 'restricted') await ensureRestrictedNetwork();
+    if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de iniciar el contenedor.');
     await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
     const result = await new Promise(resolve => {
       let settled = false;
@@ -239,6 +247,7 @@ async function runJob(job) {
       currentChild.on('error', error => finish({ code: null, error: error.message }));
       currentChild.on('close', code => finish({ code, error: null }));
     });
+    if (timedOut || cancelled) await stopPromise;
     job.exitCode = result.code;
     job.timedOut = timedOut;
     job.cancelled = cancelled;
