@@ -4,5 +4,5 @@
   "private": true,
   "type": "module",
   "engines": { "node": "22.x" },
-  "scripts": { "check": "node scripts/check.mjs && node --test tests/*.test.mjs" }
+  "scripts": { "check": "node scripts/check.mjs && node --check apps/runner-api/server.js && node --test tests/*.test.mjs apps/runner-api/*.test.js" }
 }
