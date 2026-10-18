@@ -31,7 +31,6 @@ El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos p
 | runner.jobStatus | jobId | Desarrollador y Validador; solo IDs devueltos por una herramienta en esa misma sesión de dispatcher |
 | runner.cancel | jobId | Solo Desarrollador; solo IDs devueltos por una herramienta en esa misma sesión |
 | runner.artifact.read | jobId, artifactId | Desarrollador y Validador; recupera un artefacto por ID para un job de su sesión |
-| runner.artifacts.read | jobId, path | Recupera un artefacto con límites y filtro de datos sensibles |
 
 **No exponer** herramientas como docker.run, host.exec, network.open, read.hostFile, setEnvironment o editAllowlist. No permitir que el modelo elija una URL de proxy, nombre de red Docker, imagen arbitraria, mount, UID, variables de entorno del host o parámetros de privilegio.
 
