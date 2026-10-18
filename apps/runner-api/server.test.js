@@ -24,6 +24,10 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes('cp -R -P /input/. /workspace/ && find /workspace -mindepth 1 ! -type l -exec chmod a+rwX,u-s,g-s,o-t {} + && touch /tmp/swarm-runner-ready && exec tail -f /dev/null'));
   assert.ok(source.includes("'exec', '--workdir', '/workspace', '--user', '10001:10001', cid, 'timeout'"));
   assert.ok(source.includes("content.includes('\\u0000') || containsCredential(content)"));
+  assert.ok(source.includes("inventory.stdout.split"));
+  assert.ok(source.includes("'-print0'"));
+  assert.ok(source.includes("No se pudo recuperar el archivo de salida"));
+  assert.ok(source.includes("0x1f"));
   assert.ok(source.includes("'--user', '65532:65532'"));
   assert.ok(source.includes("mode: 0o755"));
   assert.ok(source.includes("mode: 0o644"));
