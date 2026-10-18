@@ -109,13 +109,19 @@ async function save(job) {
   await fsp.rename(temp, target);
 }
 async function writeWorkspace(job, files, resetWorkspace) {
-  if (resetWorkspace) await fsp.rm(job.workspace, { recursive: true, force: true });
-  await fsp.mkdir(job.workspace, { recursive: false, mode: 0o700 }).catch(error => {
-    if (error.code !== 'EEXIST' || resetWorkspace) throw error;
-  });
-  const workspaceStat = await fsp.stat(job.workspace);
-  if (!workspaceStat.isDirectory()) throw Object.assign(new Error('El workspace existente no es un directorio.'), { status: 409 });
-  if (!resetWorkspace && files.length) throw Object.assign(new Error('No se pueden añadir archivos a un workspace existente sin reset.'), { status: 400 });
+  if (resetWorkspace) {
+    await fsp.rm(job.workspace, { recursive: true, force: true });
+    await fsp.mkdir(job.workspace, { recursive: false, mode: 0o700 });
+  } else {
+    let workspaceStat;
+    try { workspaceStat = await fsp.stat(job.workspace); }
+    catch (error) {
+      if (error.code === 'ENOENT') throw Object.assign(new Error('No existe el workspace para reutilizar.'), { status: 404 });
+      throw error;
+    }
+    if (!workspaceStat.isDirectory()) throw Object.assign(new Error('El workspace existente no es un directorio.'), { status: 409 });
+    if (files.length) throw Object.assign(new Error('No se pueden añadir archivos a un workspace existente sin reset.'), { status: 400 });
+  }
   for (const file of files) {
     const target = path.resolve(job.workspace, ...file.path.split('/'));
     if (!target.startsWith(job.workspace + path.sep)) throw new Error('La ruta sale del workspace.');
@@ -383,7 +389,12 @@ async function initialize() {
         await fsp.rm(path.join(WORKSPACES, job.workspaceId || job.id), { recursive: true, force: true });
         continue;
       }
-      if (job.status === 'running') { job.status = 'failed'; job.error = 'El servicio se reinició durante la ejecución; se requiere reintentar.'; job.finishedAt = new Date().toISOString(); await save(job); }
+      if (job.status === 'running') {
+        await killJobContainer(job).catch(() => {});
+        await removeJobContainer(job).catch(() => {});
+        job.status = 'failed'; job.error = 'El servicio se reinició durante la ejecución; el contenedor fue detenido y se requiere reintentar.';
+        job.finishedAt = new Date().toISOString(); await save(job);
+      }
       jobs.set(job.id, job);
       if (job.idempotencyKey) idempotency.set(job.idempotencyKey, job.id);
       if (job.status === 'queued') {
