@@ -149,6 +149,30 @@ with urllib.request.urlopen("https://registry.npmjs.org/-/ping", timeout=10) as 
 '
 echo "PASS restricted egress allows an explicitly approved package host"
 
+# Verify the API's own restricted-network mode, not just the local wrapper.
+api_network_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"22222222-2222-4222-8222-222222222222",resetWorkspace:true,
+  command:["python3","-c","import urllib.request; r=urllib.request.urlopen(\\"https://registry.npmjs.org/-/ping\\",timeout=10); assert r.status==200"],
+  network:"restricted",timeoutMs:15000
+}))')
+api_network_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-egress-0001' \
+  -d "$api_network_body")
+api_network_id=$(printf '%s' "$api_network_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+api_network_json=
+i=0
+while [ "$i" -lt 60 ]; do
+  api_network_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$api_network_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$api_network_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$api_network_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||j.exitCode!==0){console.error("FAIL API restricted egress:",JSON.stringify(j));process.exit(1)}})'
+echo "PASS runner API restricted mode reaches allowlisted package host"
+
 set +e
 SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
 import urllib.request
