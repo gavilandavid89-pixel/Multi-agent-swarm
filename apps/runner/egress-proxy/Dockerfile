@@ -9,4 +9,4 @@ COPY squid.conf /etc/squid/squid.conf
 COPY allowed-domains.txt /etc/squid/allowed-domains.txt
 EXPOSE 3128
 USER proxy
-CMD ["-N", "-f", "/etc/squid/squid.conf"]
+CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]
