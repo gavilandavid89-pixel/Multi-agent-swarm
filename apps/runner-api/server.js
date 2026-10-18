@@ -286,12 +286,10 @@ async function runJob(job) {
     }
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de ejecutar el comando.');
     const timeoutSeconds = Math.max(1, Math.ceil(job.timeoutMs / 1000));
-    const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
-    const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
     const result = await new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; resolve(value); };
-      currentChild = spawn(DOCKER, ['exec', '--user', uid + ':' + gid, cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
+      currentChild = spawn(DOCKER, ['exec', '--user', '10001:10001', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
       currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
       currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
       currentChild.on('error', error => finish({ code: null, error: error.message }));
