@@ -29,6 +29,7 @@ const running = new Map();
 const workspaceBusy = new Map();
 let active = 0;
 let closing = false;
+let initialized = false;
 
 if (SECRET.length < 32 || /replace-with|your-/i.test(SECRET)) {
   throw new Error('RUNNER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
@@ -354,12 +355,14 @@ async function handle(req, res) {
   const url = new URL(req.url || '/', 'http://runner.local');
   if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, role: 'agent-runner-api' });
   if (req.method === 'GET' && url.pathname === '/readyz') {
+    if (!initialized) return json(res, 503, { ok: false, starting: true });
     const info = await dockerCommand(['info', '--format', '{{.ServerVersion}}'], 5000);
     if (info.code !== 0) return json(res, 503, { ok: false, docker: 'unavailable' });
     const image = await dockerCommand(['image', 'inspect', IMAGE], 5000);
     if (image.code !== 0) return json(res, 503, { ok: false, docker: 'ready', image: 'missing' });
     return json(res, 200, { ok: true, docker: 'ready', image: 'ready', queue: queue.length, active });
   }
+  if (!initialized) return json(res, 503, { error: 'Runner is starting; retry shortly.' });
   if (!url.pathname.startsWith('/v1/')) return json(res, 404, { error: 'No encontrado.' });
   if (!safeEqual(req.headers['x-swarm-runner-secret'], SECRET)) return json(res, 401, { error: 'No autorizado.' });
   if (req.method === 'POST' && url.pathname === '/v1/jobs') {
@@ -449,6 +452,7 @@ async function initialize() {
   }
   await pump();
   setInterval(() => { void pruneOldJobs().catch(() => {}); }, 10 * 60 * 1000).unref();
+  initialized = true;
 }
 const server = createServer((req, res) => {
   void handle(req, res).catch(error => {
