@@ -16,7 +16,9 @@ sudo install -d -o swarm-runner -g swarm-runner -m 0700 /var/lib/swarm-runner
 cd apps/runner-api
 cp .env.example .env
 # Set RUNNER_SHARED_SECRET to a fresh 32+ character random secret, never commit it.
-node server.js
+chmod 600 .env
+# Run as the dedicated account with its rootless Docker environment configured.
+sudo -u swarm-runner npm start
 ```
 
 Set `RUNNER_SHARED_SECRET` to the exact same random secret configured as `AGENT_RUNNER_SHARED_SECRET` on the Worker; it must be different from `WORKER_SHARED_SECRET`. Keep the API reachable only over a private network/firewall rule from the Worker.
