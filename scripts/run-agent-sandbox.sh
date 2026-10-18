@@ -28,8 +28,21 @@ workspace=$(CDPATH= cd -- "$workspace_arg" 2>/dev/null && pwd -P) || {
   exit 2
 }
 case "$workspace" in
-  /|/home|/home/*|/root|/root/*|/etc|/etc/*|/usr|/usr/*|/var|/var/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/tmp|/tmp/*)
+  /|/home|/root|/root/*|/etc|/etc/*|/usr|/usr/*|/var|/var/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/tmp)
     echo "ERROR: se rechazó un directorio raíz, del sistema o temporal del host: $workspace" >&2
+    exit 2
+    ;;
+esac
+# Allow project folders under a user's home (and dedicated /tmp workspaces), but
+# never mount the entire current home or well-known credential directories.
+host_home=$(CDPATH= cd -- "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || true)
+if [ -n "$host_home" ] && [ "$workspace" = "$host_home" ]; then
+  echo "ERROR: no se permite montar el home completo del usuario." >&2
+  exit 2
+fi
+case "$workspace" in
+  */.ssh|*/.ssh/*|*/.aws|*/.aws/*|*/.azure|*/.azure/*|*/.kube|*/.kube/*|*/.gnupg|*/.gnupg/*|*/.docker|*/.docker/*)
+    echo "ERROR: no se permite montar directorios que suelen contener credenciales: $workspace" >&2
     exit 2
     ;;
 esac
@@ -54,6 +67,11 @@ case "$network_mode" in
     if ! docker network inspect "$docker_network" >/dev/null 2>&1; then
       echo "ERROR: falta la red interna '$docker_network' y su proxy de salida con allowlist." >&2
       echo "No se habilita acceso directo a Internet como alternativa." >&2
+      exit 125
+    fi
+    network_is_internal=$(docker network inspect --format '{{.Internal}}' "$docker_network")
+    if [ "$network_is_internal" != true ]; then
+      echo "ERROR: '$docker_network' existe pero no es una red Docker interna; se rechaza por seguridad." >&2
       exit 125
     fi
     ;;
