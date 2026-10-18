@@ -17,7 +17,21 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se h
 | Web UI | Chromium, Xvfb, xauth y fuentes básicas |
 | Operación | git, bash, coreutils, findutils, pkg-config |
 
-La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker puede ejecutar comprobaciones de toolchain en el runner y usar sus resultados para decidir si una entrega necesita correcciones. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
+La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker ejecuta comprobaciones de toolchain y perfiles de prueba en el runner; los fallos reales se convierten en hallazgos del ciclo correctivo. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados, filtrado de credenciales conocidas y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
+
+### Perfiles de ejecución automática
+
+- JavaScript: `node --check` y validación JSON.
+- Python: `py_compile`; cuando hay tests, prepara `requirements.txt` con egress limitado y ejecuta `pytest` sin red.
+- Node.js: si hay script `test` o `build`, instala desde `package-lock.json`/shrinkwrap con egress limitado y ejecuta tests/build sin red.
+- Go: valida sintaxis; con `go.mod` y `go.sum`, descarga módulos por el proxy y ejecuta `go test` offline.
+- Rust: `rustc`/comprobaciones estáticas y, con `Cargo.toml` + `Cargo.lock`, `cargo fetch` restringido y `cargo test --offline`.
+- Java/Maven: compila fuentes simples o resuelve dependencias con Maven bajo egress limitado y ejecuta `mvn -o test`.
+- Gradle: usa el wrapper del proyecto para resolver/compilar con proxy y después ejecuta `test` offline.
+- PHP/Composer y Ruby/Bundler: cuando hay lockfile y scripts de test, prepara dependencias con egress restringido y ejecuta tests offline.
+- C/C++ y shell: comprobación sintáctica. Chromium/Xvfb está disponible para pruebas de navegador.
+
+La detección automática está pensada para manifiestos de la raíz del proyecto; monorepos con varios gestores, SDK de Godot/Android/.NET/CUDA y builds que superan el tmpfs necesitan perfiles/imágenes específicas. El límite de 256 MiB por workspace hace que proyectos de dependencias pesadas fallen de forma explícita en vez de consumir disco del host.
 
 La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Godot, Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
 
