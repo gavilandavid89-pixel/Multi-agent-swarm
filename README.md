@@ -162,5 +162,13 @@ La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI
 
 - Diseño, capacidades, límites, red restringida y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
+
+### Modos de red del runner experimental
+
+- Predeterminado: `SWARM_RUNNER_NETWORK=none`; la ejecución no tiene red.
+- Opcional para dependencias: primero iniciá el proxy con `docker compose -f docker-compose.runner-egress.yml up --build -d`, y después usá `SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm ci`. La salida se limita a los hosts de `apps/runner/egress-proxy/allowed-domains.txt`; destinos no listados se deniegan. Apagá el proxy con `docker compose -f docker-compose.runner-egress.yml down`.
+- No agregues dominios sin revisar su necesidad. No habilites la red restringida para ejecutar tareas arbitrarias que tengan secretos. El modo restringido falla cerrado si la red no existe o no está marcada como interna.
+- El runner y el proxy son experimentales; la validación CI debe demostrar que los hosts permitidos funcionan y los no permitidos fallan antes de integrar. La red Docker y el proxy no sustituyen una política de DNS/egress del host para código hostil multiusuario.
+
 - Frontera de seguridad y arquitectura objetivo del runner de producción: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
 - El runner experimental no está desplegado ni conectado al worker. Revisar y ejecutar pruebas de CI antes de integrar; no ejecutar código generado en el proceso del worker ni habilitar red libre para corregir dependencias ausentes.
