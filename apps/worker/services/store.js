@@ -4,6 +4,7 @@ import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash }
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
 import { generateTaskTitle } from './taskTitle.js';
+import { normalizeDiagnosticReport, sanitizeDiagnosticText } from './diagnosticNormalizer.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -79,6 +80,24 @@ export async function initStore() {
   )`);
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_updated_idx ON jobs(updated_at DESC)');
   await pool.query('CREATE INDEX IF NOT EXISTS jobs_created_idx ON jobs(created_at DESC)');
+  await pool.query(`CREATE TABLE IF NOT EXISTS diagnostic_reports (
+    report_id TEXT PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    severity TEXT NOT NULL,
+    category TEXT NOT NULL,
+    service TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    task_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    report JSONB NOT NULL,
+    triage JSONB,
+    attempts INTEGER NOT NULL DEFAULT 0
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS diagnostic_reports_status_idx ON diagnostic_reports(status, received_at DESC)');
+  await pool.query('CREATE INDEX IF NOT EXISTS diagnostic_reports_fingerprint_idx ON diagnostic_reports(fingerprint, received_at DESC)');
   await pool.query(`CREATE TABLE IF NOT EXISTS job_request_idempotency (
     idempotency_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL,
     job_id TEXT UNIQUE, created_at TIMESTAMPTZ NOT NULL
@@ -104,6 +123,82 @@ export async function initStore() {
   await pool.query('SELECT 1');
   console.info('[worker][storage_ready] PostgreSQL conectado; historial cifrado habilitado.');
 }
+
+const DIAGNOSTIC_MAX_REPORTS = 5000;
+export async function saveDiagnosticReport(input) {
+  const normalized = normalizeDiagnosticReport(input);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const prior = await client.query('SELECT report_id,status FROM diagnostic_reports WHERE report_id=$1 FOR UPDATE', [normalized.reportId]);
+    if (prior.rows[0]) {
+      await client.query('COMMIT');
+      return { reportId: normalized.reportId, duplicate: true, status: prior.rows[0].status };
+    }
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [normalized.fingerprint]);
+    const recent = await client.query(
+      "SELECT report_id FROM diagnostic_reports WHERE fingerprint=$1 AND received_at > now() - interval '10 minutes' ORDER BY received_at DESC LIMIT 1",
+      [normalized.fingerprint]
+    );
+    if (recent.rows[0]) {
+      await client.query('COMMIT');
+      return { reportId: recent.rows[0].report_id, duplicate: true, deduplicated: true };
+    }
+    await client.query(
+      'INSERT INTO diagnostic_reports(report_id,occurred_at,severity,category,service,environment,summary,fingerprint,task_id,status,report) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)',
+      [normalized.reportId, normalized.report.occurredAt, normalized.severity, normalized.category, normalized.service, normalized.environment, normalized.summary, normalized.fingerprint, normalized.taskId, 'queued', JSON.stringify(normalized.report)]
+    );
+    await client.query("DELETE FROM diagnostic_reports WHERE report_id IN (SELECT report_id FROM diagnostic_reports ORDER BY received_at DESC OFFSET $1)", [DIAGNOSTIC_MAX_REPORTS]);
+    await client.query('COMMIT');
+    return { reportId: normalized.reportId, duplicate: false, status: 'queued' };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
+}
+export async function listDiagnosticReports({ limit = 25, offset = 0, status = '' } = {}) {
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 25));
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const values = status ? [status, safeLimit, safeOffset] : [safeLimit, safeOffset];
+  const where = status ? 'WHERE status=$1' : '';
+  const limitPos = status ? '$2' : '$1';
+  const offsetPos = status ? '$3' : '$2';
+  const { rows } = await pool.query(
+    `SELECT report_id,occurred_at,received_at,severity,category,service,environment,summary,task_id,status,attempts,triage FROM diagnostic_reports ${where} ORDER BY received_at DESC LIMIT ${limitPos} OFFSET ${offsetPos}`,
+    values
+  );
+  return rows.map(row => ({ reportId: row.report_id, occurredAt: toIso(row.occurred_at), receivedAt: toIso(row.received_at), severity: row.severity, category: row.category, service: row.service, environment: row.environment, summary: row.summary, taskId: row.task_id, status: row.status, attempts: row.attempts, triage: row.triage }));
+}
+export async function getDiagnosticReport(reportId) {
+  const { rows } = await pool.query('SELECT report_id,occurred_at,received_at,severity,category,service,environment,summary,task_id,status,attempts,report,triage FROM diagnostic_reports WHERE report_id=$1', [reportId]);
+  const row = rows[0];
+  return row ? { reportId: row.report_id, occurredAt: toIso(row.occurred_at), receivedAt: toIso(row.received_at), severity: row.severity, category: row.category, service: row.service, environment: row.environment, summary: row.summary, taskId: row.task_id, status: row.status, attempts: row.attempts, report: row.report, triage: row.triage } : null;
+}
+
+
+export async function updateDiagnosticTriage(reportId, input = {}) {
+  const allowed = new Set(['queued', 'investigating', 'investigated', 'resolved', 'ignored']);
+  if (!allowed.has(input.status)) {
+    const error = new Error('Estado de triage inválido.');
+    error.status = 400;
+    throw error;
+  }
+  const triage = {
+    status: input.status,
+    analysis: sanitizeDiagnosticText(input.analysis || '', 6000),
+    likelyCause: sanitizeDiagnosticText(input.likelyCause || '', 1500),
+    nextTests: Array.isArray(input.nextTests) ? input.nextTests.slice(0, 12).map(item => sanitizeDiagnosticText(item, 500)) : [],
+    resolvedAt: input.status === 'resolved' ? new Date().toISOString() : null,
+    updatedAt: new Date().toISOString()
+  };
+  const { rows } = await pool.query(
+    'UPDATE diagnostic_reports SET status=$2, triage=$3::jsonb, attempts=attempts + CASE WHEN $2=\'investigating\' THEN 1 ELSE 0 END WHERE report_id=$1 RETURNING report_id,status,attempts,triage',
+    [reportId, input.status, JSON.stringify(triage)]
+  );
+  if (!rows[0]) return null;
+  return { reportId: rows[0].report_id, status: rows[0].status, attempts: rows[0].attempts, triage: rows[0].triage };
+}
+
 function safeArtifactPath(value) {
   let candidate = String(value || '').trim().replace(/^\x60|\x60$/g, '').replace(/^(?:Archivo|File|Ruta)\s*:\s*/i, '').replace(/^\.\//, '').replace(/\\/g, '/');
   candidate = candidate.split(/[\r\n]/)[0].trim().replace(/^['"]|['"]$/g, '');

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import 'dotenv/config';
 import express from 'express';
-import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
+import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact, saveDiagnosticReport, listDiagnosticReports, getDiagnosticReport, updateDiagnosticTriage } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
@@ -55,6 +55,22 @@ async function runJobWithAccountProviders(id) {
     return result;
   });
 }
+async function recordWorkerFailure(id, error) {
+  try {
+    await saveDiagnosticReport({
+      service: 'swarm-worker',
+      environment: ['development','test','staging','production'].includes(process.env.NODE_ENV) ? process.env.NODE_ENV : 'unknown',
+      severity: 'error',
+      category: 'runtime',
+      summary: String(error?.message || 'Falló la ejecución de una tarea').slice(0, 500),
+      error: { name: error?.name || 'Error', message: error?.message || 'Error sin mensaje', stack: error?.stack || '' },
+      correlation: { taskId: id, checkpoint: 'worker-job-execution' },
+      operation: { name: 'processJob', retryable: false }
+    });
+  } catch (storeError) {
+    console.error('[worker][diagnostic_capture_failed]', JSON.stringify({ jobId: id, code: storeError?.code || 'storage' }));
+  }
+}
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
 function pump() {
   if (shuttingDown) return;
@@ -66,7 +82,7 @@ function pump() {
         const nextJobId = result.continuationJobId || id;
         const timer = setTimeout(() => enqueue(nextJobId), delay); timer.unref();
       }
-    }).catch(error => console.error('[worker] fallo inesperado', id, error?.message || error)).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
+    }).catch(async error => { console.error('[worker] fallo inesperado', JSON.stringify({ jobId: id, errorName: String(error?.name || 'Error').slice(0, 80) })); await recordWorkerFailure(id, error); }).finally(() => { active.delete(id); if (shuttingDown) maybeExit(); else pump(); });
   }
 }
 app.post('/internal/account/apis/:slot/test', async (req, res) => {
@@ -80,6 +96,48 @@ app.post('/internal/admin/import-legacy-apis', async (req, res) => {
   try { res.json(await importLegacyProvidersForUser(userId)); }
   catch (error) { console.error('[worker][legacy_api_import_failed]', error?.code || 'internal'); res.status(503).json({ error: 'No se pudieron migrar las APIs heredadas.' }); }
 });
+
+app.post('/internal/diagnostics', async (req, res) => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  if (Buffer.byteLength(JSON.stringify(body), 'utf8') > 32000) return res.status(413).json({ error: 'El informe supera 32 KB.' });
+  if (!String(body.summary || body.error?.message || '').trim()) return res.status(400).json({ error: 'El informe necesita un resumen o mensaje de error.' });
+  try {
+    const result = await saveDiagnosticReport(body);
+    console.info('[worker][diagnostic_report_received]', JSON.stringify({ reportId: result.reportId, duplicate: result.duplicate, category: body.category || 'unknown', severity: body.severity || 'error' }));
+    res.status(result.duplicate ? 200 : 202).json({ ok: true, ...result, triage: result.status || 'queued' });
+  } catch (error) {
+    console.error('[worker][diagnostic_report_store_failed]', JSON.stringify({ code: error?.code || 'database' }));
+    res.status(503).json({ error: 'No se pudo guardar el informe de diagnóstico; se puede reintentar de forma segura.' });
+  }
+});
+app.get('/internal/diagnostics', async (req, res) => {
+  const status = ['queued','investigating','investigated','resolved','ignored'].includes(String(req.query.status || '')) ? String(req.query.status) : '';
+  try { res.json({ reports: await listDiagnosticReports({ limit: req.query.limit, offset: req.query.offset, status }) }); }
+  catch { res.status(503).json({ error: 'No se pudieron consultar los informes de diagnóstico.' }); }
+});
+app.get('/internal/diagnostics/:id', async (req, res) => {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(req.params.id)) return res.status(400).json({ error: 'ID de informe inválido.' });
+  try {
+    const report = await getDiagnosticReport(req.params.id);
+    if (!report) return res.status(404).json({ error: 'No existe ese informe.' });
+    res.json(report);
+  } catch { res.status(503).json({ error: 'No se pudo consultar el informe.' }); }
+});
+
+
+app.patch('/internal/diagnostics/:id/triage', async (req, res) => {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(req.params.id)) return res.status(400).json({ error: 'ID de informe inválido.' });
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  try {
+    const result = await updateDiagnosticTriage(req.params.id, body);
+    if (!result) return res.status(404).json({ error: 'No existe ese informe.' });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    res.status(503).json({ error: 'No se pudo guardar el estado de investigación.' });
+  }
+});
+
 app.get('/internal/history', async (_req, res, next) => { try { res.json(await historySummary()); } catch (error) { next(error); } });
 app.get('/internal/jobs', async (req, res, next) => {
   const requestedStatus = String(req.query.status || '');

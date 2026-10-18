@@ -1,0 +1,67 @@
+name: Agent IDE and diagnostics
+
+on:
+  pull_request:
+    paths:
+      - 'apps/worker/**'
+      - 'apps/agent-ide/**'
+      - 'docs/diagnostics/**'
+      - 'docs/agent-ide/**'
+      - '.github/workflows/agent-ide-diagnostics.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/worker/**'
+      - 'apps/agent-ide/**'
+      - 'docs/diagnostics/**'
+      - 'docs/agent-ide/**'
+
+permissions:
+  contents: read
+
+jobs:
+  worker-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: swarm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d swarm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/swarm_test?sslmode=disable
+      HISTORY_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/worker/package-lock.json
+      - run: npm ci --prefix apps/worker --no-audit --no-fund
+      - name: Verify diagnostic tests use the CI PostgreSQL service
+        run: node -e "const u = new URL(process.env.DATABASE_URL); if (u.username !== 'postgres' || u.pathname !== '/swarm_test') process.exit(1); console.log('PostgreSQL test target:', u.username, u.pathname)"
+      - name: Run worker tests against CI PostgreSQL
+        run: npm --prefix apps/worker test
+      - run: npm --prefix apps/worker run check
+      - run: sh -n apps/agent-ide/start-agent-ide.sh
+
+  ide-image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./apps/agent-ide
+          file: ./apps/agent-ide/Dockerfile
+          push: false
+          tags: swarm-agent-ide:ci
