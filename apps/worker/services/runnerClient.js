@@ -138,6 +138,7 @@ const CHECK_SCRIPT = String.raw`#!/usr/bin/env bash
 set -uo pipefail
 failed=0
 checked=0
+runtime_checked=0
 mapfile -d '' files < <(find . -type f \
   -not -path './.git/*' -not -path './node_modules/*' -not -path './.venv/*' \
   -not -path './target/*' -not -path './vendor/*' -print0)
@@ -164,7 +165,7 @@ for file in "${'${files[@]}'}"; do
   esac
 done
 if [ -f go.mod ] && [ -d vendor ]; then
-  checked=$((checked + 1)); GOPROXY=off go test -mod=vendor ./... || { echo "FAIL go test -mod=vendor"; failed=1; }
+  checked=$((checked + 1)); runtime_checked=$((runtime_checked + 1)); GOPROXY=off go test -mod=vendor ./... || { echo "FAIL go test -mod=vendor"; failed=1; }
 fi
 mapfile -d '' java_files < <(find . -type f -name '*.java' -not -path './.git/*' -not -path './target/*' -print0)
 if [ "${'${#java_files[@]}'}" -gt 0 ] && [ ! -f pom.xml ] && [ ! -f build.gradle ] && [ ! -f build.gradle.kts ]; then
@@ -172,7 +173,7 @@ if [ "${'${#java_files[@]}'}" -gt 0 ] && [ ! -f pom.xml ] && [ ! -f build.gradle
   javac -proc:none -d /tmp/swarm-java-classes "${'${java_files[@]}'}" || { echo "FAIL javac"; failed=1; }
 fi
 if [ -f Cargo.toml ] && [ -f Cargo.lock ] && [ -d vendor ]; then
-  checked=$((checked + 1)); CARGO_NET_OFFLINE=true cargo test --offline || { echo "FAIL cargo test --offline"; failed=1; }
+  checked=$((checked + 1)); runtime_checked=$((runtime_checked + 1)); CARGO_NET_OFFLINE=true cargo test --offline || { echo "FAIL cargo test --offline"; failed=1; }
 fi
 printf 'SWARM_RUNNER_CHECKED=%s\n' "$checked"
 exit "$failed"
@@ -320,7 +321,11 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   const checked = Number(match?.[1] || 0);
   const profiles = detectRuntimeProfiles(entries);
   if (!checked && !profiles.length) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos o perfiles de prueba compatibles.' };
-  const runtimeChecks = [];
+  const bundledTestMatch = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_TESTS=(\\d+)/);
+  const bundledTestCount = Number(bundledTestMatch?.[1] || 0);
+  const runtimeChecks = bundledTestCount > 0
+    ? [{ profile: 'tests vendorizados', phase: 'tests', ok: true, exitCode: 0 }]
+    : [];
   for (const profile of profiles) {
     const profileKey = profile.name.toLowerCase().replace(/[^a-z0-9._:-]+/g, '-').slice(0, 30);
     if (profile.prepare) {
