@@ -141,30 +141,25 @@ function appendOutput(job, key, chunk) {
 }
 async function dockerCommand(args, timeoutMs = 5000) {
   return new Promise(resolve => {
-    const child = spawn(DOCKER, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = ''; let done = false;
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ code: null, stderr: 'Docker command timeout.' }); }, timeoutMs);
+    const child = spawn(DOCKER, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = ''; let stderr = ''; let done = false;
+    const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ code: null, stdout, stderr: 'Docker command timeout.' }); }, timeoutMs);
     const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
+    child.stdout.on('data', chunk => { if (stdout.length < 4000) stdout += chunk.toString('utf8'); });
     child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk.toString('utf8'); });
-    child.on('error', error => finish({ code: null, stderr: error.message }));
-    child.on('close', code => finish({ code, stderr }));
+    child.on('error', error => finish({ code: null, stdout, stderr: error.message }));
+    child.on('close', code => finish({ code, stdout, stderr }));
   });
 }
 async function ensureRestrictedNetwork() {
   const net = await dockerCommand(['network', 'inspect', '--format', '{{.Internal}}', 'swarm-agent-egress']);
-  if (net.code !== 0 || net.stderr.trim() !== '' ) throw Object.assign(new Error('No se pudo verificar la red interna swarm-agent-egress.'), { status: 503 });
-  // dockerCommand suppresses stdout; inspect again with a small explicit output helper.
-  const result = await new Promise(resolve => {
-    const child = spawn(DOCKER, ['network', 'inspect', '--format', '{{.Internal}}', 'swarm-agent-egress'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = ''; let stderr = ''; const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: null, stdout, stderr }); }, 5000);
-    child.stdout.on('data', c => { if (stdout.length < 1000) stdout += c.toString(); });
-    child.stderr.on('data', c => { if (stderr.length < 1000) stderr += c.toString(); });
-    child.on('error', error => { clearTimeout(timer); resolve({ code: null, stdout, stderr: error.message }); });
-    child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
-  });
-  if (result.code !== 0 || result.stdout.trim() !== 'true') throw Object.assign(new Error('La red swarm-agent-egress no existe o no es internal=true.'), { status: 503 });
+  if (net.code !== 0 || net.stdout.trim() !== 'true') {
+    throw Object.assign(new Error('La red swarm-agent-egress no existe o no es internal=true.'), { status: 503 });
+  }
   const proxy = await dockerCommand(['inspect', '--format', '{{.State.Health.Status}}', 'swarm-egress-proxy']);
-  if (proxy.code !== 0 || proxy.stderr.trim()) throw Object.assign(new Error('No se pudo verificar el estado del proxy.'), { status: 503 });
+  if (proxy.code !== 0 || proxy.stdout.trim() !== 'healthy') {
+    throw Object.assign(new Error('El proxy swarm-egress-proxy no está healthy.'), { status: 503 });
+  }
 }
 async function killJobContainer(job) {
   let cid = '';
@@ -214,7 +209,7 @@ async function runJob(job) {
       const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
       timer = setTimeout(() => {
         timedOut = true;
-        void killJobContainer(job);
+        void (async () => { await new Promise(resolve => setTimeout(resolve, 300)); await killJobContainer(job); })();
         child.kill('SIGTERM');
         setTimeout(() => child.kill('SIGKILL'), 3000).unref();
       }, job.timeoutMs);
@@ -316,9 +311,13 @@ const server = createServer((req, res) => {
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 5000;
-server.listen(PORT, '0.0.0.0', async () => {
-  await initialize();
-  console.log('[runner-api] listening', JSON.stringify({ port: PORT, concurrency: MAX_CONCURRENCY, image: IMAGE }));
+server.listen(PORT, '0.0.0.0', () => {
+  void initialize().then(() => {
+    console.log('[runner-api] listening', JSON.stringify({ port: PORT, concurrency: MAX_CONCURRENCY, image: IMAGE }));
+  }).catch(error => {
+    console.error('[runner-api] initialization failed', error?.message || error);
+    process.exit(1);
+  });
 });
 function shutdown() {
   if (closing) return;
