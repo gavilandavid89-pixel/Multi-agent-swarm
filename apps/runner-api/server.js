@@ -1,0 +1,331 @@
+import { createServer } from 'node:http';
+import { timingSafeEqual, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
+const PORT = Number(process.env.PORT || 3200);
+const SECRET = process.env.RUNNER_SHARED_SECRET || '';
+const DOCKER = process.env.RUNNER_DOCKER_BIN || 'docker';
+const IMAGE = process.env.SWARM_RUNNER_IMAGE || 'swarm-agent-runner:local';
+const ROOT = path.resolve(process.env.RUNNER_STATE_DIR || '/var/lib/swarm-runner');
+const WORKSPACES = path.join(ROOT, 'workspaces');
+const STATE = path.join(ROOT, 'jobs');
+const MAX_CONCURRENCY = Math.max(1, Math.min(2, Number.parseInt(process.env.RUNNER_CONCURRENCY || '1', 10) || 1));
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_FILE_BYTES = 256 * 1024;
+const MAX_TOTAL_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_FILES = 200;
+const MAX_OUTPUT_CHARS = 64 * 1024;
+const JOB_TTL_MS = 24 * 60 * 60 * 1000;
+const jobs = new Map();
+const idempotency = new Map();
+const queue = [];
+const running = new Map();
+let active = 0;
+let closing = false;
+
+if (SECRET.length < 32 || /replace-with|your-/i.test(SECRET)) {
+  throw new Error('RUNNER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
+}
+function json(res, status, value) {
+  const body = JSON.stringify(value);
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+  res.end(body);
+}
+async function readJson(req) {
+  let size = 0; const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) throw Object.assign(new Error('El cuerpo supera el límite permitido.'), { status: 413 });
+    chunks.push(chunk);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw Object.assign(new Error('JSON inválido.'), { status: 400 }); }
+}
+function safeRelativePath(input) {
+  if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
+  const parts = input.split('/');
+  if (parts.some(part => !part || part === '.' || part === '..')) return false;
+  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules'].includes(part))) return false;
+  const base = parts.at(-1).toLowerCase();
+  if (base === '.env' || (base.startsWith('.env.') && base !== '.env.example')) return false;
+  return true;
+}
+function validateRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('Cuerpo de solicitud inválido.'), { status: 400 });
+  if (!Array.isArray(body.command) || body.command.length < 1 || body.command.length > 32) throw Object.assign(new Error('command debe ser un arreglo de 1 a 32 argumentos.'), { status: 400 });
+  const command = body.command.map(value => {
+    if (typeof value !== 'string' || value.length > 4096 || value.includes('\0')) throw Object.assign(new Error('Argumento de comando inválido.'), { status: 400 });
+    return value;
+  });
+  if (!command[0] || command[0].startsWith('-')) throw Object.assign(new Error('El ejecutable debe ser explícito.'), { status: 400 });
+  const network = body.network === undefined ? 'none' : body.network;
+  if (!['none', 'restricted'].includes(network)) throw Object.assign(new Error('network solo admite none o restricted.'), { status: 400 });
+  const timeoutMs = Number(body.timeoutMs || 60000);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) throw Object.assign(new Error('timeoutMs debe estar entre 1000 y 120000.'), { status: 400 });
+  if (!Array.isArray(body.files) || body.files.length > MAX_FILES) throw Object.assign(new Error('files debe contener como máximo 200 archivos.'), { status: 400 });
+  let total = 0; const seen = new Set();
+  const files = body.files.map(file => {
+    if (!file || !safeRelativePath(file.path) || typeof file.content !== 'string') throw Object.assign(new Error('Ruta o contenido de archivo inválido.'), { status: 400 });
+    if (seen.has(file.path)) throw Object.assign(new Error('Hay rutas de archivo duplicadas.'), { status: 400 });
+    seen.add(file.path);
+    const bytes = Buffer.byteLength(file.content, 'utf8');
+    if (bytes > MAX_FILE_BYTES) throw Object.assign(new Error('Un archivo supera 256 KiB.'), { status: 413 });
+    total += bytes;
+    if (total > MAX_TOTAL_FILE_BYTES) throw Object.assign(new Error('El proyecto supera 2 MiB.'), { status: 413 });
+    return { path: file.path, content: file.content };
+  });
+  return { command, network, timeoutMs, files };
+}
+function publicJob(job) {
+  return {
+    id: job.id, status: job.status, createdAt: job.createdAt, updatedAt: job.updatedAt,
+    startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
+    exitCode: job.exitCode ?? null, timedOut: Boolean(job.timedOut), cancelled: Boolean(job.cancelled),
+    stdout: job.stdout || '', stderr: job.stderr || '', error: job.error || null,
+    durationMs: job.durationMs ?? null, artifactCount: job.artifactCount ?? 0
+  };
+}
+async function save(job) {
+  job.updatedAt = new Date().toISOString();
+  const target = path.join(STATE, job.id + '.json');
+  const temp = target + '.tmp';
+  await fsp.writeFile(temp, JSON.stringify(job), { mode: 0o600 });
+  await fsp.rename(temp, target);
+}
+async function writeWorkspace(job, files) {
+  await fsp.mkdir(job.workspace, { recursive: false, mode: 0o700 });
+  for (const file of files) {
+    const target = path.resolve(job.workspace, ...file.path.split('/'));
+    if (!target.startsWith(job.workspace + path.sep)) throw new Error('La ruta sale del workspace.');
+    await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
+    await fsp.writeFile(target, file.content, { flag: 'wx', mode: 0o644 });
+  }
+}
+function dockerArgs(job) {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
+  const args = [
+    'run', '--rm', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
+    '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+    '--pids-limit', '128', '--memory', '1g', '--cpus', '2',
+    '--tmpfs', '/tmp:rw,nosuid,nodev,size=512m',
+    '--mount', 'type=bind,src=' + job.workspace + ',dst=/workspace',
+    '--workdir', '/workspace', '--user', uid + ':' + gid,
+    '--env', 'HOME=/tmp', '--env', 'CI=true', '--env', 'LANG=C.UTF-8',
+    '--env', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    '--env', 'CHROME_BIN=/usr/bin/chromium'
+  ];
+  if (job.network === 'restricted') {
+    args.push('--network', 'swarm-agent-egress', '--dns', '127.0.0.1',
+      '--env', 'HTTP_PROXY=http://172.30.0.2:3128',
+      '--env', 'HTTPS_PROXY=http://172.30.0.2:3128',
+      '--env', 'ALL_PROXY=http://172.30.0.2:3128',
+      '--env', 'NO_PROXY=localhost,127.0.0.1,::1');
+  } else args.push('--network', 'none');
+  args.push(IMAGE, ...job.command);
+  return args;
+}
+function appendOutput(job, key, chunk) {
+  const current = job[key] || '';
+  const next = current + chunk.toString('utf8');
+  job[key] = next.length > MAX_OUTPUT_CHARS ? next.slice(-MAX_OUTPUT_CHARS) : next;
+}
+async function dockerCommand(args, timeoutMs = 5000) {
+  return new Promise(resolve => {
+    const child = spawn(DOCKER, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; let done = false;
+    const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ code: null, stderr: 'Docker command timeout.' }); }, timeoutMs);
+    const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
+    child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk.toString('utf8'); });
+    child.on('error', error => finish({ code: null, stderr: error.message }));
+    child.on('close', code => finish({ code, stderr }));
+  });
+}
+async function ensureRestrictedNetwork() {
+  const net = await dockerCommand(['network', 'inspect', '--format', '{{.Internal}}', 'swarm-agent-egress']);
+  if (net.code !== 0 || net.stderr.trim() !== '' ) throw Object.assign(new Error('No se pudo verificar la red interna swarm-agent-egress.'), { status: 503 });
+  // dockerCommand suppresses stdout; inspect again with a small explicit output helper.
+  const result = await new Promise(resolve => {
+    const child = spawn(DOCKER, ['network', 'inspect', '--format', '{{.Internal}}', 'swarm-agent-egress'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = ''; let stderr = ''; const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: null, stdout, stderr }); }, 5000);
+    child.stdout.on('data', c => { if (stdout.length < 1000) stdout += c.toString(); });
+    child.stderr.on('data', c => { if (stderr.length < 1000) stderr += c.toString(); });
+    child.on('error', error => { clearTimeout(timer); resolve({ code: null, stdout, stderr: error.message }); });
+    child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+  });
+  if (result.code !== 0 || result.stdout.trim() !== 'true') throw Object.assign(new Error('La red swarm-agent-egress no existe o no es internal=true.'), { status: 503 });
+  const proxy = await dockerCommand(['inspect', '--format', '{{.State.Health.Status}}', 'swarm-egress-proxy']);
+  if (proxy.code !== 0 || proxy.stderr.trim()) throw Object.assign(new Error('No se pudo verificar el estado del proxy.'), { status: 503 });
+}
+async function killJobContainer(job) {
+  let cid = '';
+  try { cid = (await fsp.readFile(path.join(STATE, job.id + '.cid'), 'utf8')).trim(); } catch {}
+  if (cid && /^[0-9a-f]{12,64}$/i.test(cid)) {
+    await dockerCommand(['kill', cid], 5000);
+    await dockerCommand(['rm', '-f', cid], 5000);
+  }
+}
+async function collectFiles(workspace) {
+  const files = []; let total = 0;
+  async function walk(directory, relative = '') {
+    if (files.length >= 100 || total >= MAX_TOTAL_FILE_BYTES) return;
+    let entries;
+    try { entries = await fsp.readdir(directory, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (files.length >= 100 || total >= MAX_TOTAL_FILE_BYTES) break;
+      if (entry.isSymbolicLink() || ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
+      const name = relative ? relative + '/' + entry.name : entry.name;
+      if (!safeRelativePath(name)) continue;
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(target, name);
+      else if (entry.isFile()) {
+        const stat = await fsp.stat(target);
+        if (stat.size > MAX_FILE_BYTES || total + stat.size > MAX_TOTAL_FILE_BYTES) continue;
+        const content = await fsp.readFile(target, 'utf8');
+        if (content.includes('\u0000')) continue;
+        files.push({ path: name, content }); total += stat.size;
+      }
+    }
+  }
+  await walk(workspace);
+  return files;
+}
+async function runJob(job) {
+  active++;
+  job.status = 'running'; job.startedAt = new Date().toISOString(); await save(job);
+  const started = Date.now(); let timedOut = false; let cancelled = false; let settled = false; let timer;
+  try {
+    if (job.network === 'restricted') await ensureRestrictedNetwork();
+    await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
+    const child = spawn(DOCKER, dockerArgs(job), { stdio: ['ignore', 'pipe', 'pipe'] });
+    running.set(job.id, { child, cancel: () => { cancelled = true; void killJobContainer(job); child.kill('SIGTERM'); } });
+    child.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
+    child.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
+    const result = await new Promise(resolve => {
+      const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+      timer = setTimeout(() => {
+        timedOut = true;
+        void killJobContainer(job);
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), 3000).unref();
+      }, job.timeoutMs);
+      child.on('error', error => finish({ code: null, error: error.message }));
+      child.on('close', code => finish({ code, error: null }));
+    });
+    job.exitCode = result.code;
+    job.timedOut = timedOut;
+    job.cancelled = cancelled;
+    job.error = result.error || null;
+    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : result.code === 0 ? 'succeeded' : 'failed';
+  } catch (error) {
+    job.status = 'failed'; job.error = String(error?.message || error).slice(0, 1200);
+  } finally {
+    clearTimeout(timer);
+    running.delete(job.id);
+    job.durationMs = Date.now() - started;
+    job.finishedAt = new Date().toISOString();
+    try { job.artifactCount = (await collectFiles(job.workspace)).length; } catch {}
+    await save(job).catch(() => {});
+    active--;
+    pump();
+  }
+}
+async function pump() {
+  if (closing) return;
+  while (active < MAX_CONCURRENCY && queue.length) {
+    const id = queue.shift(); const job = jobs.get(id);
+    if (!job || job.status !== 'queued') continue;
+    void runJob(job);
+  }
+}
+async function handle(req, res) {
+  const url = new URL(req.url || '/', 'http://runner.local');
+  if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { ok: true, role: 'agent-runner-api' });
+  if (req.method === 'GET' && url.pathname === '/readyz') {
+    const info = await dockerCommand(['info', '--format', '{{.ServerVersion}}'], 5000);
+    if (info.code !== 0) return json(res, 503, { ok: false, docker: 'unavailable' });
+    const image = await dockerCommand(['image', 'inspect', IMAGE], 5000);
+    if (image.code !== 0) return json(res, 503, { ok: false, docker: 'ready', image: 'missing' });
+    return json(res, 200, { ok: true, docker: 'ready', image: 'ready', queue: queue.length, active });
+  }
+  if (!url.pathname.startsWith('/v1/')) return json(res, 404, { error: 'No encontrado.' });
+  if (!safeEqual(req.headers['x-swarm-runner-secret'], SECRET)) return json(res, 401, { error: 'No autorizado.' });
+  if (req.method === 'POST' && url.pathname === '/v1/jobs') {
+    const body = validateRequest(await readJson(req));
+    const key = String(req.headers['x-swarm-idempotency-key'] || '');
+    if (key && !/^[A-Za-z0-9._:-]{8,128}$/.test(key)) return json(res, 400, { error: 'Clave de idempotencia inválida.' });
+    if (key && idempotency.has(key)) return json(res, 200, publicJob(jobs.get(idempotency.get(key))));
+    if (closing) return json(res, 503, { error: 'El runner se está apagando.' });
+    const id = randomUUID(); const now = new Date().toISOString();
+    const job = { id, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, id), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null };
+    await writeWorkspace(job, body.files);
+    jobs.set(id, job); if (key) idempotency.set(key, id);
+    await save(job); queue.push(id); void pump();
+    return json(res, 202, publicJob(job));
+  }
+  const match = url.pathname.match(/^\/v1\/jobs\/([0-9a-f-]{36})(?:\/(files|cancel))?$/i);
+  if (!match) return json(res, 404, { error: 'No encontrado.' });
+  const job = jobs.get(match[1]);
+  if (!job) return json(res, 404, { error: 'No existe esa ejecución.' });
+  if (req.method === 'GET' && !match[2]) return json(res, 200, publicJob(job));
+  if (req.method === 'GET' && match[2] === 'files') return json(res, 200, { files: await collectFiles(job.workspace) });
+  if (req.method === 'POST' && match[2] === 'cancel') {
+    if (['succeeded', 'failed', 'timed_out', 'cancelled'].includes(job.status)) return json(res, 200, publicJob(job));
+    if (job.status === 'queued') { job.status = 'cancelled'; job.cancelled = true; job.finishedAt = new Date().toISOString(); await save(job); }
+    else running.get(job.id)?.cancel();
+    return json(res, 202, publicJob(job));
+  }
+  return json(res, 405, { error: 'Método no permitido.' });
+}
+async function initialize() {
+  await fsp.mkdir(WORKSPACES, { recursive: true, mode: 0o700 });
+  await fsp.mkdir(STATE, { recursive: true, mode: 0o700 });
+  for (const name of await fsp.readdir(STATE)) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const job = JSON.parse(await fsp.readFile(path.join(STATE, name), 'utf8'));
+      if (!job || !/^[0-9a-f-]{36}$/i.test(job.id) || !['queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled'].includes(job.status)) continue;
+      if (Date.now() - Date.parse(job.updatedAt) > JOB_TTL_MS) {
+        await fsp.rm(path.join(STATE, name), { force: true });
+        await fsp.rm(path.join(WORKSPACES, job.id), { recursive: true, force: true });
+        continue;
+      }
+      if (job.status === 'running') { job.status = 'failed'; job.error = 'El servicio se reinició durante la ejecución; se requiere reintentar.'; job.finishedAt = new Date().toISOString(); await save(job); }
+      jobs.set(job.id, job);
+      if (job.idempotencyKey) idempotency.set(job.idempotencyKey, job.id);
+      if (job.status === 'queued') queue.push(job.id);
+    } catch {}
+  }
+  await pump();
+}
+const server = createServer((req, res) => {
+  void handle(req, res).catch(error => {
+    if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : 'Error interno del runner.' });
+    else res.destroy();
+  });
+});
+server.requestTimeout = 15000;
+server.headersTimeout = 10000;
+server.keepAliveTimeout = 5000;
+server.listen(PORT, '0.0.0.0', async () => {
+  await initialize();
+  console.log('[runner-api] listening', JSON.stringify({ port: PORT, concurrency: MAX_CONCURRENCY, image: IMAGE }));
+});
+function shutdown() {
+  if (closing) return;
+  closing = true;
+  for (const entry of running.values()) { entry.cancel(); }
+  server.close();
+  const wait = setTimeout(() => process.exit(0), 10000); wait.unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
