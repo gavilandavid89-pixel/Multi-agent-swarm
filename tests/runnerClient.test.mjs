@@ -91,6 +91,8 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(catalog.ok, true);
   assert.equal(catalog.capabilities.execution.defaultNetwork, 'none');
   assert.equal(catalog.capabilities.toolchains[0].id, 'typescript');
+  assert.deepEqual(catalog.capabilities.output.streams, ['stdout', 'stderr']);
+  assert.equal(catalog.capabilities.debugging.debuggers[0].id, 'python-pdb');
   assert.ok(pollSecrets.every(secret => secret === 'test-runner-secret-that-is-long-enough-32'));
 
   const checks = await runProjectToolchainChecks({
