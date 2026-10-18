@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "id": "swarm-agent-runner",
+  "status": "experimental-not-production-enabled",
+  "image": {
+    "name": "swarm-agent-runner:local",
+    "base": "node:22-bookworm-slim",
+    "godotVersion": "4.4.1-stable"
+  },
+  "summary": "Entorno aislado para inspeccionar, editar, compilar y probar proyectos de software. La API Runner autentica al Worker; el modelo no recibe el secreto ni acceso al host.",
+  "toolchains": [
+    {
+      "id": "javascript-node",
+      "languages": [
+        "JavaScript",
+        "Node.js"
+      ],
+      "commands": [
+        "node",
+        "npm",
+        "npx"
+      ],
+      "checks": [
+        "node --check",
+        "npm test",
+        "npm run build"
+      ],
+      "dependencyPreparation": "npm ci con lockfile en red restricted; ejecutar tests después con network none"
+    },
+    {
+      "id": "typescript",
+      "languages": [
+        "TypeScript"
+      ],
+      "commands": [
+        "tsc",
+        "tsx"
+      ],
+      "checks": [
+        "tsc --noEmit usando la configuración del proyecto",
+        "tsx para scripts TypeScript"
+      ],
+      "notes": "Se usa la versión global fijada solo como fallback; preferir versiones locales fijadas por el proyecto."
+    },
+    {
+      "id": "web-lint-format",
+      "languages": [
+        "JavaScript",
+        "TypeScript",
+        "JSON",
+        "CSS",
+        "HTML"
+      ],
+      "commands": [
+        "eslint",
+        "prettier",
+        "chromium",
+        "xvfb-run"
+      ],
+      "checks": [
+        "ESLint cuando exista configuración del proyecto",
+        "Prettier --check",
+        "smoke HTML/JavaScript con Chromium y Xvfb"
+      ],
+      "network": "none"
+    },
+    {
+      "id": "python",
+      "languages": [
+        "Python"
+      ],
+      "commands": [
+        "python3",
+        "pip3",
+        "pytest",
+        "black",
+        "flake8",
+        "mypy"
+      ],
+      "checks": [
+        "py_compile",
+        "pytest",
+        "black --check",
+        "flake8",
+        "mypy cuando haya configuración"
+      ],
+      "dependencyPreparation": "venv aislado y requirements/lockfile con red restricted; tests offline"
+    },
+    {
+      "id": "java",
+      "languages": [
+        "Java"
+      ],
+      "commands": [
+        "java",
+        "javac",
+        "mvn"
+      ],
+      "checks": [
+        "javac para fuentes simples",
+        "mvn -o test"
+      ],
+      "dependencyPreparation": "resolver Maven con red restricted y luego ejecutar offline"
+    },
+    {
+      "id": "go",
+      "languages": [
+        "Go"
+      ],
+      "commands": [
+        "go"
+      ],
+      "checks": [
+        "go test ./..."
+      ],
+      "dependencyPreparation": "go mod download mediante proxy restringido; pruebas offline"
+    },
+    {
+      "id": "php",
+      "languages": [
+        "PHP"
+      ],
+      "commands": [
+        "php",
+        "composer"
+      ],
+      "checks": [
+        "php -l",
+        "scripts de test del proyecto"
+      ],
+      "dependencyPreparation": "Composer con lockfile y red restricted; tests offline"
+    },
+    {
+      "id": "ruby",
+      "languages": [
+        "Ruby"
+      ],
+      "commands": [
+        "ruby",
+        "bundle"
+      ],
+      "checks": [
+        "ruby -c",
+        "bundle exec test cuando exista"
+      ],
+      "dependencyPreparation": "Bundler con lockfile y red restricted; tests offline"
+    },
+    {
+      "id": "c-cpp",
+      "languages": [
+        "C",
+        "C++"
+      ],
+      "commands": [
+        "gcc",
+        "g++",
+        "make",
+        "pkg-config"
+      ],
+      "checks": [
+        "compilación con flags del proyecto y make cuando corresponda"
+      ]
+    },
+    {
+      "id": "rust",
+      "languages": [
+        "Rust"
+      ],
+      "commands": [
+        "rustc",
+        "cargo"
+      ],
+      "checks": [
+        "rustc",
+        "cargo test --offline"
+      ],
+      "dependencyPreparation": "cargo fetch mediante proxy restringido; tests offline"
+    },
+    {
+      "id": "godot",
+      "languages": [
+        "GDScript",
+        "Godot"
+      ],
+      "commands": [
+        "godot"
+      ],
+      "checks": [
+        "import headless",
+        "parseo de scripts",
+        "arranque headless de escena principal"
+      ],
+      "version": "4.4.1-stable"
+    },
+    {
+      "id": "shell",
+      "languages": [
+        "sh",
+        "bash"
+      ],
+      "commands": [
+        "bash",
+        "sh",
+        "shellcheck",
+        "shfmt"
+      ],
+      "checks": [
+        "sh -n",
+        "bash -n",
+        "shellcheck",
+        "shfmt --diff"
+      ]
+    },
+    {
+      "id": "data-files",
+      "languages": [
+        "JSON",
+        "SQLite"
+      ],
+      "commands": [
+        "jq",
+        "sqlite3",
+        "file",
+        "tree",
+        "rg",
+        "fdfind"
+      ],
+      "checks": [
+        "validación JSON con jq",
+        "consultas SQLite local",
+        "búsqueda de código y estructura de archivos"
+      ]
+    }
+  ],
+  "browser": {
+    "engine": "Chromium del sistema",
+    "virtualDisplay": "Xvfb",
+    "smokeScript": "/opt/swarm-runner/browser-smoke.mjs",
+    "defaultNetwork": "none",
+    "notes": [
+      "Puede abrir HTML local y detectar excepciones JavaScript básicas.",
+      "No equivale a pruebas E2E completas de aplicaciones que requieren servidor, autenticación o servicios externos."
+    ]
+  },
+  "execution": {
+    "invocation": "argv array; no host shell",
+    "workspace": "por tarea, secuencial; entradas y artefactos limitados",
+    "defaultNetwork": "none",
+    "dependencyNetwork": "restricted only; exact-host allowlist; proxy healthy required",
+    "timeoutMs": {
+      "min": 1000,
+      "max": 120000
+    },
+    "memory": "1 GiB",
+    "cpus": 2,
+    "pids": 128,
+    "maxWorkspaceBytes": 268435456,
+    "maxInputBytes": 2097152,
+    "maxInputFiles": 200,
+    "maxOutputBytesPerStream": 65536,
+    "concurrency": 1
+  },
+  "agentToolContract": {
+    "current": "El Worker usa el runner para checks deterministas; la API ofrece jobs, polling, cancelación y snapshots.",
+    "notYetImplemented": [
+      "dispatcher de tool-calls LLM",
+      "herramientas directas workspace.list/read/write",
+      "permisos por rol aplicados a llamadas de herramientas del modelo"
+    ],
+    "plannedTools": [
+      "workspace.list",
+      "workspace.read",
+      "workspace.write",
+      "runner.check",
+      "runner.execute",
+      "runner.prepareDependencies",
+      "runner.jobStatus",
+      "runner.cancel",
+      "runner.artifacts.list",
+      "runner.artifacts.read"
+    ],
+    "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo."
+  },
+  "notIncluded": [
+    "Docker socket o ejecución de contenedores hermanos desde el sandbox",
+    "credenciales de GitHub, proveedores de IA, Render, Neon o producción",
+    "red pública directa o DNS arbitrario por defecto",
+    "servidor PostgreSQL/MySQL/Redis persistente; usar servicios de test efímeros separados cuando se necesiten",
+    "Android SDK/emuladores, .NET, CUDA, Xcode/macOS, navegadores móviles reales"
+  ],
+  "limitations": [
+    "Los toolchains del sistema dependen de la versión concreta de la imagen construida; el CI verifica que los comandos requeridos existan.",
+    "Los gestores de dependencias y scripts de instalación son código no confiable; ejecutarlos solo en un contenedor sin secretos y con egress restringido.",
+    "Docker no sustituye una frontera VM/microVM frente a código hostil multiusuario."
+  ]
+}
