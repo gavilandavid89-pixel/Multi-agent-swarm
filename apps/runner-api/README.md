@@ -44,7 +44,7 @@ Limits: 200 files, 2 MiB total input, 256 KiB per file, 1–32 argv items, 1–1
 
 - `none` is the default for all code execution.
 - `restricted` is only for dependency preparation. It requires `swarm-agent-egress` to be a Docker internal network and a healthy `swarm-egress-proxy`. The sandbox receives a fixed proxy address and no normal DNS resolver. The proxy allowlist lives in `apps/runner/egress-proxy/allowed-domains.txt`.
-- Never provide secrets to the sandbox. Dependency install hooks execute project code; prefer lockfiles and script-disabled installs where possible, then rerun tests with network disabled.
+- Never provide secrets to the sandbox. Automatic profiles may run dependency lifecycle hooks inside the isolated container with restricted egress because native packages/build plugins need them. Manual preparation should prefer lockfiles and `--ignore-scripts` where compatible. The Worker always launches a separate container with network disabled for the test/build phase.
 
 The proxy is not a substitute for host-level egress/DNS enforcement against hostile code. Use a dedicated host, host firewall, restricted DNS, and preferably rootless Docker or a stronger VM/microVM boundary for multi-tenant untrusted workloads.
 
