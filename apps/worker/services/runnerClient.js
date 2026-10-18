@@ -182,6 +182,13 @@ function detectRuntimeProfiles(entries) {
   const paths = new Set(entries.map(file => file.path));
   const contents = new Map(entries.map(file => [file.path, file.content]));
   const profiles = [];
+  if (paths.has('project.godot')) {
+    profiles.push({
+      name: 'Godot headless import and startup',
+      test: ['bash', '-lc', 'bash /opt/swarm-runner/godot-smoke.sh'],
+      testTimeoutMs: 60000
+    });
+  }
   if (entries.some(file => /\\.html?$/i.test(file.path))) {
     profiles.push({
       name: 'Chromium/Xvfb browser smoke',
