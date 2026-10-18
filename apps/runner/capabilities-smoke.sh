@@ -3,7 +3,7 @@ set -eu
 
 # This runs inside the isolated runner image. It is a build-time inventory,
 # not a command executed in the Worker or on the runner host.
-required='node npm npx tsc tsx prettier eslint python3 pytest black flake8 mypy java javac mvn go php composer ruby bundle gcc g++ make rustc cargo chromium xvfb-run godot jq sqlite3 rg fdfind tree shellcheck shfmt'
+required='node npm npx tsc tsx prettier eslint python3 pytest black flake8 mypy java javac jdb mvn go php composer ruby bundle gcc g++ make rustc cargo chromium xvfb-run godot jq sqlite3 rg fdfind tree shellcheck shfmt'
 missing=''
 for command_name in $required; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -40,6 +40,15 @@ jq --version
 sqlite3 --version | head -n 1
 shellcheck --version | head -n 2
 shfmt --version
+jdb -help >/dev/null 2>&1 || true
+
+# Exercise the debugger non-interactively with bounded debugger commands.
+debug_tmp=$(mktemp -d)
+trap 'rm -rf "$debug_tmp"' EXIT
+printf '%s\\n' 'print("debug target reached")' > "$debug_tmp/debug_target.py"
+printf 'p 6 * 7\\nq\\n' | python3 -m pdb "$debug_tmp/debug_target.py" > "$debug_tmp/pdb.out"
+grep -q '42' "$debug_tmp/pdb.out"
+echo 'SWARM_RUNNER_DEBUGGER_CHECKED=1'
 
 node -e '
   const fs = require("node:fs");
