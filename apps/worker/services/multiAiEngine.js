@@ -250,14 +250,19 @@ async function runJob(jobId) {
         return { blocked: true, reason: 'runner-infra-error' };
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
-        const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
-        const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
+        const validationLevel = syntax.runnerExecution?.checked
+          ? 'ai_syntax_and_runtime'
+          : syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
+        const validationDescription = syntax.runnerExecution?.checked
+          ? 'revisión de IA, sintaxis y pruebas ejecutadas'
+          : syntax.checked ? 'revisión de IA y sintaxis; ejecución aislada no confirmada' : 'revisión de IA';
+        const result = { status: 'completed', validationLevel, executionStatus: syntax.executionStatus || 'NO EJECUTADO', summary: validation.summary, delivery, validation, syntax };
         const latestPayload = (await getPayload(jobId))?.payload || {};
         const transcript = appendEntries(latestPayload.transcript, [{
           at: new Date().toISOString(), agent: 'sistema', type: 'check',
-          content: `El comité terminó la tarea y la validación final fue aprobada (${validationLevel === 'ai_and_syntax' ? 'revisión de IA y sintaxis' : 'revisión de IA'}). El resultado está listo para revisar.`
+          content: `El comité terminó la tarea y la validación final fue aprobada (${validationDescription}). El resultado está listo para revisar.`
         }]);
-        await updateJob(jobId, { status: 'completed', stage: syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
+        await updateJob(jobId, { status: 'completed', stage: syntax.runnerExecution?.checked ? 'Completado · IA + sintaxis + ejecución' : syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
