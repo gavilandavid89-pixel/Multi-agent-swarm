@@ -16,7 +16,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
     'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY', 'createHash', 'requestHash', 'clave de idempotencia ya se usó',
-    'swarm-agent-egress', 'ensureRestrictedNetwork', "basename === '.env'", "basename.startsWith('.env.')", "'credentials.json'"
+    'swarm-agent-egress', 'ensureRestrictedNetwork', 'chmod(ROOT, 0o700)', 'chmod(WORKSPACES, 0o700)', 'chmod(STATE, 0o700)', "basename === '.env'", "basename.startsWith('.env.')", "'credentials.json'"
   ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
   assert.equal(source.includes('--privileged'), false);
   assert.equal(source.includes('/var/run/docker.sock'), false);
