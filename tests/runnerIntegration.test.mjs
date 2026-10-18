@@ -9,6 +9,8 @@ const render = await readFile(new URL('../render.yaml', import.meta.url), 'utf8'
 
 test('Worker runner integration is optional by default and authenticates remote requests', () => {
   assert.ok(client.includes("process.env.AGENT_RUNNER_BASE_URL"));
+  assert.ok(client.includes("name: 'Chromium/Xvfb browser smoke'"));
+  assert.ok(client.includes("'/opt/swarm-runner/browser-smoke.mjs'"));
   assert.ok(client.includes("process.env.AGENT_RUNNER_SHARED_SECRET"));
   assert.ok(client.includes("process.env.AGENT_RUNNER_REQUIRED === 'true'"));
   assert.ok(client.includes("'x-swarm-runner-secret': configuredSecret"));
