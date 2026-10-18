@@ -138,8 +138,6 @@ async function writeWorkspace(job, files, resetWorkspace) {
   }
 }
 function dockerArgs(job) {
-  const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
-  const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
   const args = [
     'run', '-d', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
@@ -147,7 +145,7 @@ function dockerArgs(job) {
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
     '--tmpfs', '/workspace:rw,nosuid,nodev,size=256m,mode=1777',
     '--mount', 'type=bind,src=' + job.workspace + ',dst=/input,readonly',
-    '--workdir', '/workspace', '--user', uid + ':' + gid,
+    '--workdir', '/workspace', '--user', '0:0',
     '--env', 'HOME=/tmp', '--env', 'CI=true', '--env', 'LANG=C.UTF-8',
     '--env', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     '--env', 'CHROME_BIN=/usr/bin/chromium'
@@ -161,7 +159,7 @@ function dockerArgs(job) {
   } else args.push('--network', 'none');
   // Keep the container alive while docker cp snapshots its size-limited tmpfs workspace.
   // The project command is passed separately to docker exec as argv, never through a host shell.
-  args.push(IMAGE, 'bash', '-c', 'cp -a /input/. /workspace/ && touch /tmp/swarm-runner-ready && exec tail -f /dev/null');
+  args.push(IMAGE, 'bash', '-c', 'cp -a /input/. /workspace/ && chmod -R a+rwX /workspace && touch /tmp/swarm-runner-ready && exec tail -f /dev/null');
   return args;
 }
 function appendOutput(job, key, chunk) {
@@ -283,10 +281,12 @@ async function runJob(job) {
     if (!ready) throw new Error('El workspace del contenedor no quedó listo dentro del límite.');
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de ejecutar el comando.');
     const timeoutSeconds = Math.max(1, Math.ceil(job.timeoutMs / 1000));
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
+    const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
     const result = await new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; resolve(value); };
-      currentChild = spawn(DOCKER, ['exec', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
+      currentChild = spawn(DOCKER, ['exec', '--user', uid + ':' + gid, cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
       currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
       currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
       currentChild.on('error', error => finish({ code: null, error: error.message }));
