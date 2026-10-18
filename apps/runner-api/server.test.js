@@ -12,7 +12,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     '--pids-limit', '--memory', '--cpus', '--tmpfs',
     '--cidfile', 'no-new-privileges:true', 'MAX_OUTPUT_CHARS',
     '/input,readonly', '/workspace:rw,nosuid,nodev,size=256m,mode=1777',
-    'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot',
+    'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot', 'finalizing', 'recopilando artefactos',
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
     'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY',
