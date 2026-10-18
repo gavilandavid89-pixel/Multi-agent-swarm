@@ -8,7 +8,7 @@ const terminal = new Set(['succeeded', 'failed', 'timed_out', 'cancelled']);
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function unavailable(message) {
-  return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, message };
+  return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, infraError: required && !configuredBase, message };
 }
 function isPrivateRunnerHost(hostname) {
   const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
@@ -39,12 +39,12 @@ async function request(path, options = {}, timeoutMs = 15000) {
  */
 export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey } = {}) {
   if (!configuredBase) return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.' : 'Runner remoto no configurado; se mantiene la validación determinista local.');
-  if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
+  if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
   let baseUrl;
-  try { baseUrl = new URL(configuredBase); } catch { return { available: true, checked: false, ok: false, message: 'AGENT_RUNNER_BASE_URL no es una URL válida.' }; }
-  if (!['http:', 'https:'].includes(baseUrl.protocol)) return { available: true, checked: false, ok: false, message: 'El protocolo del runner debe ser HTTP(S) sobre una red privada.' };
+  try { baseUrl = new URL(configuredBase); } catch { return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_BASE_URL no es una URL válida.' }; }
+  if (!['http:', 'https:'].includes(baseUrl.protocol)) return { available: true, checked: false, ok: false, infraError: true, message: 'El protocolo del runner debe ser HTTP(S) sobre una red privada.' };
   if (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)) {
-    return { available: true, checked: false, ok: false, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
+    return { available: true, checked: false, ok: false, infraError: true, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
   }
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
@@ -72,7 +72,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
       if (attempt < 2) await delay(1500 * (attempt + 1));
     }
   }
-  if (!created?.id) return { available: true, checked: false, ok: false, message: 'No se pudo crear la ejecución aislada: ' + String(lastError?.message || 'el runner no respondió').slice(0, 1000) };
+  if (!created?.id) return { available: true, checked: false, ok: false, infraError: true, message: 'No se pudo crear la ejecución aislada: ' + String(lastError?.message || 'el runner no respondió').slice(0, 1000) };
   const maxWait = Math.min(180000, Math.max(75000, Number(timeoutMs) + 60000));
   const deadline = Date.now() + maxWait;
   let latest = created;
@@ -81,6 +81,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
       const ok = latest.status === 'succeeded' && latest.exitCode === 0 && !latest.timedOut;
       return {
         available: true, checked: true, ok, skipped: false, jobId: latest.id,
+        infraError: Boolean(latest.error || latest.exitCode === 125),
         exitCode: latest.exitCode, timedOut: Boolean(latest.timedOut), durationMs: latest.durationMs,
         stdout: String(latest.stdout || '').slice(-12000), stderr: String(latest.stderr || '').slice(-12000),
         message: ok
@@ -93,7 +94,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
     catch (error) { lastError = error; }
   }
   try { await request('/v1/jobs/' + encodeURIComponent(created.id) + '/cancel', { method: 'POST' }, 5000); } catch {}
-  return { available: true, checked: true, ok: false, jobId: created.id, timedOut: true, message: 'El runner no completó la tarea dentro de la ventana de espera; se solicitó cancelación y se conserva el ID ' + created.id + '. ' + String(lastError?.message || '').slice(0, 300) };
+  return { available: true, checked: true, ok: false, infraError: true, jobId: created.id, timedOut: true, message: 'El runner no completó la tarea dentro de la ventana de espera; se solicitó cancelación y se conserva el ID ' + created.id + '. ' + String(lastError?.message || '').slice(0, 300) };
 }
 
 const CHECK_SCRIPT = String.raw`#!/usr/bin/env bash
