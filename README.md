@@ -127,6 +127,9 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 | `WORKER_CONCURRENCY` | Entero entre 1 y 8; el código actual usa 1 por defecto | — | Máximo de tareas concurrentes |
 | `MAX_TASK_TOKENS` | Entero entre 4.000 y 1.000.000; por defecto 1.000.000 | — | Presupuesto acumulado por tarea |
 | `MAX_OUTPUT_TOKENS_PER_CALL` | Entero; el README del proyecto documenta 6.000 por defecto | — | Límite de salida por llamada |
+| `AGENT_RUNNER_BASE_URL` | Opcional; URL privada del Runner API dedicado, no del Bridge/Worker público | Worker → Runner | Dirección del host aislado con Docker. Mantenerla sin configurar hasta provisionar red privada y firewall; usar HTTPS si no es una IP/host privado confiable |
+| `AGENT_RUNNER_SHARED_SECRET` | Opcional; secreto aleatorio de al menos 32 caracteres, igual a `RUNNER_SHARED_SECRET` en el host runner y distinto de `WORKER_SHARED_SECRET` | Worker ↔ Runner | Autenticación del protocolo de ejecución. Nunca registrar el valor ni compartirlo con agentes/modelos |
+| `AGENT_RUNNER_REQUIRED` | `false` por defecto; usar `true` solo tras validar el host | Worker | Si se activa, un runner ausente/fallido bloquea la aprobación automática y deja el checkpoint para reintentar; no se simula que se ejecutaron pruebas |
 
 ### Estado verificado y puntos pendientes
 
