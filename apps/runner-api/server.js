@@ -218,6 +218,23 @@ async function copyWorkspaceFromContainer(job) {
   if (!cid) return;
   const copied = await dockerCommand(['cp', cid + ':/workspace/.', job.workspace + path.sep], 15000);
   if (copied.code !== 0) throw new Error('No se pudieron recuperar los archivos de salida del contenedor: ' + copied.stderr.slice(0, 600));
+
+  // Some Docker/container-storage combinations may report success copying a mounted
+  // tmpfs directory but omit newly-created files. Verify the inventory and recover
+  // missing regular files individually, never following symlinks or unsafe paths.
+  const inventory = await dockerCommand(['exec', cid, 'find', '/workspace', '-mindepth', '1', '-maxdepth', '8', '-type', 'f', '-print0'], 5000);
+  if (inventory.code !== 0) throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + inventory.stderr.slice(0, 400));
+  for (const relative of inventory.stdout.split('\\0').filter(Boolean)) {
+    if (relative.length > 1024 || relative.startsWith('/') || relative.includes('\\\\')
+      || /[\\x00-\\x1f\\x7f]/.test(relative)
+      || relative.split('/').some(part => !part || part === '.' || part === '..')) continue;
+    const target = path.resolve(job.workspace, ...relative.split('/'));
+    if (!target.startsWith(job.workspace + path.sep)) continue;
+    try { await fsp.access(target); continue; } catch {}
+    await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
+    const fileCopy = await dockerCommand(['cp', cid + ':/workspace/' + relative, target], 15000);
+    if (fileCopy.code !== 0) throw new Error('No se pudo recuperar el archivo de salida ' + relative.slice(0, 160) + ': ' + fileCopy.stderr.slice(0, 400));
+  }
 }
 async function collectFiles(workspace) {
   const files = []; let total = 0;
