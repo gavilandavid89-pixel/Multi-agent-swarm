@@ -32,6 +32,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("Buffer.concat(paths.flatMap(p=>[Buffer.from(p),nul]))"));
   assert.ok(source.includes("chmod 0777 {} +"));
   assert.ok(source.includes("chmod 0666 {} +"));
+  assert.ok(source.includes("'test', '-w', '/workspace'"));
   assert.equal(source.includes("paths.map(p=>p+'\\\\\\\\0').join('')"), false);
   assert.ok(source.includes("spawn('tar'"));
   assert.ok(source.includes("'--no-recursion'"));
