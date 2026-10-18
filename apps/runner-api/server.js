@@ -436,9 +436,9 @@ async function handle(req, res) {
 async function initialize() {
   await fsp.mkdir(WORKSPACES, { recursive: true, mode: 0o700 });
   await fsp.mkdir(STATE, { recursive: true, mode: 0o700 });
-  const dockerInfo = await dockerCommand(['info', '--format', '{{.ServerVersion}}'], 60000);
+  const dockerInfo = await dockerCommand(['info', '--format', '{{.ServerVersion}}'], 90000);
   if (dockerInfo.code !== 0 || !dockerInfo.stdout.trim()) {
-    throw new Error('Docker daemon no está disponible después de esperar hasta 60 segundos: ' + String(dockerInfo.stderr || dockerInfo.stdout).slice(0, 400));
+    throw new Error('Docker daemon no está disponible después de esperar hasta 90 segundos: ' + String(dockerInfo.stderr || dockerInfo.stdout).slice(0, 400));
   }
   const imageInfo = await dockerCommand(['image', 'inspect', '--format', '{{.Id}}', IMAGE], 10000);
   if (imageInfo.code !== 0 || !imageInfo.stdout.trim()) {
