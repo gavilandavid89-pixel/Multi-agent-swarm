@@ -13,15 +13,15 @@ test('agent sandbox disables network and uses a read-only container root', () =>
 });
 
 test('agent sandbox applies process, memory, CPU and wall-clock limits', () => {
-  assert.match(wrapper, /--pids-limit "\$pids_limit"/);
-  assert.match(wrapper, /--memory "\$memory_limit"/);
-  assert.match(wrapper, /--cpus "\$cpu_limit"/);
+  assert.ok(wrapper.includes('--pids-limit "$pids_limit"'));
+  assert.ok(wrapper.includes('--memory "$memory_limit"'));
+  assert.ok(wrapper.includes('--cpus "$cpu_limit"'));
   assert.match(wrapper, /timeout --signal=TERM --kill-after=5s/);
   assert.match(wrapper, /--tmpfs \/tmp:rw,nosuid,nodev,size=512m/);
 });
 
 test('only the requested project directory is mounted writable', () => {
-  assert.match(wrapper, /--mount "type=bind,src=\$workspace,dst=\/workspace,rw"/);
+  assert.ok(wrapper.includes('--mount "type=bind,src=$workspace,dst=/workspace,rw"'));
   assert.doesNotMatch(wrapper, /\/var\/run\/docker\.sock/);
   assert.doesNotMatch(wrapper, /--privileged/);
   assert.doesNotMatch(wrapper, /--network host/);
