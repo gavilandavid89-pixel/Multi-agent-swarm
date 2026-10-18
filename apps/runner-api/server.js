@@ -150,7 +150,7 @@ function dockerArgs(job) {
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
     '--pids-limit', '128', '--memory', '1g', '--cpus', '2',
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
-    '--tmpfs', '/workspace:rw,nosuid,nodev,size=256m,mode=1777',
+    '--tmpfs', '/workspace:rw,nosuid,nodev,size=256m,mode=0777',
     '--mount', 'type=bind,src=' + job.workspace + ',dst=/input,readonly',
     '--workdir', '/workspace', '--user', '10001:10001',
     '--env', 'HOME=/tmp', '--env', 'CI=true', '--env', 'LANG=C.UTF-8',
