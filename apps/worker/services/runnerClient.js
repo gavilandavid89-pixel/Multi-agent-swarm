@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 
 const configuredBase = String(process.env.AGENT_RUNNER_BASE_URL || '').trim().replace(/\/+$/, '');
@@ -333,11 +333,12 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     return { available: true, checked: false, ok: false, infraError: true, message: 'Se detectó una ruta de credenciales/caché o una credencial de alta confianza; no se envió ningún archivo al runner.' };
   }
   const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
+  const contentFingerprint = createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
   const taskKey = String(taskId || workspaceId).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 60);
   const result = await runAgentCommand({
     taskId, workspaceId, resetWorkspace: true, files: entries,
     command: ['bash', '-lc', CHECK_SCRIPT], network: 'none', timeoutMs: 60000,
-    idempotencyKey: taskKey + ':validation:' + String(round || 1)
+    idempotencyKey: taskKey + ':validation:' + String(round || 1) + ':' + contentFingerprint
   });
   if (!result.checked) return result;
   if (!result.ok) {
@@ -359,7 +360,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
       const prep = await runAgentCommand({
         taskId, workspaceId, resetWorkspace: false, files: [],
         command: profile.prepare, network: 'restricted', timeoutMs: profile.prepareTimeoutMs,
-        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profileKey
+        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint
       });
       runtimeChecks.push({ profile: profile.name, phase: 'dependency-preparation', ok: prep.ok, exitCode: prep.exitCode, durationMs: prep.durationMs });
       if (!prep.ok) {
@@ -374,7 +375,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     const tested = await runAgentCommand({
       taskId, workspaceId, resetWorkspace: false, files: [],
       command: profile.test, network: 'none', timeoutMs: profile.testTimeoutMs,
-      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profileKey
+      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint
     });
     runtimeChecks.push({ profile: profile.name, phase: 'tests', ok: tested.ok, exitCode: tested.exitCode, durationMs: tested.durationMs });
     if (!tested.ok) {
