@@ -155,3 +155,11 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
 - Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
 - El resultado aparece al refrescar el detalle de la tarea. Si el proceso del Worker se reinicia durante la votación, el registro puede quedar en estado `running`; una futura mejora debe incluir recuperación de votaciones abandonadas al arrancar.
+
+## Entorno aislado de ejecución para agentes
+
+La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos sin red, con límites de recursos, sistema raíz de solo lectura y montaje escribible limitado al directorio de trabajo. Incluye toolchains comunes de Node.js, Python, Java, Go, PHP, Ruby, C/C++ y Rust, además de Chromium/Xvfb.
+
+- Diseño, capacidades, límites y uso: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Frontera de seguridad y arquitectura objetivo del runner de producción: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
+- El runner experimental no está desplegado ni conectado al worker. Revisar y ejecutar pruebas de CI antes de integrar; no ejecutar código generado en el proceso del worker ni habilitar red libre para corregir dependencias ausentes.
