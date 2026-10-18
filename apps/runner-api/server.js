@@ -58,7 +58,7 @@ function safeRelativePath(input) {
   if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
   const parts = input.split('/');
   if (parts.some(part => !part || part === '.' || part === '..')) return false;
-  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle'].includes(part))) return false;
+  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle'].includes(part))) return false;
   const base = parts.at(-1).toLowerCase();
   if (base === '.env' || (base.startsWith('.env.') && base !== '.env.example')) return false;
   if (['.npmrc', '.pypirc', '.netrc', '.git-credentials', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig'].includes(base)) return false;
@@ -219,7 +219,7 @@ async function collectFiles(workspace) {
     try { entries = await fsp.readdir(directory, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (files.length >= 100 || total >= MAX_TOTAL_FILE_BYTES) break;
-      if (entry.isSymbolicLink() || ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
+      if (entry.isSymbolicLink() || ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle', 'vendor', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
       const name = relative ? relative + '/' + entry.name : entry.name;
       if (!safeRelativePath(name)) continue;
       const target = path.join(directory, entry.name);
