@@ -13,6 +13,12 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const raw = Buffer.concat(chunks).toString('utf8');
+    if (req.url === '/readyz' && req.method === 'GET') {
+      pollSecrets.push(req.headers['x-swarm-runner-secret']);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, docker: 'ready', image: 'ready' }));
+      return;
+    }
     if (req.url === '/v1/jobs' && req.method === 'POST') {
       seen.push({ method: req.method, secret: req.headers['x-swarm-runner-secret'], key: req.headers['x-swarm-idempotency-key'], body: JSON.parse(raw) });
       res.writeHead(202, { 'content-type': 'application/json' });
