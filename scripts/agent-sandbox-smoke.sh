@@ -9,7 +9,7 @@ api_pid=
 cleanup() {
   if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
   docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json"
+  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -61,6 +61,18 @@ if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL ru
 unauthorized=$(curl -sS -o "${workspace}-unauthorized.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs -H 'content-type: application/json' -d '{}')
 if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticated request ($unauthorized)" >&2; exit 1; fi
 echo "PASS runner API rejects unauthenticated requests"
+
+secret_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[{path:"id_rsa",content:"-----BEGIN OPENSSH PRIVATE KEY-----\\nnot-a-real-key\\n-----END OPENSSH PRIVATE KEY-----"}],
+  command:["true"],network:"none",timeoutMs:5000
+}))')
+secret_status=$(curl -sS -o "${workspace}-secret-rejection.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-secret-01' \
+  -d "$secret_body")
+if [ "$secret_status" != 400 ]; then echo "FAIL runner API accepted a credential-like file path ($secret_status)" >&2; exit 1; fi
+echo "PASS runner API rejects credential-like paths before job creation"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
