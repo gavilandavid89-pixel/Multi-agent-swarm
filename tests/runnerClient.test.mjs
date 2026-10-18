@@ -35,7 +35,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
         execution: { defaultNetwork: 'none', concurrency: 1 },
         output: { streams: ['stdout', 'stderr'], maxRetainedCharsPerStream: 65536 },
         debugging: { stdin: { maxBytes: 16384 }, debuggers: [{ id: 'python-pdb' }] },
-        workspaceIsolation: { status: 'worker-primitives-implemented; model-tool-dispatch-pending', concurrency: { globalRunner: 1 }, merge: 'conflicts fail closed' },
+        workspaceIsolation: { status: 'worker-primitives-and-model-tool-dispatch-implemented', concurrency: { globalRunner: 1 }, merge: 'conflicts fail closed' },
         toolchains: [{ id: 'typescript', commands: ['tsc', 'tsx'] }]
       }));
       return;
