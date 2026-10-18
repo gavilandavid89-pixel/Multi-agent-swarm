@@ -1,0 +1,21 @@
+# Exact hostnames only. Add a hostname only after reviewing why the task needs it.
+# Package registries and source archives; HTTPS CONNECT is restricted to port 443.
+registry.npmjs.org
+npmjs.org
+pypi.org
+files.pythonhosted.org
+proxy.golang.org
+sum.golang.org
+storage.googleapis.com
+index.crates.io
+static.crates.io
+crates.io
+rubygems.org
+repo.maven.apache.org
+repo1.maven.org
+deb.debian.org
+security.debian.org
+github.com
+codeload.github.com
+objects.githubusercontent.com
+raw.githubusercontent.com
