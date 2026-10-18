@@ -17,7 +17,7 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se h
 | Web UI | Chromium, Xvfb, xauth y fuentes básicas |
 | Operación | git, bash, coreutils, findutils, pkg-config |
 
-La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker puede ejecutar comprobaciones de toolchain en el runner y usar sus resultados para decidir si una entrega necesita correcciones. El protocolo usa idempotencia, polling, cancelación y resultados acotados; no pasa las claves de IA ni el entorno del Worker al contenedor.
+La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker puede ejecutar comprobaciones de toolchain en el runner y usar sus resultados para decidir si una entrega necesita correcciones. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
 
 La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Godot, Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
 
