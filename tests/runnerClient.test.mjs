@@ -70,6 +70,15 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(seen[3].body.command[1], 'test');
   assert.equal(seen[3].body.network, 'none');
   assert.equal(seen[3].body.resetWorkspace, false);
+  const requestsBeforeSecret = seen.length;
+  const blocked = await runProjectToolchainChecks({
+    taskId: '44444444-4444-4444-8444-444444444444',
+    round: 1,
+    files: new Map([['id_rsa', { content: '-----BEGIN OPENSSH PRIVATE KEY-----\\nnot-a-real-key\\n-----END OPENSSH PRIVATE KEY-----' }]])
+  });
+  assert.equal(blocked.infraError, true);
+  assert.match(blocked.message, /no se envió ningún archivo/i);
+  assert.equal(seen.length, requestsBeforeSecret);
 });
 
 test('Worker refuses public HTTP runner endpoints and skips optional unconfigured runner', () => {
