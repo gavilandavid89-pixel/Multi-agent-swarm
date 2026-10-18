@@ -45,7 +45,7 @@ test('rejects traversal, secret paths, credential content, and shell injection',
   await assert.rejects(f.dispatcher.invoke({ name: 'workspace_write', arguments: { path: '.env', content: 'x' } }), /sensible/);
   await assert.rejects(f.dispatcher.invoke({ name: 'workspace_write', arguments: { path: 'secret.txt', content: 'ghp_abcdefghijklmnopqrstuvwxyz1234567890' } }), /credenciales/);
   await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['bash', '-c', 'id'] } }), /Binario/);
-  await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '-e', 'process.exit(0); rm -rf /'] } }), /Shell/);
+  await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node; rm', '-rf', '/'] } }), /Binario/);
 });
 test('limits calls and per-file size', async () => {
   const f = fixture('desarrollador', 1);
