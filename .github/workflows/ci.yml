@@ -40,7 +40,7 @@ jobs:
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
           npm --prefix apps/worker audit --audit-level=high --no-fund
-      - name: Run Chromium/Xvfb browser smoke test
+      - name: Verify Worker delegates generated HTML to the isolated runner
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb xauth
