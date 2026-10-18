@@ -167,6 +167,7 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js, Python, Java, Go, PHP, Ruby, C/C++, Rust, Godot 4.4.1 headless y Chromium/Xvfb.
 
 - Diseño, capacidades, límites, integración y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Contrato de herramientas futuras para agentes, permisos por rol, recuperación, artefactos y criterios de aceptación: [docs/AGENT_TOOL_PROTOCOL.md](docs/AGENT_TOOL_PROTOCOL.md).
 - API autenticada de ejecución: [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 
