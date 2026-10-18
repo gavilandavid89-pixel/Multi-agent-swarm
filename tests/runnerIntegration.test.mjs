@@ -11,6 +11,8 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("process.env.AGENT_RUNNER_BASE_URL"));
   assert.ok(client.includes("name: 'Chromium/Xvfb browser smoke'"));
   assert.ok(client.includes("name: 'Godot headless import and startup'"));
+  assert.ok(client.includes('Missing modules/imports are usually actionable project failures'));
+  assert.ok(!client.includes('infraError: Boolean(tested.infraError || missingDependency'));
   assert.ok(client.includes('/opt/swarm-runner/godot-smoke.sh'));
   assert.ok(client.includes("'/opt/swarm-runner/browser-smoke.mjs'"));
   assert.ok(client.includes("process.env.AGENT_RUNNER_SHARED_SECRET"));
