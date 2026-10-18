@@ -8,7 +8,8 @@ services:
     networks:
       swarm-agent-egress:
         ipv4_address: 172.30.0.2
-      swarm-egress-outbound: {}
+      swarm-egress-outbound:
+        gw_priority: 1
     expose:
       - "3128"
     read_only: true
