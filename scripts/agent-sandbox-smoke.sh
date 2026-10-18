@@ -6,9 +6,10 @@ workspace=${RUNNER_TEMP:-/tmp}/swarm-agent-sandbox-smoke
 rm -rf "$workspace"
 mkdir -p "$workspace"
 api_pid=
+proxy_started_by_smoke=0
 cleanup() {
   if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
-  docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true
+  if [ "$proxy_started_by_smoke" -eq 1 ]; then docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true; fi
   rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json" "${workspace}-create-response.json"
 }
 trap cleanup EXIT HUP INT TERM
@@ -233,9 +234,18 @@ echo "PASS network disabled"
 # Restricted mode is opt-in and routes only through an allowlisting proxy on an
 # internal Docker network; test one approved package host and one denied host.
 docker compose -f docker-compose.runner-egress.yml config -q
-if ! docker compose -f docker-compose.runner-egress.yml up --build -d --wait --wait-timeout 60; then
-  docker compose -f docker-compose.runner-egress.yml logs --no-color swarm-egress-proxy >&2 || true
-  exit 1
+existing_proxy=$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' swarm-egress-proxy 2>/dev/null || true)
+if [ -n "$existing_proxy" ]; then
+  if [ "$existing_proxy" != "true|healthy" ]; then
+    echo "FAIL existing swarm-egress-proxy is not healthy; refusing to replace a shared service during smoke tests" >&2
+    exit 1
+  fi
+else
+  if ! docker compose -f docker-compose.runner-egress.yml up --build -d --wait --wait-timeout 60; then
+    docker compose -f docker-compose.runner-egress.yml logs --no-color swarm-egress-proxy >&2 || true
+    exit 1
+  fi
+  proxy_started_by_smoke=1
 fi
 SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
 import urllib.request
