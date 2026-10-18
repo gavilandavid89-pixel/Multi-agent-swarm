@@ -17,8 +17,8 @@ services:
     security_opt:
       - no-new-privileges:true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=16m
-      - /var/spool/squid:rw,noexec,nosuid,nodev,size=32m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=13,gid=13,mode=700
+      - /var/spool/squid:rw,noexec,nosuid,nodev,size=32m,uid=13,gid=13,mode=700
     mem_limit: 256m
     cpus: 0.50
     pids_limit: 64
