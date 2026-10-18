@@ -1,7 +1,9 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax, extractFiles } from './codeChecks.js';
-import { runProjectToolchainChecks } from './runnerClient.js';
+import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
+import { deriveAgentWorkspaceId } from './agentWorkspace.js';
+import { AGENT_TOOL_DEFINITIONS, createAgentToolDispatcher } from './agentToolDispatcher.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -9,6 +11,90 @@ import { recordAgentCheckpoint } from './agentMemory.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
+async function createDeveloperToolContext(jobId, round, seedDelivery = '') {
+  const workspaceId = deriveAgentWorkspaceId(jobId, 'desarrollador', 'round-' + round);
+  const initial = await getPayload(jobId);
+  const stored = initial?.payload?.agentWorkspaces?.[workspaceId];
+  if (!Array.isArray(stored)) {
+    const seed = extractFiles(seedDelivery);
+    if (seed.length) await updateJob(jobId, { payload: { agentWorkspaces: { ...(initial?.payload?.agentWorkspaces || {}), [workspaceId]: seed } } });
+  }
+  const readFiles = async () => {
+    const record = await getPayload(jobId);
+    const value = record?.payload?.agentWorkspaces?.[workspaceId];
+    return Array.isArray(value) ? value.map(file => ({ path: file.path, content: file.content })) : [];
+  };
+  const writeFiles = async files => {
+    const record = await getPayload(jobId);
+    const all = record?.payload?.agentWorkspaces || {};
+    await updateJob(jobId, { payload: { agentWorkspaces: { ...all, [workspaceId]: files } } });
+  };
+  const workspace = {
+    list: readFiles,
+    read: async path => (await readFiles()).find(file => file.path === path)?.content ?? null,
+    write: async (path, content) => {
+      const files = await readFiles();
+      const next = [...files.filter(file => file.path !== path), { path, content }].sort((a, b) => a.path.localeCompare(b.path));
+      await writeFiles(next);
+      return { path, bytes: Buffer.byteLength(content, 'utf8') };
+    }
+  };
+  let executionCount = 0;
+  const refreshFromArtifacts = async result => {
+    if (Array.isArray(result?.artifacts) && result.artifacts.length) {
+      const current = await readFiles();
+      const byPath = new Map(current.map(file => [file.path, file]));
+      for (const file of result.artifacts) if (file && typeof file.path === 'string' && typeof file.content === 'string') byPath.set(file.path, file);
+      await writeFiles([...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)));
+    }
+    return result;
+  };
+  const runner = {
+    execute: async input => {
+      executionCount++;
+      return refreshFromArtifacts(await runAgentCommand({
+        taskId: jobId, workspaceId, files: await readFiles(), command: input.command,
+        network: input.network, timeoutMs: input.timeoutMs, includeArtifacts: true,
+        idempotencyKey: jobId + ':agent-tool:' + workspaceId + ':' + executionCount
+      }));
+    },
+    check: async () => runProjectToolchainChecks({ taskId: jobId, round, files: await readFiles() }),
+    jobStatus: getAgentJobStatus,
+    cancel: cancelAgentJob,
+    artifact: getAgentJobArtifact,
+    dependency: async input => {
+      const commands = {
+        'package-lock.json': ['npm', 'ci'],
+        'requirements.txt': ['python3', '-m', 'pip', 'install', '-r', 'requirements.txt'],
+        'pyproject.toml': ['python3', '-m', 'pip', 'install', '.'],
+        'composer.lock': ['composer', 'install', '--no-interaction', '--prefer-dist'],
+        'Gemfile.lock': ['bundle', 'install'],
+        'go.sum': ['go', 'mod', 'download'],
+        'Cargo.lock': ['cargo', 'fetch', '--locked'],
+        'pom.xml': ['mvn', '-B', '-DskipTests', 'dependency:go-offline']
+      };
+      executionCount++;
+      return refreshFromArtifacts(await runAgentCommand({
+        taskId: jobId, workspaceId, files: await readFiles(), command: commands[input.manifest],
+        network: 'restricted', timeoutMs: 120000, includeArtifacts: true,
+        idempotencyKey: jobId + ':agent-dependencies:' + workspaceId + ':' + executionCount
+      }));
+    }
+  };
+  const dispatcher = createAgentToolDispatcher({ role: 'desarrollador', workspace, runner, jobId, round, maxCalls: 40 });
+  return {
+    workspace, workspaceId, tools: AGENT_TOOL_DEFINITIONS,
+    onToolCall: ({ name, arguments: args }) => dispatcher.invoke({ name, arguments: args })
+  };
+}
+function workspaceFilesAsDelivery(files) {
+  return (Array.isArray(files) ? files : []).map(file => {
+    const ext = String(file.path || '').split('.').pop().toLowerCase();
+    const lang = ({ js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', py: 'python', html: 'html', css: 'css', json: 'json', yml: 'yaml', yaml: 'yaml', md: 'markdown', sh: 'bash' })[ext] || '';
+    return '### Archivo: ' + file.path + '\\n\\n' + String.fromCharCode(96, 96, 96) + lang + '\\n' + file.content + '\\n' + String.fromCharCode(96, 96, 96);
+  }).join('\\n\\n');
+}
+
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
 function selectRepairContext(delivery, findings) {
   const source = String(delivery || '');
@@ -170,13 +256,16 @@ async function runJob(jobId) {
     if (!delivery) {
       await startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Con el plan acordado, voy a construir los archivos procurando que las piezas encajen entre sí; después pasarán una revisión independiente.');
       await assertTaskTokenBudget(jobId);
+      const toolContext = await createDeveloperToolContext(jobId, 1, partialDelivery || delivery);
       if (partialDelivery) {
         delivery = partialDelivery;
-        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry('Desarrollador', 'Desarrollo'), partialDelivery, coherence, canContinue, savePartial);
+        const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry('Desarrollador', 'Desarrollo'), partialDelivery, coherence, canContinue, savePartial, toolContext);
         delivery = mergeDelivery(partialDelivery, continuation);
       } else {
-        delivery = await agenteDesarrollador(objective, strategy, '', onRetry('Desarrollador', 'Desarrollo'), '', coherence, canContinue, savePartial);
+        delivery = await agenteDesarrollador(objective, strategy, '', onRetry('Desarrollador', 'Desarrollo'), '', coherence, canContinue, savePartial, toolContext);
       }
+      const workspaceDelivery = workspaceFilesAsDelivery(await toolContext.workspace.list());
+      if (workspaceDelivery) delivery = mergeDelivery(delivery, workspaceDelivery);
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
     }
