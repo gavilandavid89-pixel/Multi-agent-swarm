@@ -41,6 +41,15 @@ if [ -n "$host_home" ] && [ "$workspace" = "$host_home" ]; then
   exit 2
 fi
 case "$workspace" in
+  /home/*)
+    home_relative=${workspace#/home/}
+    case "$home_relative" in
+      */*) ;;
+      *) echo "ERROR: no se permite montar el directorio raíz de otro usuario en /home." >&2; exit 2 ;;
+    esac
+    ;;
+esac
+case "$workspace" in
   */.ssh|*/.ssh/*|*/.aws|*/.aws/*|*/.azure|*/.azure/*|*/.kube|*/.kube/*|*/.gnupg|*/.gnupg/*|*/.docker|*/.docker/*)
     echo "ERROR: no se permite montar directorios que suelen contener credenciales: $workspace" >&2
     exit 2
@@ -72,6 +81,11 @@ case "$network_mode" in
     network_is_internal=$(docker network inspect --format '{{.Internal}}' "$docker_network")
     if [ "$network_is_internal" != true ]; then
       echo "ERROR: '$docker_network' existe pero no es una red Docker interna; se rechaza por seguridad." >&2
+      exit 125
+    fi
+    proxy_status=$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' swarm-egress-proxy 2>/dev/null || true)
+    if [ "$proxy_status" != "true|healthy" ]; then
+      echo "ERROR: swarm-egress-proxy no está healthy; no se inicia una ejecución con red restringida." >&2
       exit 125
     fi
     ;;
