@@ -198,7 +198,7 @@ function detectRuntimeProfiles(entries) {
       name: 'composer test',
       prepare: ['composer', 'install', '--no-interaction', '--no-progress', '--no-scripts', '--no-plugins'],
       prepareTimeoutMs: 120000,
-      test: ['composer', 'run-script', 'test', '--no-interaction'],
+      test: ['composer', 'run-script', '--no-interaction', 'test'],
       testTimeoutMs: 60000
     });
   }
@@ -211,7 +211,11 @@ function detectRuntimeProfiles(entries) {
       name: 'bundle test',
       prepare: ['bash', '-lc', 'bundle config set --local path /workspace/.swarm-bundle && bundle install --jobs 2 --retry 1'],
       prepareTimeoutMs: 120000,
-      test: [paths.has('Rakefile') ? 'bash' : 'bundle', ...(paths.has('Rakefile') ? ['-lc', 'bundle exec rake test'] : ['exec', 'rspec'])],
+      test: paths.has('Rakefile')
+        ? ['bash', '-lc', 'bundle exec rake test']
+        : entries.some(file => file.path.startsWith('spec/'))
+          ? ['bundle', 'exec', 'rspec']
+          : ['bundle', 'exec', 'ruby', '-Itest', '-e', "Dir.glob('test/**/*_test.rb').each { |f| require_relative f }"],
       testTimeoutMs: 60000
     });
   }
