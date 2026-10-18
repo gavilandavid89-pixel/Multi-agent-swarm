@@ -208,11 +208,15 @@ async function runJob(jobId) {
         }
         syntax = await checkJavascriptSyntax(delivery);
         const runnerExecution = await runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) });
+        const executionStatus = runnerExecution.checked
+          ? (runnerExecution.ok ? 'APROBADO' : 'FALLO')
+          : runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE';
         syntax = {
           ...syntax,
           runnerExecution,
+          executionStatus,
           ok: Boolean(syntax.ok && runnerExecution.ok),
-          message: [syntax.message, runnerExecution.checked || !runnerExecution.ok ? 'Runner aislado: ' + String(runnerExecution.message || (runnerExecution.ok ? 'ejecución omitida' : 'falló la ejecución')).slice(0, 2500) : ''].filter(Boolean).join('\n')
+          message: [syntax.message, 'Runner aislado (' + executionStatus + '): ' + String(runnerExecution.message || (runnerExecution.ok ? 'sin comprobación de ejecución' : 'falló la ejecución')).slice(0, 2500)].filter(Boolean).join('\n')
         };
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
