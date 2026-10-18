@@ -189,7 +189,7 @@ function detectRuntimeProfiles(entries) {
       testTimeoutMs: 60000
     });
   }
-  if (entries.some(file => /\\.html?$/i.test(file.path))) {
+  if (entries.some(file => /\.html?$/i.test(file.path))) {
     profiles.push({
       name: 'Chromium/Xvfb browser smoke',
       test: ['node', '/opt/swarm-runner/browser-smoke.mjs'],
