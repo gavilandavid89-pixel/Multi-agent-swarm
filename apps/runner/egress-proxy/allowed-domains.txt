@@ -13,6 +13,10 @@ crates.io
 rubygems.org
 repo.maven.apache.org
 repo1.maven.org
+plugins.gradle.org
+services.gradle.org
+downloads.gradle.org
+release-assets.githubusercontent.com
 deb.debian.org
 security.debian.org
 github.com
