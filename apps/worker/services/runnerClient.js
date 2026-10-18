@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 
 const configuredBase = String(process.env.AGENT_RUNNER_BASE_URL || '').trim().replace(/\/+$/, '');
 const configuredSecret = String(process.env.AGENT_RUNNER_SHARED_SECRET || '');
@@ -8,6 +9,17 @@ const terminal = new Set(['succeeded', 'failed', 'timed_out', 'cancelled']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function unavailable(message) {
   return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, message };
+}
+function isPrivateRunnerHost(hostname) {
+  const host = String(hostname || '').replace(/^\\[|\\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')) return true;
+  const version = isIP(host);
+  if (version === 4) {
+    const [a, b] = host.split('.').map(Number);
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  if (version === 6) return host === '::1' || /^(?:fc|fd)/i.test(host) || /^fe[89ab]/i.test(host);
+  return false;
 }
 async function request(path, options = {}, timeoutMs = 15000) {
   const response = await fetch(configuredBase + path, { ...options, signal: AbortSignal.timeout(timeoutMs) });
@@ -31,6 +43,9 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   let baseUrl;
   try { baseUrl = new URL(configuredBase); } catch { return { available: true, checked: false, ok: false, message: 'AGENT_RUNNER_BASE_URL no es una URL válida.' }; }
   if (!['http:', 'https:'].includes(baseUrl.protocol)) return { available: true, checked: false, ok: false, message: 'El protocolo del runner debe ser HTTP(S) sobre una red privada.' };
+  if (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)) {
+    return { available: true, checked: false, ok: false, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
+  }
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
   }
