@@ -147,7 +147,7 @@ function detectRuntimeProfiles(entries) {
   const profiles = [];
   let pkg = null;
   try { if (contents.has('package.json')) pkg = JSON.parse(contents.get('package.json')); } catch {}
-  if (pkg?.scripts?.test && paths.has('package-lock.json') || pkg?.scripts?.test && paths.has('npm-shrinkwrap.json')) {
+  if (pkg?.scripts?.test && (paths.has('package-lock.json') || paths.has('npm-shrinkwrap.json'))) {
     profiles.push({
       name: 'npm test',
       prepare: ['npm', 'ci', '--no-audit', '--no-fund', '--ignore-scripts'],
@@ -158,7 +158,7 @@ function detectRuntimeProfiles(entries) {
   } else if (pkg?.scripts?.test) {
     profiles.push({ name: 'npm test (offline; no lockfile)', test: ['npm', 'test'], testTimeoutMs: 60000 });
   }
-  const hasPythonTests = entries.some(file => /(^|\\/)(test_[^/]+\\.py|[^/]+_test\\.py)$/.test(file.path));
+  const hasPythonTests = entries.some(file => { const base = file.path.split('/').at(-1); return (base.startsWith('test_') && base.endsWith('.py')) || base.endsWith('_test.py'); });
   if (hasPythonTests && paths.has('requirements.txt')) {
     profiles.push({
       name: 'pytest',
