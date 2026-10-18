@@ -45,8 +45,17 @@ function bounded(value) {
   try { out = JSON.stringify(value ?? null); }
   catch { return { ok: false, error: 'Resultado no serializable' }; }
   if (out.length <= 12000) return value ?? null;
-  // Preserve a valid tool-result envelope instead of truncating JSON mid-token.
-  return { truncated: true, serializedChars: out.length, preview: out.slice(0, 11500) + '[recortado]' };
+  // Preserve a valid tool-result envelope and essential job metadata instead of
+  // truncating JSON mid-token (which would also hide the ID needed for follow-up tools).
+  const summary = { truncated: true, serializedChars: out.length, preview: out.slice(0, 11500) + '[recortado]' };
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const key of ['jobId', 'status', 'exitCode', 'timedOut', 'durationMs', 'ok', 'available', 'checked', 'infraError', 'message']) {
+      if (!Object.hasOwn(value, key)) continue;
+      const item = value[key];
+      summary[key] = typeof item === 'string' ? item.slice(0, 1000) : item;
+    }
+  }
+  return summary;
 }
 
 function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
