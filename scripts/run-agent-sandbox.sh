@@ -88,6 +88,12 @@ case "$network_mode" in
       echo "ERROR: swarm-egress-proxy no está healthy; no se inicia una ejecución con red restringida." >&2
       exit 125
     fi
+    proxy_ip=$(docker inspect --format '{{with index .NetworkSettings.Networks "swarm-agent-egress"}}{{.IPAddress}}{{end}}' swarm-egress-proxy)
+    proxy_outbound_ip=$(docker inspect --format '{{with index .NetworkSettings.Networks "swarm-egress-outbound"}}{{.IPAddress}}{{end}}' swarm-egress-proxy)
+    if [ "$proxy_ip" != "172.30.0.2" ] || [ -z "$proxy_outbound_ip" ]; then
+      echo "ERROR: el proxy no está conectado a las dos redes esperadas o su IP interna cambió." >&2
+      exit 125
+    fi
     ;;
   *) echo "ERROR: SWARM_RUNNER_NETWORK admite solo none o restricted." >&2; exit 2 ;;
 esac
