@@ -218,7 +218,7 @@ async function collectFiles(workspace) {
     try { entries = await fsp.readdir(directory, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (files.length >= 100 || total >= MAX_TOTAL_FILE_BYTES) break;
-      if (entry.isSymbolicLink() || ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle', 'vendor', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
+      if (entry.isSymbolicLink() || ['.git', '.godot', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle', 'vendor', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
       const name = relative ? relative + '/' + entry.name : entry.name;
       if (!safeRelativePath(name)) continue;
       const target = path.join(directory, entry.name);
