@@ -12,7 +12,7 @@ function unavailable(message) {
 }
 function containsSensitivePath(entries) {
   const blockedNames = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig']);
-  const blockedDirs = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle']);
+  const blockedDirs = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle']);
   return entries.some(file => {
     const parts = String(file.path || '').split('/');
     const base = parts.at(-1)?.toLowerCase() || '';
