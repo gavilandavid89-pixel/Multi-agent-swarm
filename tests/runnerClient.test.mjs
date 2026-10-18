@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { deriveAgentWorkspaceId } from '../apps/worker/services/agentWorkspace.js';
 
 const moduleUrl = new URL('../apps/worker/services/runnerClient.js', import.meta.url).href;
 
@@ -110,6 +111,9 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(seen[1].body.command[0], 'bash');
   assert.match(seen[1].key, /:validation:1:[a-f0-9]{16}$/i, 'validation idempotency keys should include a source-content fingerprint');
   assert.equal(seen[1].body.network, 'none');
+  assert.equal(seen[1].body.workspaceId, deriveAgentWorkspaceId('33333333-3333-4333-8333-333333333333', 'validador', 'round-1'));
+  assert.notEqual(seen[1].body.workspaceId, '33333333-3333-4333-8333-333333333333', 'validation must not share the task/agent integration workspace');
+  assert.equal(seen[2].body.workspaceId, seen[1].body.workspaceId, 'dependency preparation and tests must reuse the same isolated validation workspace');
   assert.equal(seen[2].body.command[0], 'npm');
   assert.equal(seen[2].body.command[1], 'ci');
   assert.equal(seen[2].body.network, 'restricted');
