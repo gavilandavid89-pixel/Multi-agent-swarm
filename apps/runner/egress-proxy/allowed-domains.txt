@@ -6,7 +6,6 @@ pypi.org
 files.pythonhosted.org
 proxy.golang.org
 sum.golang.org
-storage.googleapis.com
 index.crates.io
 static.crates.io
 crates.io
@@ -24,5 +23,4 @@ deb.debian.org
 security.debian.org
 github.com
 codeload.github.com
-objects.githubusercontent.com
 raw.githubusercontent.com
