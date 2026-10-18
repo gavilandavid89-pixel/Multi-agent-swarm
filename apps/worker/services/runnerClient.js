@@ -10,6 +10,18 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function unavailable(message) {
   return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, infraError: required && !configuredBase, message };
 }
+function containsSensitivePath(entries) {
+  const blockedNames = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig']);
+  const blockedDirs = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle']);
+  return entries.some(file => {
+    const parts = String(file.path || '').split('/');
+    const base = parts.at(-1)?.toLowerCase() || '';
+    return parts.some(part => blockedDirs.has(part.toLowerCase()))
+      || blockedNames.has(base)
+      || base === '.env'
+      || (base.startsWith('.env.') && base !== '.env.example');
+  });
+}
 function containsSensitiveCredential(entries) {
   const patterns = [
     /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----/i,
@@ -258,8 +270,8 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     ? [...files.entries()].map(([filePath, file]) => ({ path: filePath, content: String(file?.content || '') }))
     : Array.isArray(files) ? files : [];
   if (!entries.length) return { available: false, checked: false, ok: true, skipped: true, message: 'No hay archivos extraídos para ejecutar en el runner.' };
-  if (configuredBase && containsSensitiveCredential(entries)) {
-    return { available: true, checked: false, ok: false, infraError: true, message: 'Se detectó una credencial de alta confianza en los archivos; no se envió ningún archivo al runner.' };
+  if (configuredBase && (containsSensitivePath(entries) || containsSensitiveCredential(entries))) {
+    return { available: true, checked: false, ok: false, infraError: true, message: 'Se detectó una ruta de credenciales/caché o una credencial de alta confianza; no se envió ningún archivo al runner.' };
   }
   const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
   const taskKey = String(taskId || workspaceId).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 60);
