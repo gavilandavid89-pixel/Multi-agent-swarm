@@ -147,16 +147,19 @@ function detectRuntimeProfiles(entries) {
   const profiles = [];
   let pkg = null;
   try { if (contents.has('package.json')) pkg = JSON.parse(contents.get('package.json')); } catch {}
-  if (pkg?.scripts?.test && (paths.has('package-lock.json') || paths.has('npm-shrinkwrap.json'))) {
+  const hasNodeTest = Boolean(pkg?.scripts?.test);
+  const hasNodeBuild = Boolean(pkg?.scripts?.build);
+  const nodeChecks = hasNodeTest && hasNodeBuild
+    ? ['bash', '-lc', 'npm test && npm run build']
+    : hasNodeTest ? ['npm', 'test'] : ['npm', 'run', 'build'];
+  if (hasNodeTest || hasNodeBuild) {
+    const locked = paths.has('package-lock.json') || paths.has('npm-shrinkwrap.json');
     profiles.push({
-      name: 'npm test',
-      prepare: ['npm', 'ci', '--no-audit', '--no-fund', '--ignore-scripts'],
-      prepareTimeoutMs: 120000,
-      test: ['npm', 'test'],
+      name: hasNodeTest && hasNodeBuild ? 'npm test and build' : hasNodeTest ? 'npm test' : 'npm build',
+      ...(locked ? { prepare: ['npm', 'ci', '--no-audit', '--no-fund', '--ignore-scripts'], prepareTimeoutMs: 120000 } : {}),
+      test: nodeChecks,
       testTimeoutMs: 60000
     });
-  } else if (pkg?.scripts?.test) {
-    profiles.push({ name: 'npm test (offline; no lockfile)', test: ['npm', 'test'], testTimeoutMs: 60000 });
   }
   const hasPythonTests = entries.some(file => { const base = file.path.split('/').at(-1); return (base.startsWith('test_') && base.endsWith('.py')) || base.endsWith('_test.py'); });
   if (hasPythonTests && paths.has('requirements.txt')) {
@@ -185,6 +188,30 @@ function detectRuntimeProfiles(entries) {
       prepare: ['bash', '-lc', 'CARGO_HOME=/workspace/.swarm-cargo-home cargo fetch --locked'],
       prepareTimeoutMs: 120000,
       test: ['bash', '-lc', 'CARGO_HOME=/workspace/.swarm-cargo-home CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=/tmp/swarm-cargo-target cargo test --locked --offline'],
+      testTimeoutMs: 60000
+    });
+  }
+  let composer = null;
+  try { if (contents.has('composer.json')) composer = JSON.parse(contents.get('composer.json')); } catch {}
+  if (composer?.scripts?.test && paths.has('composer.lock')) {
+    profiles.push({
+      name: 'composer test',
+      prepare: ['composer', 'install', '--no-interaction', '--no-progress', '--no-scripts', '--no-plugins'],
+      prepareTimeoutMs: 120000,
+      test: ['composer', 'run-script', 'test', '--no-interaction'],
+      testTimeoutMs: 60000
+    });
+  }
+  const hasRubyTests = entries.some(file => {
+    const base = file.path.split('/').at(-1);
+    return file.path.startsWith('spec/') || base === 'Rakefile' || (base.endsWith('_test.rb')) || (base.startsWith('test_') && base.endsWith('.rb'));
+  });
+  if (hasRubyTests && paths.has('Gemfile') && paths.has('Gemfile.lock')) {
+    profiles.push({
+      name: 'bundle test',
+      prepare: ['bash', '-lc', 'bundle config set --local path /workspace/.swarm-bundle && bundle install --jobs 2 --retry 1'],
+      prepareTimeoutMs: 120000,
+      test: [paths.has('Rakefile') ? 'bash' : 'bundle', ...(paths.has('Rakefile') ? ['-lc', 'bundle exec rake test'] : ['exec', 'rspec'])],
       testTimeoutMs: 60000
     });
   }
