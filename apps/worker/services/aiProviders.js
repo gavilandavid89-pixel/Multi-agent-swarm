@@ -172,7 +172,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
   throw error;
 }
 
-function buildProviderRequest({ model, messages, temperature, maxTokens, reasoningEffort, responseFormat, apiKey, baseUrl, providerName, tools, toolChoice }) {
+function buildProviderRequest({ model, messages, temperature, maxTokens, reasoningEffort, responseFormat, apiKey, baseUrl, providerName }) {
   let target;
   try { target = new URL(baseUrl); } catch { throw new Error('La URL base del proveedor no es válida.'); }
   if (target.hostname.toLowerCase() === 'api.anthropic.com') {
@@ -203,12 +203,12 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     options: {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: toolChoice || 'auto' } : {}) })
+      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) })
     }
   };
 }
 
-async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false, tools, onToolCall, maxToolRounds = 8 }) {
+async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -224,7 +224,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
   const apiKey = suppliedApiKey;
   if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0; let continuationCount = 0; let toolRounds = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
@@ -239,7 +239,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName, tools, toolChoice: 'auto' }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
+    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -270,37 +270,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         continue;
       }
       const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
-      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) {
-         if (!Array.isArray(tools) || !tools.length || typeof onToolCall !== 'function') {
-           const error = new Error('El proveedor solicitó herramientas, pero esta llamada no tiene un dispatcher autorizado.');
-           error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
-           throw error;
-         }
-         if (toolRounds >= Math.max(1, Math.min(12, Number(maxToolRounds) || 8))) {
-           const error = new Error('El agente superó el máximo de rondas de herramientas permitido.');
-           error.code = 'AGENT_TOOL_ROUND_LIMIT';
-           throw error;
-         }
-         const calls = message.tool_calls.slice(0, 8);
-         requestMessages = [...requestMessages, { role: 'assistant', content: typeof content === 'string' ? content : '', tool_calls: calls }];
-         for (const call of calls) {
-           const name = String(call?.function?.name || '');
-           let args;
-           try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch { args = null; }
-           let result;
-           try {
-             if (!name || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos de herramienta inválidos.');
-             result = await onToolCall({ id: String(call.id || ''), name, arguments: args, model, provider: providerName });
-           } catch (toolError) {
-             result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
-           }
-           let serialized;
-           try { serialized = JSON.stringify(result ?? { ok: true }); } catch { serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' }); }
-           requestMessages.push({ role: 'tool', tool_call_id: String(call.id || ''), content: serialized.slice(0, 16000) });
-         }
-         toolRounds++;
-         continue;
-       }
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) { const toolError = deferredProviderError(model, retry + 1, retryDelay(retry + 1), 'la respuesta requiere llamadas a herramientas que el motor aún no ejecuta', providerName); throw toolError; }
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
