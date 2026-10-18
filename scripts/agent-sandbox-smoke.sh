@@ -127,6 +127,28 @@ printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s
 echo "PASS runner API idempotency and sequential task-scoped workspace reuse"
 echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
+timeout_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
+  command:["node","-e","setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
+}))')
+timeout_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-timeout-01' \
+  -d "$timeout_body")
+timeout_id=$(printf '%s' "$timeout_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+timeout_json=
+i=0
+while [ "$i" -lt 30 ]; do
+  timeout_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$timeout_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$timeout_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$timeout_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="timed_out"||j.timedOut!==true){console.error("FAIL API timeout enforcement:",JSON.stringify(j));process.exit(1)}})'
+echo "PASS runner API kills timed-out executions"
+
 # Network must be unavailable inside the sandbox.
 sh scripts/run-agent-sandbox.sh "$workspace" node -e '
   fetch("https://example.com", { signal: AbortSignal.timeout(2500) })
