@@ -45,12 +45,32 @@ function bounded(value) {
   try { out = JSON.stringify(value ?? null); } catch { out = '{"ok":false,"error":"Resultado no serializable"}'; }
   return out.length > 12000 ? out.slice(0, 12000) + '[recortado]' : out;
 }
+
+function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 8) return ids;
+  if (!Array.isArray(value) && typeof value.jobId === 'string' && /^[0-9a-f-]{36}$/i.test(value.jobId)) ids.add(value.jobId);
+  const children = Array.isArray(value) ? value.slice(0, 200) : Object.values(value).slice(0, 200);
+  for (const child of children) collectRunnerJobIds(child, ids, depth + 1);
+  return ids;
+}
 export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40 } = {}) {
   const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
   if (!workspace || !['list', 'read', 'write'].every(k => typeof workspace[k] === 'function')) throw error('Falta el adaptador seguro de workspace.');
   let calls = 0;
+  // A model may only inspect/cancel artifacts from jobs returned by this dispatcher.
+  // UUID-shaped IDs alone are not proof of ownership across tasks or agents.
+  const ownedRunnerJobs = new Set();
+  const rememberRunnerJobs = result => {
+    for (const id of collectRunnerJobIds(result)) ownedRunnerJobs.add(id);
+    return result;
+  };
+  const requireOwnedRunnerJob = id => {
+    if (typeof id !== 'string' || !ownedRunnerJobs.has(id)) {
+      throw error('El jobId no pertenece a esta sesión de herramientas.', 'AGENT_TOOL_JOB_NOT_OWNED');
+    }
+  };
   async function invoke({ name, arguments: args = {} } = {}) {
     calls++;
     if (calls > Math.min(100, Math.max(1, Number(maxCalls) || 40))) throw error('Límite de llamadas excedido.', 'AGENT_TOOL_CALL_LIMIT');
@@ -93,25 +113,28 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (args.command.some(v => /(?:^|[;&|\n])\s*(?:sh|bash|cmd|powershell)\b|\$\(/.test(v))) throw error('Shell o encadenamiento no permitido.');
         if (args.network !== undefined && !['none', 'restricted'].includes(args.network)) throw error('Red no permitida.');
         if (args.timeoutMs !== undefined && (!Number.isInteger(args.timeoutMs) || args.timeoutMs < 1000 || args.timeoutMs > 120000)) throw error('Timeout fuera de límites.');
-        result = await runner.execute({ jobId, round, workspace, command: args.command, network: args.network || 'none', timeoutMs: args.timeoutMs || 60000 }); break;
+        result = rememberRunnerJobs(await runner.execute({ jobId, round, workspace, command: args.command, network: args.network || 'none', timeoutMs: args.timeoutMs || 60000 })); break;
       }
       case 'runner_check':
         if (Object.keys(args).length) throw error('runner_check no acepta argumentos.');
         if (typeof runner?.check !== 'function') throw error('Runner check no disponible.');
-        result = await runner.check({ jobId, round, workspace }); break;
+        result = rememberRunnerJobs(await runner.check({ jobId, round, workspace })); break;
       case 'runner_job_status':
         if (Object.keys(args).some(k => k !== 'jobId') || typeof args.jobId !== 'string' || !args.jobId) throw error('jobId inválido.');
+        requireOwnedRunnerJob(args.jobId);
         result = await runner.jobStatus({ jobId: args.jobId }); break;
       case 'runner_cancel':
         if (Object.keys(args).some(k => k !== 'jobId') || typeof args.jobId !== 'string' || !args.jobId) throw error('jobId inválido.');
+        requireOwnedRunnerJob(args.jobId);
         result = await runner.cancel({ jobId: args.jobId }); break;
       case 'runner_artifact':
         if (Object.keys(args).some(k => !['jobId', 'artifactId'].includes(k)) || typeof args.jobId !== 'string' || typeof args.artifactId !== 'string') throw error('Identificadores de artefacto inválidos.');
+        requireOwnedRunnerJob(args.jobId);
         result = await runner.artifact({ jobId: args.jobId, artifactId: args.artifactId }); break;
       case 'runner_dependency':
         if (Object.keys(args).some(k => k !== 'manifest')) throw error('Argumentos extra no permitidos para runner_dependency.');
         if (!['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'].includes(args.manifest)) throw error('Manifest no permitido.');
-        result = await runner.dependency({ jobId, round, workspace, manifest: args.manifest }); break;
+        result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest })); break;
       default: throw error('Herramienta desconocida.');
     }
     return { ok: true, result: JSON.parse(bounded(result)) };
