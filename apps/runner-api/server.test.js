@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const source = await readFile(new URL('./server.js', import.meta.url), 'utf8');
+
+test('runner API is authenticated, bounded, and uses a fixed hardened Docker invocation', () => {
+  for (const required of [
+    'RUNNER_SHARED_SECRET', 'timingSafeEqual', 'MAX_BODY_BYTES',
+    'MAX_TOTAL_FILE_BYTES', 'MAX_FILES', '--network', '--read-only',
+    '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+    '--pids-limit', '--memory', '--cpus', '--tmpfs',
+    '--cidfile', 'no-new-privileges:true', 'MAX_OUTPUT_CHARS',
+    'swarm-agent-egress', 'ensureRestrictedNetwork'
+  ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
+  assert.equal(source.includes('--privileged'), false);
+  assert.equal(source.includes('/var/run/docker.sock'), false);
+  assert.equal(source.includes('process.env, stdio'), false);
+});
+
+test('runner API exposes health and async job lifecycle endpoints', () => {
+  for (const route of [
+    '/healthz', '/readyz', '/v1/jobs', '/v1/jobs/([0-9a-f-]{36})',
+    'cancel', 'files', 'idempotencyKey', 'JOB_TTL_MS'
+  ]) assert.ok(source.includes(route), 'missing API behavior: ' + route);
+});
