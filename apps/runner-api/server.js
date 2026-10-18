@@ -120,7 +120,7 @@ async function save(job) {
 async function writeWorkspace(job, files, resetWorkspace) {
   if (resetWorkspace) {
     await fsp.rm(job.workspace, { recursive: true, force: true });
-    await fsp.mkdir(job.workspace, { recursive: false, mode: 0o700 });
+    await fsp.mkdir(job.workspace, { recursive: false, mode: 0o755 });
   } else {
     let workspaceStat;
     try { workspaceStat = await fsp.stat(job.workspace); }
@@ -146,7 +146,7 @@ function dockerArgs(job) {
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
     '--tmpfs', '/workspace:rw,nosuid,nodev,size=256m,mode=1777',
     '--mount', 'type=bind,src=' + job.workspace + ',dst=/input,readonly',
-    '--workdir', '/workspace', '--user', '0:0',
+    '--workdir', '/workspace', '--user', '65532:65532',
     '--env', 'HOME=/tmp', '--env', 'CI=true', '--env', 'LANG=C.UTF-8',
     '--env', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
     '--env', 'CHROME_BIN=/usr/bin/chromium'
