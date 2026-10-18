@@ -76,7 +76,7 @@ echo "PASS runner API rejects credential-like paths before job creation"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
-  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
+  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); fs.writeFileSync(\"/workspace/credential-output.txt\",\"-----BEGIN OPENSSH PRIVATE KEY-----\\\\nnot-a-real-key\\\\n-----END OPENSSH PRIVATE KEY-----\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
   workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
@@ -106,7 +106,7 @@ let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
   }
 })'
 artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
-printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL missing generated artifact",JSON.stringify(f));process.exit(1)}})'
+printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL missing generated artifact",JSON.stringify(f));process.exit(1)}if(f.some(x=>x.path==="credential-output.txt")){console.error("FAIL credential-like output was returned",JSON.stringify(f));process.exit(1)}})'
 repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
@@ -114,6 +114,16 @@ repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -d "$job_body")
 repeat_id=$(printf '%s' "$repeat" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
 if [ "$repeat_id" != "$job_id" ]; then echo "FAIL runner API idempotency returned a duplicate job" >&2; exit 1; fi
+
+set +e
+conflict_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
+  -d "$(printf '%s' "$job_body" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);j.timeoutMs=14000;process.stdout.write(JSON.stringify(j))}')" )
+set -e
+if [ "$conflict_status" != 409 ]; then echo "FAIL runner API accepted a changed request with a reused idempotency key ($conflict_status)" >&2; exit 1; fi
+echo "PASS runner API rejects idempotency-key collisions with changed payloads"
 
 step_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:false,
