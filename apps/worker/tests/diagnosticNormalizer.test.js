@@ -23,8 +23,8 @@ test('normalizes a valid diagnostic report and preserves task correlation', () =
 });
 
 test('redacts common credentials and credential-bearing URLs', () => {
-  const value = sanitizeDiagnosticText('Bearer: abc123 token=secret123 https://alice:password@example.com/path sk-abcdefghijklmnop');
-  assert.doesNotMatch(value, /abc123|secret123|alice:password|sk-abcdefghijklmnop/);
+  const value = sanitizeDiagnosticText('Bearer: abc123 token=secret123 Authorization: Bearer header-secret https://alice:password@example.com/path sk-abcdefghijklmnop');
+  assert.doesNotMatch(value, /abc123|secret123|header-secret|alice:password|sk-abcdefghijklmnop/);
   assert.match(value, /REDACTED/);
 });
 
