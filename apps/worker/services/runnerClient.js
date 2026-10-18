@@ -156,7 +156,7 @@ function detectRuntimeProfiles(entries) {
     const locked = paths.has('package-lock.json') || paths.has('npm-shrinkwrap.json');
     profiles.push({
       name: hasNodeTest && hasNodeBuild ? 'npm test and build' : hasNodeTest ? 'npm test' : 'npm build',
-      ...(locked ? { prepare: ['npm', 'ci', '--no-audit', '--no-fund', '--ignore-scripts'], prepareTimeoutMs: 120000 } : {}),
+      ...(locked ? { prepare: ['npm', 'ci', '--no-audit', '--no-fund'], prepareTimeoutMs: 120000 } : {}),
       test: nodeChecks,
       testTimeoutMs: 60000
     });
@@ -182,7 +182,7 @@ function detectRuntimeProfiles(entries) {
       testTimeoutMs: 60000
     });
   }
-  if (paths.has('Cargo.toml') && paths.has('Cargo.lock') && entries.some(file => file.path.endsWith('.rs')) && !entries.some(file => file.path.startsWith('vendor/'))) {
+  if (paths.has('Cargo.toml') && paths.has('Cargo.lock') && entries.some(file => file.path.endsWith('.rs')) && !paths.has('.cargo/config.toml') && !paths.has('.cargo/config')) {
     profiles.push({
       name: 'cargo test',
       prepare: ['bash', '-lc', 'CARGO_HOME=/workspace/.swarm-cargo-home cargo fetch --locked'],
@@ -196,7 +196,7 @@ function detectRuntimeProfiles(entries) {
   if (composer?.scripts?.test && paths.has('composer.lock')) {
     profiles.push({
       name: 'composer test',
-      prepare: ['composer', 'install', '--no-interaction', '--no-progress', '--no-scripts', '--no-plugins'],
+      prepare: ['composer', 'install', '--no-interaction', '--no-progress'],
       prepareTimeoutMs: 120000,
       test: ['composer', 'run-script', '--no-interaction', 'test'],
       testTimeoutMs: 60000
