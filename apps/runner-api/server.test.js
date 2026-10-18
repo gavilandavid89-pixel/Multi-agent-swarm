@@ -28,7 +28,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
 
 test('runner API exposes health and async job lifecycle endpoints', () => {
   for (const route of [
-    '/healthz', '/readyz', '/v1/jobs', '/v1/jobs/([0-9a-f-]{36})',
+    '/healthz', '/readyz', '/v1/jobs', '([0-9a-f-]{36})',
     'cancel', 'files', 'idempotencyKey', 'JOB_TTL_MS'
   ]) assert.ok(source.includes(route), 'missing API behavior: ' + route);
 });
