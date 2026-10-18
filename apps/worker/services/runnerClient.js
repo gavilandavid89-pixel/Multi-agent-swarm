@@ -45,6 +45,7 @@ async function request(path, options = {}, timeoutMs = 15000) {
   const response = await fetch(configuredBase + path, {
     ...options,
     headers: { ...(options.headers || {}), 'x-swarm-runner-secret': configuredSecret },
+    redirect: 'error',
     signal: AbortSignal.timeout(timeoutMs)
   });
   let body;
