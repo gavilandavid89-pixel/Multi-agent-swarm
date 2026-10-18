@@ -1,6 +1,6 @@
 name: Swarm checks
 concurrency:
-  group: swarm-checks-${{ github.event.pull_request.number || github.ref }}
+  group: swarm-checks-${{ github.event.pull_request.number || github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 on:
   pull_request:
@@ -51,6 +51,7 @@ jobs:
 
   agent-sandbox:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v7
       - name: Validate isolated agent sandbox scripts
