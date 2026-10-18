@@ -247,7 +247,7 @@ echo "PASS restricted egress allows an explicitly approved package host"
 # Verify the API's own restricted-network mode, not just the local wrapper.
 api_network_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"22222222-2222-4222-8222-222222222222",resetWorkspace:true,
-  command:["python3","-c","import urllib.request; r=urllib.request.urlopen(\\"https://registry.npmjs.org/-/ping\\",timeout=10); assert r.status==200"],
+  command:["python3","-c","import urllib.request; r=urllib.request.urlopen("+JSON.stringify("https://registry.npmjs.org/-/ping")+",timeout=10); assert r.status==200"],
   network:"restricted",timeoutMs:15000
 }))')
 api_network_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
