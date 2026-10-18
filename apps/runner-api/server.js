@@ -258,7 +258,7 @@ async function copyWorkspaceFromContainer(job) {
   // between sequential toolchain jobs even if a directory-level docker cp omits changes.
   const manifestScript = "const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');function walk(dir,rel='',depth=0){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const absolute=path.join(dir,entry.name);const name=rel?rel+'/'+entry.name:entry.name;if(entry.isDirectory()){process.stdout.write('D\\0'+name+'\\0\\0');if(depth<32)walk(absolute,name,depth+1);}else if(entry.isFile()){const hash=crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');process.stdout.write('F\\0'+name+'\\0'+hash+'\\0');}}}walk('/workspace');process.stdout.write('END\\0\\0\\0');";
   const inventory = await dockerCommand(['exec', cid, 'node', '-e', manifestScript], 30000, 8 * 1024 * 1024);
-  if (inventory.code !== 0 || !inventory.stdout.endsWith('\0')) {
+  if (inventory.code !== 0 || (inventory.stdout && !inventory.stdout.endsWith('END\0\0\0'))) {
     throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + String(inventory.stderr || 'inventario truncado').slice(0, 500));
   }
   const fields = inventory.stdout.split('\0');
