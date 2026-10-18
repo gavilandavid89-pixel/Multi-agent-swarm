@@ -10,7 +10,7 @@ proxy_started_by_smoke=0
 cleanup() {
   if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
   if [ "$proxy_started_by_smoke" -eq 1 ]; then docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true; fi
-  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json" "${workspace}-create-response.json"
+  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json" "${workspace}-capabilities.json" "${workspace}-create-response.json"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -32,6 +32,11 @@ HTML
 # Confirm the X server starts and exposes a usable display before testing the browser.
 sh scripts/run-agent-sandbox.sh "$workspace" xvfb-run -a timeout --signal=TERM --kill-after=2s 10s xdpyinfo >/dev/null
 echo "PASS Xvfb starts a usable X11 display"
+
+# The image must contain every documented language/runtime and helper tool.
+capability_result=$(sh scripts/run-agent-sandbox.sh "$workspace" bash /opt/swarm-runner/capabilities-smoke.sh)
+printf '%s\\n' "$capability_result" | grep -q 'SWARM_RUNNER_CAPABILITIES_CHECKED=1'
+echo "PASS runner toolchain inventory matches the machine-readable catalog"
 
 # Headless Chromium has deterministic process lifetime; a separate timeout catches hangs
 # without consuming the runner's full 120-second outer deadline.
@@ -111,6 +116,11 @@ if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL ru
 unauthorized=$(curl -sS -o "${workspace}-unauthorized.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs -H 'content-type: application/json' -d '{}')
 if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticated request ($unauthorized)" >&2; exit 1; fi
 echo "PASS runner API rejects unauthenticated requests"
+
+capabilities_status=$(curl -sS -o "${workspace}-capabilities.json" -w '%{http_code}' http://127.0.0.1:3200/v1/capabilities -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+if [ "$capabilities_status" != 200 ]; then echo "FAIL authenticated capability discovery HTTP $capabilities_status" >&2; exit 1; fi
+node -e 'const fs=require("node:fs"); const c=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(c.schemaVersion!==1||c.execution.defaultNetwork!=="none"||!c.toolchains.some(x=>x.id==="typescript")||!c.toolchains.some(x=>x.id==="godot")) process.exit(51)' "${workspace}-capabilities.json"
+echo "PASS authenticated capability discovery exposes the supported toolchains and safety defaults"
 
 secret_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"id_rsa",content:"-----BEGIN OPENSSH PRIVATE KEY-----\\nnot-a-real-key\\n-----END OPENSSH PRIVATE KEY-----"}],
