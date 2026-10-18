@@ -24,8 +24,16 @@ test('agent sandbox applies process, memory, CPU and wall-clock limits', () => {
   assert.ok(wrapper.includes('timeout --signal=TERM --kill-after=5s'));
 });
 
+test('network is denied by default and restricted mode requires a fixed egress proxy', () => {
+  assert.ok(wrapper.includes('network_mode=${SWARM_RUNNER_NETWORK:-none}'));
+  assert.ok(wrapper.includes('docker_network=swarm-agent-egress'));
+  assert.ok(wrapper.includes('--env HTTPS_PROXY=http://swarm-egress-proxy:3128'));
+  assert.ok(wrapper.includes('docker network inspect "$docker_network"'));
+  assert.ok(wrapper.includes('--network none'));
+});
+
 test('only the requested project directory is mounted writable', () => {
-  assert.ok(wrapper.includes('--mount "type=bind,src=$workspace,dst=/workspace,rw"'));
+  assert.ok(wrapper.includes('--mount "type=bind,src=$workspace,dst=/workspace"'));
   assert.equal(wrapper.includes('/var/run/docker.sock'), false);
   assert.equal(wrapper.includes('--privileged'), false);
   assert.equal(wrapper.includes('--network host'), false);
