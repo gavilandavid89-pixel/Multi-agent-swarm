@@ -46,6 +46,22 @@ browser_result=$(sh scripts/run-agent-sandbox.sh "$workspace" node /opt/swarm-ru
 printf '%s\n' "$browser_result" | grep -q 'SWARM_BROWSER_CHECKED=1'
 echo "PASS isolated Chromium/Xvfb browser smoke script detects JavaScript runtime errors"
 
+cp "$workspace/index.html" "$workspace/index.html.good"
+cat > "$workspace/index.html" <<'HTML'
+<!doctype html><html><head></head><body><script>throw new Error("browser-error-detection")</script></body></html>
+HTML
+set +e
+sh scripts/run-agent-sandbox.sh "$workspace" node /opt/swarm-runner/browser-smoke.mjs > "$workspace/browser-error.log" 2>&1
+browser_error_status=$?
+set -e
+mv "$workspace/index.html.good" "$workspace/index.html"
+if [ "$browser_error_status" -eq 0 ] || ! grep -q 'browser-error-detection' "$workspace/browser-error.log"; then
+  echo "FAIL isolated browser checker did not report a JavaScript runtime exception" >&2
+  cat "$workspace/browser-error.log" >&2
+  exit 1
+fi
+echo "PASS isolated browser smoke rejects a deliberate JavaScript exception"
+
 # Exercise the authenticated Worker-facing API against the actual Docker daemon.
 RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
 RUNNER_API_SENTINEL=must-not-leak \
