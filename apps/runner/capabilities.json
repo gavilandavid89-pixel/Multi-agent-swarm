@@ -407,5 +407,53 @@
     "Los toolchains del sistema dependen de la versión concreta de la imagen construida; el CI verifica que los comandos requeridos existan.",
     "Los gestores de dependencias y scripts de instalación son código no confiable; ejecutarlos solo en un contenedor sin secretos y con egress restringido.",
     "Docker no sustituye una frontera VM/microVM frente a código hostil multiusuario."
-  ]
+  ],
+  "output": {
+    "streams": [
+      "stdout",
+      "stderr"
+    ],
+    "livePolling": "GET /v1/jobs/:id while status is queued/running",
+    "maxRetainedCharsPerStream": 65536,
+    "workerReturnedCharsPerStream": 12000,
+    "metadata": [
+      "exitCode",
+      "status",
+      "timedOut",
+      "cancelled",
+      "durationMs",
+      "error"
+    ],
+    "artifacts": "GET /v1/jobs/:id/files returns a bounded, filtered snapshot"
+  },
+  "debugging": {
+    "status": "available-through-runner-execute; not yet exposed as model tool-calls",
+    "stdin": {
+      "maxBytes": 16384,
+      "network": "none-only",
+      "persistence": "kept in memory only; queued interactive jobs fail safely after runner restart"
+    },
+    "debuggers": [
+      {
+        "id": "python-pdb",
+        "command": "python3 -m pdb <script.py>",
+        "input": "stdin commands, for example p expression followed by q"
+      },
+      {
+        "id": "node-inspector-cli",
+        "command": "node inspect <script.js>",
+        "input": "stdin debugger commands; no public inspector port is opened"
+      },
+      {
+        "id": "java-jdb",
+        "command": "jdb <class>",
+        "input": "stdin debugger commands; no public debug port is opened"
+      }
+    ],
+    "restrictions": [
+      "No host debugger access",
+      "No ptrace capability or elevated container privileges",
+      "No network access for debug sessions"
+    ]
+  }
 }
