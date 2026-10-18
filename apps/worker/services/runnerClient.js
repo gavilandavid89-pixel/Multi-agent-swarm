@@ -347,10 +347,11 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     runtimeChecks.push({ profile: profile.name, phase: 'tests', ok: tested.ok, exitCode: tested.exitCode, durationMs: tested.durationMs });
     if (!tested.ok) {
       const output = String(tested.stdout || '') + '\\n' + String(tested.stderr || '');
-      const missingDependency = /ERR_MODULE_NOT_FOUND|Cannot find module|ModuleNotFoundError|No module named|could not find or load main class/i.test(output);
       return {
         ...tested, checked: true, ok: false,
-        infraError: Boolean(tested.infraError || missingDependency || /no space left on device|disk quota exceeded/i.test(output)),
+        // Missing modules/imports are usually actionable project failures for the repair loop.
+        // Only runner/daemon failures and exhausted sandbox storage are infrastructure failures.
+        infraError: Boolean(tested.infraError || /no space left on device|disk quota exceeded/i.test(output)),
         filesChecked: checked, runtimeChecks,
         message: [result.message, profile.name + ' · pruebas: ' + tested.message, tested.stdout, tested.stderr].filter(Boolean).join('\\n').slice(0, 5000)
       };
