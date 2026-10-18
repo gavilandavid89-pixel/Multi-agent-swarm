@@ -14,7 +14,7 @@ if ! godot --headless --editor --path . --quit >"$log" 2>&1; then
   cat "$log" >&2
   exit 1
 fi
-if grep -E 'SCRIPT ERROR:|Parse Error:|Failed to load script' "$log"; then
+if grep -E 'SCRIPT ERROR:|ERROR:|Parse Error:|Failed to load script' "$log"; then
   cat "$log" >&2
   exit 1
 fi
