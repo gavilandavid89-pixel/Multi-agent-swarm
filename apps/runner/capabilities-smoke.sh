@@ -50,6 +50,7 @@ node -e '
     if (!ids.has(id)) { console.error("Missing toolchain profile:", id); process.exit(42); }
   }
   if (manifest.execution.defaultNetwork !== "none" || manifest.execution.concurrency !== 1) process.exit(43);
+  if (manifest.agentToolContract.rolePolicyStatus !== "proposed-not-enforced" || !manifest.agentToolContract.rolePolicy.Desarrollador || !manifest.agentToolContract.rolePolicy.Validador) process.exit(45);
   if (manifest.agentToolContract.notYetImplemented.length === 0) process.exit(44);
 '
 echo 'SWARM_RUNNER_CAPABILITIES_CHECKED=1'
