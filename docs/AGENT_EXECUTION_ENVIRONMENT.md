@@ -87,9 +87,11 @@ Preparación local:
 
 ```sh
 docker compose -f docker-compose.runner-egress.yml up --build -d
-SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm install
+SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm ci --ignore-scripts
 docker compose -f docker-compose.runner-egress.yml down
 ```
+
+Los instaladores de paquetes pueden ejecutar scripts de ciclo de vida o backends de compilación. Preferí `--ignore-scripts` cuando sea compatible, usá una copia descartable y no expongas secretos ni datos privados durante esta fase. Las pruebas funcionales posteriores deben correr sin red.
 
 El modo restringido **falla cerrado** si no existe la red fija. No cambia a una red abierta como fallback. Para sumar un dominio, revisá primero por qué lo necesita el lockfile o el framework, agregalo a `allowed-domains.txt` y repetí la prueba de red. No agregues comodines amplios como `*`, dominios de almacenamiento genéricos o proveedores de túneles.
 
