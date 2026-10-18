@@ -250,7 +250,7 @@ function detectRuntimeProfiles(entries) {
 
 function isDependencyInfrastructureFailure(result) {
   const output = String(result?.stdout || '') + '\\n' + String(result?.stderr || '') + '\\n' + String(result?.message || '');
-  return Boolean(result?.infraError) || /EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|E403|E404|proxy error|access denied|network is unreachable|could not resolve|no space left on device|disk quota exceeded|failed to download|unable to download/i.test(output);
+  return Boolean(result?.infraError) || /EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|E403|proxy error|access denied|network is unreachable|could not resolve|temporary failure in name resolution|newconnectionerror|could not get|could not transfer artifact|failed to transfer|unknownhostexception|handshake_failure|PKIX path building failed|fetch failed|no space left on device|disk quota exceeded|failed to download|unable to download/i.test(output);
 }
 
 export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
