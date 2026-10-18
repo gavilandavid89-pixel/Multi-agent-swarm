@@ -350,12 +350,16 @@ async function handle(req, res) {
     if (workspaceBusy.has(workspaceId)) return json(res, 409, { error: 'Ya hay una ejecución en cola o activa para este workspace.' });
     const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, artifactSnapshot: [] };
     workspaceBusy.set(workspaceId, id);
+    jobs.set(id, job);
+    if (key) idempotency.set(key, id);
     try {
       await writeWorkspace(job, body.files, body.resetWorkspace);
-      jobs.set(id, job); if (key) idempotency.set(key, id);
       await save(job); queue.push(id); void pump();
     } catch (error) {
+      jobs.delete(id);
+      if (key && idempotency.get(key) === id) idempotency.delete(key);
       if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
+      if (body.resetWorkspace) await fsp.rm(job.workspace, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
     return json(res, 202, publicJob(job));
