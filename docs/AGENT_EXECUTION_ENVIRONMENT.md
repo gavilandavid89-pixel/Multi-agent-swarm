@@ -16,9 +16,9 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se h
 | PHP / Ruby | intérpretes y herramientas de proyecto |
 | C / C++ / Rust | GCC, G++, make, rustc y cargo |
 | Web UI | Chromium, Xvfb, xauth, fuentes básicas y `/opt/swarm-runner/browser-smoke.mjs` |
-| Operación | git, bash, coreutils, findutils, pkg-config |
+| Operación | git, bash, coreutils, findutils, pkg-config, jq, ripgrep (`rg`), `fdfind`, `tree`, `file`, `less` |\n| Datos locales | `sqlite3` para bases SQLite descartables; no incluye un servidor PostgreSQL/MySQL/Redis persistente |\n| Calidad y análisis | TypeScript (`tsc`, `tsx`), ESLint, Prettier, Black, Flake8, mypy, ShellCheck y shfmt |
 
-La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones estáticas, el Worker ejecuta perfiles de toolchain y pruebas de navegador dentro del runner; los fallos reales se convierten en hallazgos del ciclo correctivo. El modelo no recibe todavía un shell libre: la interfaz de herramientas directa para agentes queda como una capa futura sobre este cliente, con acciones nombradas y políticas controladas por el servidor. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados, filtrado de credenciales conocidas y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
+El inventario completo y legible por máquina está en `apps/runner/capabilities.json`; la API lo publica en `GET /v1/capabilities` solo con autenticación del Worker. El script `apps/runner/capabilities-smoke.sh` comprueba durante CI que los comandos documentados realmente existan en la imagen. La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones estáticas, el Worker ejecuta perfiles de toolchain y pruebas de navegador dentro del runner; los fallos reales se convierten en hallazgos del ciclo correctivo. El modelo no recibe todavía un shell libre ni tool-calls ejecutables: la API de descubrimiento solo describe capacidades; la interfaz directa de herramientas para agentes sigue pendiente. Esa capa deberá usar acciones nombradas y políticas controladas por el servidor, no traducir una respuesta de texto del modelo a comandos arbitrarios. El protocolo usa idempotencia, polling, cancelación, resultados inmutables acotados, filtrado de credenciales conocidas y workspaces por tarea que se pueden reutilizar secuencialmente sin permitir ejecuciones concurrentes sobre el mismo directorio. Una preparación de dependencias puede ejecutarse en un job `restricted`; el siguiente job debe usar `none` para pruebas offline. No pasa las claves de IA ni el entorno del Worker al contenedor.
 
 ### Perfiles de ejecución automática
 
@@ -150,11 +150,11 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 
 1. Probar construcción de imagen y comandos de ejemplo en CI aislado.
 2. Mantener las pruebas de timeout, límites de recursos, rutas sensibles y red: modo `none` y proxy con allowlist.
-3. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
-4. Revisar el protocolo runner/worker ya implementado y ampliar los perfiles de ejecución según proyectos reales.
-5. Provisionar el host privado de ejecución, generar un secreto independiente y configurar el firewall antes de habilitar `AGENT_RUNNER_BASE_URL`.
-6. Mantener `AGENT_RUNNER_REQUIRED=false` hasta pasar pruebas en el host real; luego probar el flujo de corrección completo con tareas de ejemplo.
-7. Integrar solo tras revisión del PR y pruebas; no desplegar automáticamente la API en Render Free.
+3. Revisar `apps/runner/capabilities.json` cuando cambie la imagen; el CI verifica el inventario básico, no la corrección semántica de cada compilador.\n4. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
+5. Revisar el protocolo runner/worker ya implementado y ampliar los perfiles de ejecución según proyectos reales.
+6. Provisionar el host privado de ejecución, generar un secreto independiente y configurar el firewall antes de habilitar `AGENT_RUNNER_BASE_URL`.
+7. Mantener `AGENT_RUNNER_REQUIRED=false` hasta pasar pruebas en el host real; luego probar el flujo de corrección completo con tareas de ejemplo.
+8. Integrar solo tras revisión del PR y pruebas; no desplegar automáticamente la API en Render Free.
 
 
 ## Observación visual en tiempo real: frontera de seguridad
