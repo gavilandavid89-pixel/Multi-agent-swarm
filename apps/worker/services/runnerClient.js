@@ -42,7 +42,11 @@ function isPrivateRunnerHost(hostname) {
   return false;
 }
 async function request(path, options = {}, timeoutMs = 15000) {
-  const response = await fetch(configuredBase + path, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+  const response = await fetch(configuredBase + path, {
+    ...options,
+    headers: { ...(options.headers || {}), 'x-swarm-runner-secret': configuredSecret },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
   let body;
   try { body = await response.json(); } catch { body = {}; }
   if (!response.ok) {
@@ -57,7 +61,7 @@ async function request(path, options = {}, timeoutMs = 15000) {
  * Trusted Worker -> private Runner API protocol. Commands are argv arrays, never
  * host-shell strings; network and resource policy are enforced by the runner host.
  */
-export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey } = {}) {
+export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey, includeArtifacts = false } = {}) {
   if (!configuredBase) return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.' : 'Runner remoto no configurado; se mantiene la validación determinista local.');
   if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
   let baseUrl;
@@ -99,11 +103,24 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   while (Date.now() < deadline) {
     if (terminal.has(latest.status)) {
       const ok = latest.status === 'succeeded' && latest.exitCode === 0 && !latest.timedOut;
+      let artifacts = [];
+      if (includeArtifacts && ok) {
+        try {
+          const response = await request('/v1/jobs/' + encodeURIComponent(latest.id) + '/files', {}, 15000);
+          artifacts = Array.isArray(response.files) ? response.files.slice(0, 100).map(file => ({
+            path: String(file.path || '').slice(0, 240),
+            content: String(file.content || '').slice(0, 256 * 1024)
+          })) : [];
+        } catch (error) {
+          return { available: true, checked: true, ok: false, infraError: true, jobId: latest.id, exitCode: latest.exitCode, timedOut: false, stdout: String(latest.stdout || '').slice(-12000), stderr: String(latest.stderr || '').slice(-12000), message: 'La ejecución terminó, pero no se pudieron recuperar sus artefactos: ' + String(error?.message || error).slice(0, 500) };
+        }
+      }
       return {
         available: true, checked: true, ok, skipped: false, jobId: latest.id,
         infraError: Boolean(latest.error || [125, 126, 127].includes(latest.exitCode)),
         exitCode: latest.exitCode, timedOut: Boolean(latest.timedOut), durationMs: latest.durationMs,
         stdout: String(latest.stdout || '').slice(-12000), stderr: String(latest.stderr || '').slice(-12000),
+        ...(includeArtifacts ? { artifacts } : {}),
         message: ok
           ? 'La ejecución aislada terminó correctamente en ' + (Number(latest.durationMs) || 0) + ' ms.'
           : 'La ejecución aislada terminó con estado ' + latest.status + (latest.exitCode === null ? '' : ' (código ' + latest.exitCode + ')') + '.'
