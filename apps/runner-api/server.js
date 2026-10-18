@@ -279,7 +279,11 @@ async function runJob(job) {
       if (probe.code === 0) { ready = true; break; }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    if (!ready) throw new Error('El workspace del contenedor no quedó listo dentro del límite.');
+    if (!ready) {
+      const state = await dockerCommand(['inspect', '--format', '{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}', cid], 2000);
+      const logs = await dockerCommand(['logs', cid], 2000);
+      throw new Error('El workspace del contenedor no quedó listo dentro del límite. state=' + String(state.stdout || state.stderr || '').trim().slice(0, 160) + ' logs=' + String((logs.stdout || '') + (logs.stderr || '')).trim().slice(0, 500));
+    }
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de ejecutar el comando.');
     const timeoutSeconds = Math.max(1, Math.ceil(job.timeoutMs / 1000));
     const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
