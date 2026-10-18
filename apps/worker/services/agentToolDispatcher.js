@@ -42,8 +42,11 @@ function safePath(path) {
 }
 function bounded(value) {
   let out;
-  try { out = JSON.stringify(value ?? null); } catch { out = '{"ok":false,"error":"Resultado no serializable"}'; }
-  return out.length > 12000 ? out.slice(0, 12000) + '[recortado]' : out;
+  try { out = JSON.stringify(value ?? null); }
+  catch { return { ok: false, error: 'Resultado no serializable' }; }
+  if (out.length <= 12000) return value ?? null;
+  // Preserve a valid tool-result envelope instead of truncating JSON mid-token.
+  return { truncated: true, serializedChars: out.length, preview: out.slice(0, 11500) + '[recortado]' };
 }
 
 function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
@@ -137,7 +140,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest })); break;
       default: throw error('Herramienta desconocida.');
     }
-    return { ok: true, result: JSON.parse(bounded(result)) };
+    return { ok: true, result: bounded(result) };
   }
   return Object.freeze({ role: normalizedRole, permissions: [...allowed], invoke, get callCount() { return calls; } });
 }
