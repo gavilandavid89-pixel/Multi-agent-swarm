@@ -11,7 +11,7 @@ function unavailable(message) {
   return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, infraError: required && !configuredBase, message };
 }
 function containsSensitivePath(entries) {
-  const blockedNames = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig']);
+  const blockedNames = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', '.gitconfig', '.envrc', '.dockerconfigjson', 'pip.conf', 'pip.ini', 'nuget.config', 'auth.json', 'settings.xml', 'gradle.properties', 'local.properties', 'terraform.tfvars', 'terraform.tfstate', 'secrets.yaml', 'secrets.yml', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig']);
   const blockedDirs = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle']);
   return entries.some(file => {
     const parts = String(file.path || '').split('/');
