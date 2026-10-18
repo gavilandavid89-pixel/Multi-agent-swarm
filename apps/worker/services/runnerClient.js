@@ -285,7 +285,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     const details = [result.message, result.stdout, result.stderr].filter(Boolean).join('\\n').slice(0, 3500);
     return { ...result, checked: true, ok: false, message: details };
   }
-  const match = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_CHECKED=(\\d+)/);
+  const match = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_CHECKED=(\d+)/);
   const checked = Number(match?.[1] || 0);
   const profiles = detectRuntimeProfiles(entries);
   if (!checked && !profiles.length) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos o perfiles de prueba compatibles.' };
