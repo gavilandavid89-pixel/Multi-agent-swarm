@@ -224,7 +224,7 @@ async function collectFiles(workspace) {
 }
 async function runJob(job) {
   active++;
-  job.status = 'running'; job.startedAt = new Date().toISOString(); await save(job);
+  job.status = 'running'; job.startedAt = new Date().toISOString();
   const started = Date.now(); let timedOut = false; let cancelled = false; let timer; let currentChild = null;
   let stopPromise = Promise.resolve();
   const cancel = () => {
@@ -246,6 +246,7 @@ async function runJob(job) {
     })();
   }, job.timeoutMs);
   try {
+    await save(job);
     if (job.network === 'restricted') await ensureRestrictedNetwork();
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de iniciar el contenedor.');
     await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
