@@ -78,7 +78,7 @@ Se agregó un proxy Squid con denegación por defecto y una lista explícita de 
 
 - Configuración: `apps/runner/egress-proxy/squid.conf`.
 - Lista revisable por humanos: `apps/runner/egress-proxy/allowed-domains.txt`.
-- Topología: `docker-compose.runner-egress.yml`. La red `swarm-agent-egress` es `internal: true); el sandbox no se conecta a la red externa. Solo el proxy tiene una segunda interfaz en `swarm-egress-outbound`.
+- Topología: `docker-compose.runner-egress.yml`. La red `swarm-agent-egress` está configurada con `internal: true`; el sandbox no se conecta a la red externa. Solo el proxy tiene una segunda interfaz en `swarm-egress-outbound`.
 - Se permiten únicamente los hosts enumerados y los puertos HTTP/HTTPS seguros definidos por Squid; destinos privados, loopback y link-local se bloquean y todo lo demás se deniega. La lista inicial cubre registros comunes de paquetes; no garantiza que todas las dependencias usen esos hosts.
 - No se publican puertos del proxy en el host y no se permiten destinos elegidos arbitrariamente por el modelo.
 
