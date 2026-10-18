@@ -130,10 +130,10 @@ export async function saveDiagnosticReport(input) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const prior = await client.query('SELECT report_id FROM diagnostic_reports WHERE report_id=$1 FOR UPDATE', [normalized.reportId]);
+    const prior = await client.query('SELECT report_id,status FROM diagnostic_reports WHERE report_id=$1 FOR UPDATE', [normalized.reportId]);
     if (prior.rows[0]) {
       await client.query('COMMIT');
-      return { reportId: normalized.reportId, duplicate: true, status: 'queued' };
+      return { reportId: normalized.reportId, duplicate: true, status: prior.rows[0].status };
     }
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [normalized.fingerprint]);
     const recent = await client.query(
