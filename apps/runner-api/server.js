@@ -391,8 +391,6 @@ async function runJob(job) {
     }
     const writable = await dockerCommand(['exec', '--user', '65532:65532', cid, 'bash', '-lc', 'test -w /workspace && test -z "$(find /workspace -type f ! -writable -print -quit)"'], 3000);
     if (writable.code !== 0) throw new Error('El workspace del runner no es escribible para el usuario aislado; se rechaza el trabajo antes de ejecutar código.');
-    const writable = await dockerCommand(['exec', '--user', '65532:65532', cid, 'test', '-w', '/workspace'], 3000);
-    if (writable.code !== 0) throw new Error('El workspace del runner no es escribible para el usuario aislado; se rechaza el trabajo antes de ejecutar código.');
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de ejecutar el comando.');
     const timeoutSeconds = Math.max(1, Math.ceil(job.timeoutMs / 1000));
     const result = await new Promise(resolve => {
