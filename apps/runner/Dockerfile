@@ -11,13 +11,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils findutils procps git make gcc g++ pkg-config \
       jq sqlite3 ripgrep fd-find tree file less shellcheck shfmt \
-      python3 python3-dev python3-pip python3-venv python3-pytest python3-black python3-flake8 python3-mypy \
+      python3 python3-dev python3-pip python3-venv python3-pytest \
       default-jdk-headless maven golang-go php-cli composer ruby-full ruby-bundler rustc cargo \
       chromium chromium-sandbox xvfb xauth x11-utils fonts-liberation libnss3 \
       curl unzip libx11-6 libxcursor1 libxinerama1 libxi6 libxrandr2 libasound2 \
       libpulse0 libudev1 libgl1 libfontconfig1 libfreetype6 libxkbcommon0 \
       libwayland-client0 libwayland-cursor0 libwayland-egl1 libdecor-0-0 \
     && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/swarm-python-tools \
+    && /opt/swarm-python-tools/bin/pip install --no-cache-dir --disable-pip-version-check black==25.1.0 flake8==7.1.2 mypy==1.15.0 \
     && npm install --global --no-audit --no-fund typescript@5.8.3 tsx@4.19.3 prettier@3.5.3 eslint@9.24.0 \
     && groupadd --gid 10001 runner \
     && useradd --uid 10001 --gid runner --create-home --shell /bin/bash runner \
@@ -46,7 +48,8 @@ COPY --chown=runner:runner godot-smoke.sh /opt/swarm-runner/godot-smoke.sh
 COPY --chown=runner:runner capabilities-smoke.sh /opt/swarm-runner/capabilities-smoke.sh
 COPY --chown=runner:runner capabilities.json /opt/swarm-runner/capabilities.json
 
-ENV HOME=/tmp/runner-home
+ENV HOME=/tmp/runner-home \
+    PATH=/opt/swarm-python-tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /workspace
 USER runner
 
