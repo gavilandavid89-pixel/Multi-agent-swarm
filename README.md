@@ -6,11 +6,11 @@
 
 ## Guía operativa y estado real del sistema
 
-Antes de cambiar servicios o bases de datos, consultá [la guía de operaciones](docs/OPERATIONS_RUNBOOK.md) y [el contrato de informes de errores](docs/diagnostics/README.md).
+Antes de cambiar servicios o bases de datos, consultá [la guía de operaciones](docs/OPERATIONS_RUNBOOK.md).
 
 **Regla de seguridad:** un despliegue verde no demuestra que el flujo completo funcione. Separá siempre los estados *documentado*, *implementado en la rama*, *desplegado* y *verificado de extremo a extremo*. No publiques secretos, no cambies URLs de bases de datos sin backup verificado y no habilites ejecución arbitraria de código en un servicio público.
 
-- **Diagnóstico de fallos:** usá la plantilla estructurada en `docs/diagnostics/REPORT_TEMPLATE.json`. Es una plantilla documental; no implica que esta rama tenga un colector de errores conectado ni análisis automático por IA.
+- **Diagnóstico de fallos:** el colector persistente y su plantilla estructurada siguen en una rama experimental; todavía no están integrados en `main`. No asumir que los errores se envían o investigan automáticamente.
 - **Ejecución aislada:** Chromium + Xvfb para comprobaciones de HTML no equivale a un runner general seguro. La ejecución multi-lenguaje requiere infraestructura separada, límites de recursos y control de red a nivel de infraestructura.
 - **Visor de escritorio:** tratá el visor como experimental hasta verificar autenticación, health checks y conexión con la versión del Bridge desplegada.
 - **Bases de datos:** el Worker usa actualmente `DATABASE_URL` para el almacén de tareas/checkpoints de Render y `SWARM_DATABASE_URL` para cuentas en Neon. No son intercambiables.
