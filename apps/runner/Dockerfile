@@ -24,10 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Pin the Godot engine and verify the upstream release checksum at image-build time.
 RUN set -eux; \
-    curl -fsSL --retry 3 --connect-timeout 15 \
+    curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 \
       https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip \
       -o /tmp/Godot_v4.4.1-stable_linux.x86_64.zip; \
-    curl -fsSL --retry 3 --connect-timeout 15 \
+    curl -fsSL --retry 3 --connect-timeout 15 --max-time 180 \
       https://github.com/godotengine/godot/releases/download/4.4.1-stable/SHA512-SUMS.txt \
       -o /tmp/godot-sha512.txt; \
     grep 'Godot_v4.4.1-stable_linux.x86_64.zip$' /tmp/godot-sha512.txt > /tmp/godot-checksum.txt; \
