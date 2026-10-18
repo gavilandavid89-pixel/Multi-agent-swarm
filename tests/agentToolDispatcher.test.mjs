@@ -25,6 +25,8 @@ function fixture(role = 'desarrollador', maxCalls = 40) {
 test('tool schemas use strict object arguments', () => {
   assert.ok(AGENT_TOOL_DEFINITIONS.length >= 8);
   assert.ok(AGENT_TOOL_DEFINITIONS.every(t => t.function.parameters.additionalProperties === false));
+  const executeTool = AGENT_TOOL_DEFINITIONS.find(t => t.function.name === 'runner_execute');
+  assert.equal(Object.hasOwn(executeTool.function.parameters.properties, 'network'), false);
 });
 test('developer can read/write files and execute allowlisted binary without shell', async () => {
   const f = fixture();
@@ -36,6 +38,7 @@ test('developer can read/write files and execute allowlisted binary without shel
   assert.equal(f.files.get('src/app.js'), 'updated');
   assert.equal((await f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } })).result.exitCode, 0);
   assert.deepEqual(f.executed[0].command, ['node', '--version']);
+  assert.equal(f.executed[0].network, 'none');
 });
 test('oversized runner output is returned as a valid bounded result', async () => {
   const f = fixture();
@@ -83,6 +86,7 @@ test('rejects traversal, secret paths, credential content, and shell injection',
   await assert.rejects(f.dispatcher.invoke({ name: 'workspace_write', arguments: { path: '.env', content: 'x' } }), /sensible/);
   await assert.rejects(f.dispatcher.invoke({ name: 'workspace_write', arguments: { path: 'secret.txt', content: 'ghp_abcdefghijklmnopqrstuvwxyz1234567890' } }), /credenciales/);
   await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['bash', '-c', 'id'] } }), /Binario/);
+  await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'], network: 'restricted' } }), /política de red/);
   await assert.rejects(f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node; rm', '-rf', '/'] } }), /Binario/);
 });
 test('limits calls and per-file size', async () => {
