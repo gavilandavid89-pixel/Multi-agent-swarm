@@ -45,8 +45,8 @@ jdb -help >/dev/null 2>&1 || true
 # Exercise the debugger non-interactively with bounded debugger commands.
 debug_tmp=$(mktemp -d)
 trap 'rm -rf "$debug_tmp"' EXIT
-printf '%s\\n' 'print("debug target reached")' > "$debug_tmp/debug_target.py"
-printf 'p 6 * 7\\nq\\n' | python3 -m pdb "$debug_tmp/debug_target.py" > "$debug_tmp/pdb.out"
+printf '%s\n' 'print("debug target reached")' > "$debug_tmp/debug_target.py"
+printf 'p 6 * 7\nq\n' | python3 -m pdb "$debug_tmp/debug_target.py" > "$debug_tmp/pdb.out"
 grep -q '42' "$debug_tmp/pdb.out"
 echo 'SWARM_RUNNER_DEBUGGER_CHECKED=1'
 
