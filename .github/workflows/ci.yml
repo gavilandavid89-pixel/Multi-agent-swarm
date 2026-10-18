@@ -46,9 +46,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb xauth
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node apps/worker/scripts/browser-smoke-test.mjs
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node scripts/ui-layout-smoke.mjs
-      - name: Validate isolated agent sandbox scripts
-        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh
-      - name: Build and exercise isolated agent runner
-        run: sh scripts/agent-sandbox-smoke.sh
       - name: Build worker Docker image
         run: docker build -f apps/worker/Dockerfile apps/worker
+
+  agent-sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate isolated agent sandbox scripts
+        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh
+      - name: Validate egress proxy Compose configuration
+        run: docker compose -f docker-compose.runner-egress.yml config -q
+      - name: Build and exercise isolated agent runner and restricted egress proxy
+        run: sh scripts/agent-sandbox-smoke.sh
