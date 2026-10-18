@@ -17,7 +17,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
   assert.equal(source.includes('--privileged'), false);
   assert.equal(source.includes('/var/run/docker.sock'), false);
-  assert.equal(source.includes('dst=/workspace\',rw'), false);
+  assert.equal(source.includes('dst=/workspace,rw'), false);
   assert.ok(source.includes('cp -a /input/. /workspace/ && exec "$@"'));
   assert.equal(source.includes('process.env, stdio'), false);
 });
