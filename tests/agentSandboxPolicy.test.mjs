@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const wrapper = await readFile(new URL('../scripts/run-agent-sandbox.sh', import.meta.url), 'utf8');
 const image = await readFile(new URL('../apps/runner/Dockerfile', import.meta.url), 'utf8');
 const proxy = await readFile(new URL('../apps/runner/egress-proxy/squid.conf', import.meta.url), 'utf8');
+const proxyDocker = await readFile(new URL('../apps/runner/egress-proxy/Dockerfile', import.meta.url), 'utf8');
 const allowlist = await readFile(new URL('../apps/runner/egress-proxy/allowed-domains.txt', import.meta.url), 'utf8');
 const compose = await readFile(new URL('../docker-compose.runner-egress.yml', import.meta.url), 'utf8');
 const runnerApi = await readFile(new URL('../apps/runner-api/server.js', import.meta.url), 'utf8');
@@ -50,6 +51,7 @@ test('restricted egress proxy uses an internal runner network and default-deny a
   assert.ok(compose.includes('internal: true'));
   assert.ok(compose.includes('name: swarm-agent-egress'));
   assert.ok(compose.includes('name: swarm-egress-outbound'));
+  assert.ok(proxyDocker.includes('squidclient'));
   assert.ok(proxy.includes('http_access allow swarm_runner allowed_domains'));
   assert.ok(proxy.includes('http_access deny all'));
   assert.ok(proxy.includes('http_access deny private_dst'));
