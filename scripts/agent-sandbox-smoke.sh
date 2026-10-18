@@ -47,7 +47,10 @@ echo "PASS network disabled"
 # Restricted mode is opt-in and routes only through an allowlisting proxy on an
 # internal Docker network; test one approved package host and one denied host.
 docker compose -f docker-compose.runner-egress.yml config -q
-docker compose -f docker-compose.runner-egress.yml up --build -d --wait --wait-timeout 60
+if ! docker compose -f docker-compose.runner-egress.yml up --build -d --wait --wait-timeout 60; then
+  docker compose -f docker-compose.runner-egress.yml logs --no-color swarm-egress-proxy >&2 || true
+  exit 1
+fi
 SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
 import urllib.request
 with urllib.request.urlopen("https://registry.npmjs.org/-/ping", timeout=10) as response:
