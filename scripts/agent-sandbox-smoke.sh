@@ -5,7 +5,7 @@ repo_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
 workspace=${RUNNER_TEMP:-/tmp}/swarm-agent-sandbox-smoke
 rm -rf "$workspace"
 mkdir -p "$workspace"
-trap 'rm -rf "$workspace"' EXIT HUP INT TERM
+trap 'docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true; rm -rf "$workspace"' EXIT HUP INT TERM
 
 cd "$repo_root"
 docker build -t swarm-agent-runner:local -f apps/runner/Dockerfile apps/runner
@@ -33,6 +33,33 @@ sh scripts/run-agent-sandbox.sh "$workspace" node -e '
     .catch(() => process.exit(0));
 '
 echo "PASS network disabled"
+
+# Restricted mode is opt-in and routes only through an allowlisting proxy on an
+# internal Docker network; test one approved package host and one denied host.
+docker compose -f docker-compose.runner-egress.yml up --build -d
+SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
+import urllib.request
+with urllib.request.urlopen("https://registry.npmjs.org/-/ping", timeout=10) as response:
+    assert response.status == 200, response.status
+'
+echo "PASS restricted egress allows an explicitly approved package host"
+
+set +e
+SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
+import urllib.request
+try:
+    urllib.request.urlopen("https://example.com", timeout=10)
+except Exception:
+    raise SystemExit(0)
+raise SystemExit(41)
+'
+status=$?
+set -e
+if [ "$status" -ne 0 ]; then
+  echo "FAIL restricted egress reached a non-allowlisted host" >&2
+  exit 1
+fi
+echo "PASS restricted egress denies non-allowlisted hosts"
 
 # Host-side timeout must terminate a long-running process.
 set +e
