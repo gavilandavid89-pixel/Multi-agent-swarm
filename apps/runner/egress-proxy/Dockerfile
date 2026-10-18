@@ -2,7 +2,7 @@ FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends squid ca-certificates \
+ && apt-get install -y --no-install-recommends squid squidclient ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/squid/squid.conf
 COPY squid.conf /etc/squid/squid.conf
