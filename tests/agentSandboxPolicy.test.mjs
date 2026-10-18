@@ -37,6 +37,9 @@ test('network is denied by default and restricted mode requires a fixed egress p
   assert.ok(wrapper.includes('docker network inspect "$docker_network"'));
   assert.ok(wrapper.includes('docker inspect --format'));
   assert.ok(wrapper.includes('swarm-egress-proxy no está healthy'));
+  assert.ok(wrapper.includes('proxy_ip=$(docker inspect --format'));
+  assert.ok(wrapper.includes('proxy_outbound_ip=$(docker inspect --format'));
+  assert.ok(runnerApi.includes("proxyIp.stdout.trim() !== '172.30.0.2'"));
   assert.ok(wrapper.includes('home_relative'));
   assert.ok(wrapper.includes('network_is_internal=$(docker network inspect --format'));
   assert.ok(wrapper.includes('if [ "$network_is_internal" != true ]'));
