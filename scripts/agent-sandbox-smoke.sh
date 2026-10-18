@@ -213,9 +213,9 @@ echo "PASS authenticated runner API executes in bounded tmpfs and returns artifa
 
 # Exercise stdin-driven Python pdb through the authenticated runner API.
 debug_body=$(node -e 'process.stdout.write(JSON.stringify({
-  files:[{path:"debug_target.py",content:"print(\\"debug target reached\\")\\n"}],
+  files:[{path:"debug_target.py",content:"print(\"debug target reached\")\n"}],
   workspaceId:"55555555-5555-4555-8555-555555555555",resetWorkspace:true,
-  command:["python3","-m","pdb","debug_target.py"],stdin:"p 6 * 7\\nq\\n",
+  command:["python3","-m","pdb","debug_target.py"],stdin:"p 6 * 7\nq\n",
   network:"none",timeoutMs:15000
 }))')
 debug_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
