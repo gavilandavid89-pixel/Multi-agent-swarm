@@ -49,6 +49,7 @@ Requisitos: Docker Engine o Docker Desktop en Linux, macOS o Windows con WSL2; `
    - `SWARM_RUNNER_MEMORY`: límite Docker de memoria; predeterminado `1g`.
    - `SWARM_RUNNER_CPUS`: límite CPU; predeterminado `2`.
    - `SWARM_RUNNER_PIDS`: límite de procesos; predeterminado 128.
+   - `SWARM_RUNNER_NETWORK`: solo `none` (predeterminado) o `restricted`; este último requiere la topología de proxy descrita abajo y valida que la red Docker sea interna.
 
 ## Frontera de seguridad
 
