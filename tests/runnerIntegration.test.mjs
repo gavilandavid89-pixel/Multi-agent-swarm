@@ -35,6 +35,9 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(engine.includes('ok: Boolean(syntax.ok && runnerExecution.ok)'));
   assert.ok(engine.includes("runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE'"));
   assert.ok(engine.includes("'Runner aislado (' + executionStatus + '): '"));
+  assert.ok(engine.includes("'ai_syntax_and_runtime'"));
+  assert.ok(engine.includes("executionStatus: syntax.executionStatus || 'NO EJECUTADO'"));
+  assert.ok(engine.includes('ejecución aislada no confirmada'));
   assert.ok(engine.includes('syntax?.runnerExecution?.infraError'));
   assert.ok(engine.includes("lastCheckpoint: 'runner-infra-error'"));
 });
