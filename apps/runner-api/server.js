@@ -356,10 +356,12 @@ async function handle(req, res) {
       await writeWorkspace(job, body.files, body.resetWorkspace);
       await save(job); queue.push(id); void pump();
     } catch (error) {
-      jobs.delete(id);
-      if (key && idempotency.get(key) === id) idempotency.delete(key);
       if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
       if (body.resetWorkspace) await fsp.rm(job.workspace, { recursive: true, force: true }).catch(() => {});
+      job.status = 'failed';
+      job.error = String(error?.message || error).slice(0, 1200);
+      job.finishedAt = new Date().toISOString();
+      await save(job).catch(() => {});
       throw error;
     }
     return json(res, 202, publicJob(job));
