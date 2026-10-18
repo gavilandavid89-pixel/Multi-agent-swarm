@@ -5,20 +5,21 @@ import { AGENT_TOOL_DEFINITIONS, createAgentToolDispatcher } from '../apps/worke
 function fixture(role = 'desarrollador', maxCalls = 40) {
   const files = new Map([['src/app.js', 'hello']]);
   const executed = [];
+  const runnerJobId = '123e4567-e89b-42d3-a456-426614174000';
   const workspace = {
     list: async () => [...files].map(([path, content]) => ({ path, content })),
     read: async path => files.get(path) ?? null,
     write: async (path, content) => { files.set(path, content); return { path, bytes: Buffer.byteLength(content) }; }
   };
   const runner = {
-    execute: async args => { executed.push(args); return { exitCode: 0, stdout: 'ok' }; },
+    execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: 'ok' }; },
     check: async () => ({ ok: true }),
     jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded' }),
     cancel: async ({ jobId }) => ({ jobId, cancelled: true }),
     artifact: async args => args,
     dependency: async args => ({ prepared: args.manifest })
   };
-  return { files, executed, dispatcher: createAgentToolDispatcher({ role, workspace, runner, jobId: 'task-1', maxCalls }) };
+  return { files, executed, runnerJobId, dispatcher: createAgentToolDispatcher({ role, workspace, runner, jobId: 'task-1', maxCalls }) };
 }
 
 test('tool schemas use strict object arguments', () => {
@@ -41,6 +42,26 @@ test('effective role permissions deny writes and execution to validator/auditor'
   await assert.rejects(validator.invoke({ name: 'workspace_write', arguments: { path: 'x.js', content: 'x' } }), { code: 'AGENT_TOOL_ROLE_DENIED' });
   await assert.rejects(validator.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } }), { code: 'AGENT_TOOL_ROLE_DENIED' });
   await assert.rejects(fixture('esceptico').dispatcher.invoke({ name: 'runner_check', arguments: {} }), { code: 'AGENT_TOOL_ROLE_DENIED' });
+});
+test('runner job tools cannot inspect, cancel, or read artifacts for an unowned job', async () => {
+  const f = fixture();
+  const foreignJobId = '123e4567-e89b-42d3-a456-426614174999';
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'runner_job_status', arguments: { jobId: foreignJobId } }),
+    { code: 'AGENT_TOOL_JOB_NOT_OWNED' }
+  );
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'runner_cancel', arguments: { jobId: foreignJobId } }),
+    { code: 'AGENT_TOOL_JOB_NOT_OWNED' }
+  );
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'runner_artifact', arguments: { jobId: foreignJobId, artifactId: 'src/app.js' } }),
+    { code: 'AGENT_TOOL_JOB_NOT_OWNED' }
+  );
+  await f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } });
+  assert.equal((await f.dispatcher.invoke({ name: 'runner_job_status', arguments: { jobId: f.runnerJobId } })).result.status, 'succeeded');
+  assert.equal((await f.dispatcher.invoke({ name: 'runner_cancel', arguments: { jobId: f.runnerJobId } })).result.cancelled, true);
+  assert.equal((await f.dispatcher.invoke({ name: 'runner_artifact', arguments: { jobId: f.runnerJobId, artifactId: 'src/app.js' } })).result.jobId, f.runnerJobId);
 });
 test('rejects traversal, secret paths, credential content, and shell injection', async () => {
   const f = fixture();
