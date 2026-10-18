@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/swarm-python-tools \
     && /opt/swarm-python-tools/bin/pip install --no-cache-dir --disable-pip-version-check black==25.1.0 flake8==7.1.2 mypy==1.15.0 \
+    && ln -s /opt/swarm-python-tools/bin/black /usr/local/bin/black \
+    && ln -s /opt/swarm-python-tools/bin/flake8 /usr/local/bin/flake8 \
+    && ln -s /opt/swarm-python-tools/bin/mypy /usr/local/bin/mypy \
     && npm install --global --no-audit --no-fund typescript@5.8.3 tsx@4.19.3 prettier@3.5.3 eslint@9.24.0 \
     && groupadd --gid 10001 runner \
     && useradd --uid 10001 --gid runner --create-home --shell /bin/bash runner \
