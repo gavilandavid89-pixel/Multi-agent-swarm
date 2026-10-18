@@ -11,6 +11,7 @@ const SECRET = process.env.RUNNER_SHARED_SECRET || '';
 const DOCKER = process.env.RUNNER_DOCKER_BIN || 'docker';
 const IMAGE = process.env.SWARM_RUNNER_IMAGE || 'swarm-agent-runner:local';
 const ROOT = path.resolve(process.env.RUNNER_STATE_DIR || '/var/lib/swarm-runner');
+const CAPABILITIES_PATH = new URL('../runner/capabilities.json', import.meta.url);
 const WORKSPACES = path.join(ROOT, 'workspaces');
 const STATE = path.join(ROOT, 'jobs');
 const REQUESTED_CONCURRENCY = Number.parseInt(process.env.RUNNER_CONCURRENCY || '1', 10);
@@ -481,6 +482,10 @@ async function handle(req, res) {
   if (!initialized) return json(res, 503, { error: 'Runner is starting; retry shortly.' });
   if (!url.pathname.startsWith('/v1/')) return json(res, 404, { error: 'No encontrado.' });
   if (!safeEqual(req.headers['x-swarm-runner-secret'], SECRET)) return json(res, 401, { error: 'No autorizado.' });
+  if (req.method === 'GET' && url.pathname === '/v1/capabilities') {
+    const capabilities = JSON.parse(await fsp.readFile(CAPABILITIES_PATH, 'utf8'));
+    return json(res, 200, capabilities);
+  }
   if (req.method === 'POST' && url.pathname === '/v1/jobs') {
     const body = validateRequest(await readJson(req));
     const key = String(req.headers['x-swarm-idempotency-key'] || '');
