@@ -81,7 +81,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
       const ok = latest.status === 'succeeded' && latest.exitCode === 0 && !latest.timedOut;
       return {
         available: true, checked: true, ok, skipped: false, jobId: latest.id,
-        infraError: Boolean(latest.error || latest.exitCode === 125),
+        infraError: Boolean(latest.error || [125, 126, 127].includes(latest.exitCode)),
         exitCode: latest.exitCode, timedOut: Boolean(latest.timedOut), durationMs: latest.durationMs,
         stdout: String(latest.stdout || '').slice(-12000), stderr: String(latest.stderr || '').slice(-12000),
         message: ok
