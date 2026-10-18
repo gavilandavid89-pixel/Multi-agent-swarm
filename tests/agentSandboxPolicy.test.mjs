@@ -66,7 +66,8 @@ test('runner image includes common language toolchains and browser tools', () =>
   for (const tool of [
     'node:22-bookworm-slim', 'python3', 'python3-pytest',
     'default-jdk-headless', 'golang-go', 'php-cli', 'ruby-full',
-    'gcc', 'g++', 'rustc', 'cargo', 'chromium', 'xvfb', 'xauth'
+    'gcc', 'g++', 'rustc', 'cargo', 'chromium', 'xvfb', 'xauth',
+    'Godot_v4.4.1-stable_linux.x86_64.zip', 'SHA512-SUMS.txt', 'browser-smoke.mjs', 'godot-smoke.sh'
   ]) {
     assert.ok(image.includes(tool), `missing runner capability: ${tool}`);
   }
