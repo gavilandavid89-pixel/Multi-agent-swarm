@@ -83,7 +83,7 @@ export async function checkJavascriptSyntax(delivery) {
   }
   const browser = html ? {
     available: false, checked: false, ok: true,
-    message: 'Prueba de navegador delegada al runner aislado; no se ejecuta JavaScript de la entrega dentro del Worker.'
+    message: 'Prueba de navegador NO EJECUTADA dentro del Worker; solo se ejecutará si está configurado el runner aislado.'
   } : { checked: false, ok: true, message: '' };
   if (!browser.ok) issues.push(browser.message);
   for (const [name, file] of files) {
