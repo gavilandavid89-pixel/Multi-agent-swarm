@@ -104,7 +104,7 @@ app.post('/internal/diagnostics', async (req, res) => {
   try {
     const result = await saveDiagnosticReport(body);
     console.info('[worker][diagnostic_report_received]', JSON.stringify({ reportId: result.reportId, duplicate: result.duplicate, category: body.category || 'unknown', severity: body.severity || 'error' }));
-    res.status(result.duplicate ? 200 : 202).json({ ok: true, ...result, triage: 'queued' });
+    res.status(result.duplicate ? 200 : 202).json({ ok: true, ...result, triage: result.status || 'queued' });
   } catch (error) {
     console.error('[worker][diagnostic_report_store_failed]', JSON.stringify({ code: error?.code || 'database' }));
     res.status(503).json({ error: 'No se pudo guardar el informe de diagnóstico; se puede reintentar de forma segura.' });
