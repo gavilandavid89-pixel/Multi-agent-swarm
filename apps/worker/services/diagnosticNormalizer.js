@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-function sanitizeDiagnosticText(value, max = 2000) {
+export function sanitizeDiagnosticText(value, max = 2000) {
   return String(value ?? '')
     .replace(/(bearer|token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
     .replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/ig, 'https://[REDACTED]@')
