@@ -44,7 +44,7 @@ jobs:
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node apps/worker/scripts/browser-smoke-test.mjs
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node scripts/ui-layout-smoke.mjs
       - name: Validate isolated agent sandbox scripts
-        run: sh -n scripts/run-agent-sandbox.sh scripts/agent-sandbox-smoke.sh
+        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh
       - name: Build and exercise isolated agent runner
         run: sh scripts/agent-sandbox-smoke.sh
       - name: Build worker Docker image
