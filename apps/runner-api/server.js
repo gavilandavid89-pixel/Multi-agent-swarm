@@ -189,6 +189,11 @@ async function ensureRestrictedNetwork() {
   if (proxy.code !== 0 || String(proxy.stdout).trim() !== 'true|healthy') {
     throw Object.assign(new Error('El proxy swarm-egress-proxy no está healthy; se rechaza la preparación de dependencias.'), { status: 503 });
   }
+  const proxyIp = await dockerCommand(['inspect', '--format', '{{with index .NetworkSettings.Networks "swarm-agent-egress"}}{{.IPAddress}}{{end}}', 'swarm-egress-proxy']);
+  const outboundIp = await dockerCommand(['inspect', '--format', '{{with index .NetworkSettings.Networks "swarm-egress-outbound"}}{{.IPAddress}}{{end}}', 'swarm-egress-proxy']);
+  if (proxyIp.code !== 0 || proxyIp.stdout.trim() !== '172.30.0.2' || outboundIp.code !== 0 || !outboundIp.stdout.trim()) {
+    throw Object.assign(new Error('El proxy no está conectado a las dos redes esperadas o su IP interna cambió.'), { status: 503 });
+  }
 }
 async function readContainerId(job) {
   try {
