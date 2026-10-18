@@ -62,3 +62,17 @@ test('runner API exposes health and async job lifecycle endpoints', () => {
     'cancel', 'files', 'idempotencyKey', 'JOB_TTL_MS'
   ]) assert.ok(source.includes(route), 'missing API behavior: ' + route);
 });
+
+
+const capabilities = JSON.parse(await readFile(new URL('../runner/capabilities.json', import.meta.url), 'utf8'));
+
+test('capability catalog accurately marks sandbox defaults and future-only model tools', () => {
+  assert.equal(capabilities.schemaVersion, 1);
+  assert.equal(capabilities.execution.defaultNetwork, 'none');
+  assert.equal(capabilities.execution.concurrency, 1);
+  assert.ok(capabilities.toolchains.some(item => item.id === 'typescript'));
+  assert.ok(capabilities.toolchains.some(item => item.id === 'godot'));
+  assert.ok(capabilities.toolchains.some(item => item.id === 'data-files'));
+  assert.ok(capabilities.agentToolContract.notYetImplemented.includes('dispatcher de tool-calls LLM'));
+  assert.ok(capabilities.notIncluded.some(item => item.includes('credenciales')));
+});
