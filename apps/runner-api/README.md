@@ -24,6 +24,8 @@ sudo -u swarm-runner npm start
 
 Set `RUNNER_SHARED_SECRET` to the exact same random secret configured as `AGENT_RUNNER_SHARED_SECRET` on the Worker; it must be different from `WORKER_SHARED_SECRET`. Keep the API reachable only over a private network/firewall rule from the Worker.
 
+The API binds to `127.0.0.1` by default. Keep that default for local tests. For Worker integration, set `RUNNER_BIND_HOST` to a private interface address only after provisioning a private network/tunnel and firewall rules that allow the Worker but block runner containers from reaching host services. Do not bind to `0.0.0.0` as a shortcut.
+
 The host must already have `swarm-agent-runner:local` built from `apps/runner/Dockerfile`. Use a process supervisor (systemd or equivalent) to restart the API and restrict its inbound port to the Worker using a private network/firewall. Do not publish port 3200 to the public Internet.
 
 ## API contract
