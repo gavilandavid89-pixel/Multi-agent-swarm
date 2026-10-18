@@ -123,6 +123,30 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(blocked.infraError, true);
   assert.match(blocked.message, /no se envió ningún archivo/i);
   assert.equal(seen.length, requestsBeforeSecret);
+
+  const debugInput = 'p 6 * 7\nq\n';
+  const debugJob = await runAgentCommand({
+    taskId: '66666666-6666-4666-8666-666666666666',
+    files: [{ path: 'debug.py', content: 'print("debug target")' }],
+    command: ['python3', '-m', 'pdb', 'debug.py'],
+    stdin: debugInput,
+    network: 'none',
+    idempotencyKey: 'worker-client-debug-input-0001',
+    timeoutMs: 5000
+  });
+  assert.equal(debugJob.ok, true);
+  assert.equal(seen.at(-1).body.stdin, debugInput);
+  const requestsBeforeRejectedInput = seen.length;
+  const unsafeDebug = await runAgentCommand({
+    taskId: '77777777-7777-4777-8777-777777777777',
+    files: [],
+    command: ['python3', '-m', 'pdb'],
+    stdin: debugInput,
+    network: 'restricted'
+  });
+  assert.equal(unsafeDebug.ok, false);
+  assert.match(unsafeDebug.message, /network none/i);
+  assert.equal(seen.length, requestsBeforeRejectedInput, 'unsafe debugger input must be rejected before contacting the runner');
 });
 
 test('Worker refuses public HTTP runner endpoints and skips optional unconfigured runner', () => {
