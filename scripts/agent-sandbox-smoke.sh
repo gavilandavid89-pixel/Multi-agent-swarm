@@ -136,7 +136,7 @@ echo "PASS runner API rejects credential-like paths before job creation"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"},{path:"deleted.txt",content:"remove-me"}],
-  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/main.js\",\"main-modified\"); fs.unlinkSync(\"/workspace/deleted.txt\"); fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); fs.writeFileSync(\"/workspace/credential-output.txt\",\"-----BEGIN OPENSSH PRIVATE KEY-----\\\\nnot-a-real-key\\\\n-----END OPENSSH PRIVATE KEY-----\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
+  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/main.js\",\"main-modified\"); fs.unlinkSync(\"/workspace/deleted.txt\"); fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); fs.writeFileSync(\"/workspace/credential-output.txt\",\"-----BEGIN OPENSSH PRIVATE KEY-----\\\\nnot-a-real-key\\\\n-----END OPENSSH PRIVATE KEY-----\"); console.log(\"runner-api-ok cwd=\"+process.cwd()); console.error(\"runner-stderr-ok\")"],
   workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
@@ -161,7 +161,7 @@ done
 printf '%s' "$job_json" | node -e '
 let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
   const j=JSON.parse(s);
-  if(j.status!=="succeeded" || !String(j.stdout||"").includes("runner-api-ok") || j.exitCode!==0) {
+  if(j.status!=="succeeded" || !String(j.stdout||"").includes("runner-api-ok") || !String(j.stderr||"").includes("runner-stderr-ok") || j.exitCode!==0) {
     console.error("FAIL runner API execution:", JSON.stringify(j)); process.exit(1);
   }
 })'
