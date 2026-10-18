@@ -59,9 +59,9 @@ node -e '
     if (!ids.has(id)) { console.error("Missing toolchain profile:", id); process.exit(42); }
   }
   if (manifest.execution.defaultNetwork !== "none" || manifest.execution.concurrency !== 1) process.exit(43);
-  if (manifest.workspaceIsolation?.status !== "worker-primitives-implemented; model-tool-dispatch-pending" || manifest.workspaceIsolation.concurrency.globalRunner !== 1 || !manifest.workspaceIsolation.merge.includes("fail closed")) process.exit(48);
-  if (manifest.agentToolContract.rolePolicyStatus !== "proposed-not-enforced" || !manifest.agentToolContract.rolePolicy.Desarrollador || !manifest.agentToolContract.rolePolicy.Validador) process.exit(45);
-  if (manifest.agentToolContract.notYetImplemented.length === 0) process.exit(44);
+  if (manifest.workspaceIsolation?.status !== "worker-primitives-and-model-tool-dispatch-implemented" || manifest.workspaceIsolation.concurrency.globalRunner !== 1 || !manifest.workspaceIsolation.merge.includes("fail closed")) process.exit(48);
+  if (manifest.agentToolContract.rolePolicyStatus !== "enforced-by-worker-dispatcher" || !manifest.agentToolContract.rolePolicy.Desarrollador || !manifest.agentToolContract.rolePolicy.Validador) process.exit(45);
+  if (!Array.isArray(manifest.agentToolContract.notYetImplemented)) process.exit(44);
   if (!manifest.output || !manifest.output.streams.includes("stdout") || !manifest.output.streams.includes("stderr") || manifest.output.maxRetainedCharsPerStream !== 65536) process.exit(46);
   const debuggers = new Set((manifest.debugging?.debuggers || []).map(x => x.id));
   if (!debuggers.has("python-pdb") || manifest.debugging.stdin.maxBytes !== 16384 || !manifest.debugging.notYetImplemented.includes("persistent interactive debugger sessions")) process.exit(47);
