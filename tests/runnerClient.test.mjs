@@ -134,6 +134,22 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.match(blocked.message, /no se envió ningún archivo/i);
   assert.equal(seen.length, requestsBeforeSecret);
 
+  const blockedDirectPath = await runAgentCommand({
+    taskId: '55555555-5555-4555-8555-555555555555',
+    files: [{ path: '.env', content: 'SHOULD_NOT_LEAVE_WORKER=secret' }],
+    command: ['node', '--version']
+  });
+  assert.equal(blockedDirectPath.ok, false);
+  assert.match(blockedDirectPath.message, /no se envió ningún archivo/i);
+  const blockedDirectCredential = await runAgentCommand({
+    taskId: '55555555-5555-4555-8555-555555555556',
+    files: [{ path: 'src/config.js', content: 'const token = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";' }],
+    command: ['node', '--version']
+  });
+  assert.equal(blockedDirectCredential.ok, false);
+  assert.match(blockedDirectCredential.message, /no se envió ningún archivo/i);
+  assert.equal(seen.length, requestsBeforeSecret, 'direct agent execution must reject sensitive paths and credentials before contacting the runner');
+
   const debugInput = 'p 6 * 7\nq\n';
   const debugJob = await runAgentCommand({
     taskId: '66666666-6666-4666-8666-666666666666',
