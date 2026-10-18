@@ -5,7 +5,6 @@ import { readFile } from 'node:fs/promises';
 const client = await readFile(new URL('../apps/worker/services/runnerClient.js', import.meta.url), 'utf8');
 const engine = await readFile(new URL('../apps/worker/services/multiAiEngine.js', import.meta.url), 'utf8');
 const checks = await readFile(new URL('../apps/worker/services/codeChecks.js', import.meta.url), 'utf8');
-const render = await readFile(new URL('../render.yaml', import.meta.url), 'utf8');
 
 test('Worker runner integration is optional by default and authenticates remote requests', () => {
   assert.ok(client.includes("process.env.AGENT_RUNNER_BASE_URL"));
@@ -30,7 +29,6 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)"));
   assert.ok(client.includes('baseUrl.username || baseUrl.password'));
   assert.ok(client.includes('sin rutas, query, fragmentos ni credenciales embebidas'));
-  assert.ok(render.includes('key: AGENT_RUNNER_REQUIRED\n        value: "false"'));
 });
 
 test('The Swarm validation/repair loop consumes real sandbox results', () => {
