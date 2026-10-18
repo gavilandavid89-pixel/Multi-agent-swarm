@@ -38,5 +38,5 @@ test('no ejecuta HTML generado dentro del Worker y declara que la prueba de nave
   const result = await checkJavascriptSyntax(delivery);
   assert.equal(result.ok, true, result.message);
   assert.equal(result.browserChecked, false);
-  assert.match(result.message, /delegada al runner aislado/);
+  assert.match(result.message, /NO EJECUTADA dentro del Worker/);
 });
