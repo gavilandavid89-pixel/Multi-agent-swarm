@@ -38,7 +38,7 @@ Every `/v1/*` request requires `x-swarm-runner-secret`. Use `x-swarm-idempotency
 - `GET /v1/jobs/:id/files`: read the immutable, bounded file snapshot captured when that job completed, including generated artifacts. Dependency directories such as `node_modules` are kept in the task workspace for sequential jobs but omitted from the returned artifact snapshot.
 - `POST /v1/jobs/:id/cancel`: cancel queued/running work.
 
-Limits: 200 files, 2 MiB total input, 256 KiB per file, 1–32 argv items, 1–120 seconds wall clock per job, 1 GiB RAM, 2 CPUs, 128 PIDs, 256 MiB workspace tmpfs, 64 KiB each stdout/stderr, a queue cap, at most 20 retained results and a 24-hour TTL. The API passes arguments directly to Docker; it does not invoke a host shell or forward host environment variables.
+Limits: 200 files, 2 MiB total input, 256 KiB per file, 1–32 argv items, 1–120 seconds wall clock per job, 1 GiB RAM, 2 CPUs, 128 PIDs, 256 MiB workspace tmpfs, 64 KiB each stdout/stderr, a queue cap, at most 20 retained results and a 24-hour TTL. The API passes arguments directly to Docker; it does not invoke a host shell or forward host environment variables. It also rejects credential-file names and high-confidence private-key/API-token patterns in submitted source files. This scanner is defense in depth, not a guarantee that arbitrary source contains no sensitive data; do not submit secrets.
 
 ## Network modes
 
