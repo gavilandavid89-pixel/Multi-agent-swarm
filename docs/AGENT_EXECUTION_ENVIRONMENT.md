@@ -1,6 +1,6 @@
 # Entorno de ejecución aislado para agentes
 
-Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No cambia Render, no despliega servicios y no ejecuta código generado contra producción.
+Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se ha desplegado ningún servicio ni se han cambiado los servicios de producción. El Worker tiene una integración optativa que permanece desactivada por defecto; la API de ejecución requiere un host aislado con Docker y no debe asumirse disponible dentro del contenedor Render Free.
 
 ## Qué incorpora
 
@@ -16,6 +16,8 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No camb
 | C / C++ / Rust | GCC, G++, make, rustc y cargo |
 | Web UI | Chromium, Xvfb, xauth y fuentes básicas |
 | Operación | git, bash, coreutils, findutils, pkg-config |
+
+La API `apps/runner-api` proporciona el plano de control autenticado y asíncrono; `apps/worker/services/runnerClient.js` es el cliente privado del Worker. Tras las comprobaciones deterministas, el Worker puede ejecutar comprobaciones de toolchain en el runner y usar sus resultados para decidir si una entrega necesita correcciones. El protocolo usa idempotencia, polling, cancelación y resultados acotados; no pasa las claves de IA ni el entorno del Worker al contenedor.
 
 La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Godot, Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
 
@@ -60,7 +62,7 @@ El wrapper aplica, por ejecución:
 - capacidades Linux eliminadas y `no-new-privileges`;
 - límites de CPU, RAM, PIDs y tiempo;
 - `/tmp` temporal y limitado;
-- un único montaje escribible: el directorio del proyecto;
+- en el wrapper local, una copia de proyecto montada como único volumen escribible; en la API, entrada montada de solo lectura y workspace en tmpfs limitado a 256 MiB;
 - usuario numérico no root;
 - solo variables de entorno explícitas; no hereda las credenciales del host;
 - ningún socket Docker, credencial, archivo del repositorio completo ni conexión a PostgreSQL.
@@ -99,7 +101,7 @@ El modo restringido **falla cerrado** si no existe la red fija. No cambia a una 
 
 **Límites honestos:** Squid restringe los destinos HTTP/HTTPS que pasan por el proxy; la variable `HTTP_PROXY` por sí sola no obliga a programas maliciosos a usarlo. La red Docker interna evita la ruta IP directa habitual, pero el DNS embebido de Docker y la configuración de red del host deben evaluarse en la plataforma final. Para código realmente hostil o multiusuario, bloqueá DNS directo y cualquier salida adicional mediante firewall de host/política de egress, o usá una VM/microVM con política de red aplicada fuera del contenedor. La prueba CI verifica un host permitido y uno denegado, pero no sustituye una auditoría de escape o de exfiltración DNS.
 
-El runner no acepta una imagen Docker, comando de host, volumen adicional o URL de red elegida por el modelo. El comando dentro del contenedor lo elige quien invoca el wrapper; en una futura API del Swarm, el servidor debe mapear perfiles y comandos a una lista permitida, no aceptar argumentos Docker arbitrarios.
+La API no acepta una imagen Docker, comando de host, volumen adicional ni variables de entorno elegidas por el modelo. Recibe un arreglo argv, lo pasa como argumentos al contenedor y aplica una política fija. El comando no se ejecuta en un shell del host. La API tiene acceso al daemon Docker, por lo que debe ejecutarse en un host dedicado y no exponerse a la web pública.
 
 ## Xvfb y pruebas de navegador
 
@@ -122,8 +124,8 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 ## Verificación sin despliegue
 
 - `sh -n scripts/run-agent-sandbox.sh` comprueba sintaxis del wrapper.
-- `npm run check` ejecuta las comprobaciones unitarias existentes y el test de política del wrapper.
-- `sh scripts/agent-sandbox-smoke.sh` construye el runner y el proxy, prueba workspace, Chromium/Xvfb, red deshabilitada, un destino permitido, uno denegado, timeout y raíz de solo lectura.
+- `npm run check` ejecuta las comprobaciones unitarias, las pruebas estáticas del runner API y la política de integración del Worker.
+- `sh scripts/agent-sandbox-smoke.sh` construye el runner y el proxy, prueba Xvfb/Chromium con timeout, autentica la API real, ejecuta un comando dentro del contenedor, verifica que no herede secretos, recupera artefactos y prueba red deshabilitada/restringida, timeout y raíz de solo lectura.
 - `docker build ...` construye la imagen local; no despliega nada.
 - La prueba de extremo a extremo contra Render sigue siendo independiente y no debe ejecutarse desde cada rama experimental.
 
@@ -132,6 +134,7 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 1. Probar construcción de imagen y comandos de ejemplo en CI aislado.
 2. Mantener las pruebas de timeout, límites de recursos, rutas sensibles y red: modo `none` y proxy con allowlist.
 3. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
-4. Diseñar un protocolo runner/worker con cola, identidad de artefacto, resultados estructurados y autenticación de servicio a servicio.
-5. Elegir una plataforma de ejecución reforzada antes de permitir código hostil multiusuario.
-6. Integrar solo tras revisión del PR y pruebas; no desplegar automáticamente el runner en Render Free.
+4. Revisar el protocolo runner/worker ya implementado y ampliar los perfiles de ejecución según proyectos reales.
+5. Provisionar el host privado de ejecución, generar un secreto independiente y configurar el firewall antes de habilitar `AGENT_RUNNER_BASE_URL`.
+6. Mantener `AGENT_RUNNER_REQUIRED=false` hasta pasar pruebas en el host real; luego probar el flujo de corrección completo con tareas de ejemplo.
+7. Integrar solo tras revisión del PR y pruebas; no desplegar automáticamente la API en Render Free.
