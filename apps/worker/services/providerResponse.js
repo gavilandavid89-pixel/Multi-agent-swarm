@@ -193,7 +193,14 @@ export function normalizeOpenAICompatibleResponse(data) {
     choices: [{
       message: {
         content: normalized.content,
-        ...(normalized.toolCalls.length ? { tool_calls: normalized.toolCalls } : {}),
+        ...(normalized.toolCalls.length ? { tool_calls: normalized.toolCalls.map(call => ({
+          id: String(call.id || ''),
+          type: 'function',
+          function: {
+            name: String(call.name || ''),
+            arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? call.input ?? {})
+          }
+        })) } : {}),
         ...(normalized.status === 'blocked' ? { refusal: normalized.content || 'Respuesta bloqueada por el proveedor.' } : {})
       },
       finish_reason: normalized.finishReason
