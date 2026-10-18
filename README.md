@@ -127,9 +127,9 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 | `WORKER_CONCURRENCY` | Entero entre 1 y 8; el código actual usa 1 por defecto | — | Máximo de tareas concurrentes |
 | `MAX_TASK_TOKENS` | Entero entre 4.000 y 1.000.000; por defecto 1.000.000 | — | Presupuesto acumulado por tarea |
 | `MAX_OUTPUT_TOKENS_PER_CALL` | Entero; el README del proyecto documenta 6.000 por defecto | — | Límite de salida por llamada |
-| `AGENT_RUNNER_BASE_URL` | Opcional; URL privada del Runner API dedicado, no del Bridge/Worker público | Worker → Runner | Dirección del host aislado con Docker. Mantenerla sin configurar hasta provisionar red privada y firewall; usar HTTPS si no es una IP/host privado confiable |
-| `AGENT_RUNNER_SHARED_SECRET` | Opcional; secreto aleatorio de al menos 32 caracteres, igual a `RUNNER_SHARED_SECRET` en el host runner y distinto de `WORKER_SHARED_SECRET` | Worker ↔ Runner | Autenticación del protocolo de ejecución. Nunca registrar el valor ni compartirlo con agentes/modelos |
-| `AGENT_RUNNER_REQUIRED` | `false` por defecto; usar `true` solo tras validar el host | Worker | Si se activa, un runner ausente/fallido bloquea la aprobación automática y deja el checkpoint para reintentar; no se simula que se ejecutaron pruebas |
+| `AGENT_RUNNER_BASE_URL` | **No agregado al blueprint de Render**; configuración futura manual | Worker → Runner | URL privada del host aislado. Mantenerla sin configurar hasta provisionar red privada y firewall; usar HTTPS si no es una IP/host privado confiable |
+| `AGENT_RUNNER_SHARED_SECRET` | **No agregado al blueprint de Render**; configuración futura manual | Worker ↔ Runner | Secreto aleatorio de 32+ caracteres, igual a `RUNNER_SHARED_SECRET` y distinto de `WORKER_SHARED_SECRET`. Nunca registrar ni compartir con agentes/modelos |
+| `AGENT_RUNNER_REQUIRED` | `false` por defecto; **no agregado al blueprint de Render** | Worker | Solo considerar `true` tras validar el host; si falta el runner, bloquea la aprobación automática y conserva el checkpoint |
 
 ### Estado verificado y puntos pendientes
 
@@ -208,4 +208,4 @@ El modelo no recibe la clave de Runner API ni acceso directo a Docker. El camino
 | `RUNNER_DOCKER_BIN` | Host dedicado | Ruta del cliente Docker si no está en `PATH`; preferir Docker rootless y nunca montar el socket en los contenedores de trabajos. |
 | `SWARM_RUNNER_IMAGE` | Host dedicado | Imagen de ejecución preconstruida; valor predeterminado `swarm-agent-runner:local`. No permitir que el agente elija imágenes. |
 
-**Integración por etapas:** la CI de la rama construye y prueba el runner, el proxy y la API real contra Docker. Eso no significa que haya un host dedicado provisionado. Para activarlo, primero construí la imagen y ejecutá `sh scripts/agent-sandbox-smoke.sh` en el host aislado; configurá el secreto y el firewall; probá el Worker con `AGENT_RUNNER_REQUIRED=false`; solo después de verificar resultados reales se debe considerar `true`. No se cambia Render ni se habilita la ejecución remota de producción como parte de esta rama.
+**Integración por etapas:** la CI de la rama construye y prueba el runner, el proxy y la API real contra Docker. Eso no significa que haya un host dedicado provisionado. Para activarlo, primero construí la imagen y ejecutá `sh scripts/agent-sandbox-smoke.sh` en el host aislado; configurá el secreto y el firewall; probá el Worker con `AGENT_RUNNER_REQUIRED=false`; solo después de verificar resultados reales se debe considerar `true`. El archivo `render.yaml` se mantiene idéntico a `main`: no se cambia el blueprint ni se habilita la ejecución remota de producción como parte de esta rama.
