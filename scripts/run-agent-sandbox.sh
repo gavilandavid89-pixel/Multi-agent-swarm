@@ -90,7 +90,7 @@ echo "Sandbox: image=$image timeout=${timeout_seconds}s memory=$memory_limit cpu
 run_sandbox() {
   if [ "$network_mode" = restricted ]; then
     exec timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" docker run --rm --init \
-      --network "$docker_network" --read-only --cap-drop ALL \
+      --network "$docker_network" --dns 127.0.0.1 --read-only --cap-drop ALL \
       --security-opt no-new-privileges:true --pids-limit "$pids_limit" \
       --memory "$memory_limit" --cpus "$cpu_limit" \
       --tmpfs /tmp:rw,nosuid,nodev,size=512m \
@@ -99,9 +99,9 @@ run_sandbox() {
       --env HOME=/tmp --env CI=true --env LANG=C.UTF-8 \
       --env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       --env CHROME_BIN=/usr/bin/chromium \
-      --env HTTP_PROXY=http://swarm-egress-proxy:3128 \
-      --env HTTPS_PROXY=http://swarm-egress-proxy:3128 \
-      --env ALL_PROXY=http://swarm-egress-proxy:3128 \
+      --env HTTP_PROXY=http://172.30.0.2:3128 \
+      --env HTTPS_PROXY=http://172.30.0.2:3128 \
+      --env ALL_PROXY=http://172.30.0.2:3128 \
       --env NO_PROXY=localhost,127.0.0.1,::1 "$image" "$@"
   else
     exec timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" docker run --rm --init \
