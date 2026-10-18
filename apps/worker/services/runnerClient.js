@@ -58,7 +58,7 @@ async function request(path, options = {}, timeoutMs = 15000) {
   return body;
 }
 
-async function waitForRunnerReady(maxWaitMs = 120000) {
+async function waitForRunnerReady(maxWaitMs = 150000) {
   const deadline = Date.now() + maxWaitMs;
   let lastError = null;
   while (Date.now() < deadline) {
@@ -73,7 +73,7 @@ async function waitForRunnerReady(maxWaitMs = 120000) {
     }
     await delay(1000);
   }
-  throw Object.assign(new Error('El Runner API no alcanzó estado ready en 120 segundos. ' + String(lastError?.message || '').slice(0, 300)), { status: 503 });
+  throw Object.assign(new Error('El Runner API no alcanzó estado ready en 150 segundos. ' + String(lastError?.message || '').slice(0, 300)), { status: 503 });
 }
 
 /**
