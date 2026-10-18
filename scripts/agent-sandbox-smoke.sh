@@ -9,7 +9,7 @@ api_pid=
 cleanup() {
   if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
   docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$workspace"
+  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -45,20 +45,20 @@ echo "PASS Chromium rendered HTML with a bounded headless run"
 # Exercise the authenticated Worker-facing API against the actual Docker daemon.
 RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
 RUNNER_API_SENTINEL=must-not-leak \
-RUNNER_STATE_DIR="$workspace/runner-api-state" \
-PORT=3200 node apps/runner-api/server.js > "$workspace/runner-api.log" 2>&1 &
+RUNNER_STATE_DIR="${workspace}-runner-state" \
+PORT=3200 node apps/runner-api/server.js > "${workspace}-runner-api.log" 2>&1 &
 api_pid=$!
 ready=0
 i=0
 while [ "$i" -lt 45 ]; do
   if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
-  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "$workspace/runner-api.log" >&2; exit 1; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "${workspace}-runner-api.log" >&2; exit 1; fi
   sleep 1
   i=$((i + 1))
 done
-if [ "$ready" -ne 1 ]; then cat "$workspace/runner-api.log" >&2; echo "FAIL runner API readiness timeout" >&2; exit 1; fi
+if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API readiness timeout" >&2; exit 1; fi
 
-unauthorized=$(curl -sS -o "$workspace/unauthorized.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs -H 'content-type: application/json' -d '{}')
+unauthorized=$(curl -sS -o "${workspace}-unauthorized.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs -H 'content-type: application/json' -d '{}')
 if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticated request ($unauthorized)" >&2; exit 1; fi
 echo "PASS runner API rejects unauthenticated requests"
 
