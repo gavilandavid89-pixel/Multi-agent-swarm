@@ -70,6 +70,10 @@ test('capability catalog accurately marks sandbox defaults and future-only model
   assert.equal(capabilities.schemaVersion, 1);
   assert.equal(capabilities.execution.defaultNetwork, 'none');
   assert.equal(capabilities.execution.concurrency, 1);
+  assert.match(capabilities.execution.workspace, /task \+ agent \+ purpose/);
+  assert.equal(capabilities.workspaceIsolation.status, 'worker-primitives-implemented; model-tool-dispatch-pending');
+  assert.equal(capabilities.workspaceIsolation.concurrency.globalRunner, 1);
+  assert.match(capabilities.workspaceIsolation.merge, /fail closed/);
   assert.ok(capabilities.toolchains.some(item => item.id === 'typescript'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'godot'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'data-files'));
