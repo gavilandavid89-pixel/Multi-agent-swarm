@@ -45,6 +45,8 @@ test('oversized runner output is returned as a valid bounded result', async () =
   });
   assert.equal(response.ok, true);
   assert.equal(response.result.truncated, true);
+  assert.equal(response.result.jobId, f.runnerJobId);
+  assert.equal(response.result.exitCode, 0);
   assert.ok(response.result.serializedChars > 12000);
   assert.ok(response.result.preview.length < 12000);
   assert.match(response.result.preview, /large-output|stdout/);
