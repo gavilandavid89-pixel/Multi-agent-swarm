@@ -91,6 +91,8 @@ SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descarta
 docker compose -f docker-compose.runner-egress.yml down
 ```
 
+Los comandos que respetan `HTTP_PROXY`/`HTTPS_PROXY` usan el proxy automáticamente. Chromium no siempre respeta esas variables en todos los entornos; si una prueba de navegador requiere red restringida, pasale explícitamente `--proxy-server=http://172.30.0.2:3128` y mantené la allowlist activa. No uses este modo para páginas arbitrarias sin revisar primero los dominios permitidos.
+
 Los instaladores de paquetes pueden ejecutar scripts de ciclo de vida o backends de compilación. Preferí `--ignore-scripts` cuando sea compatible, usá una copia descartable y no expongas secretos ni datos privados durante esta fase. Las pruebas funcionales posteriores deben correr sin red.
 
 El modo restringido **falla cerrado** si no existe la red fija. No cambia a una red abierta como fallback. Para sumar un dominio, revisá primero por qué lo necesita el lockfile o el framework, agregalo a `allowed-domains.txt` y repetí la prueba de red. No agregues comodines amplios como `*`, dominios de almacenamiento genéricos o proveedores de túneles.
