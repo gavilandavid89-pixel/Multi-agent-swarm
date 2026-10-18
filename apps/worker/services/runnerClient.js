@@ -32,7 +32,10 @@ function containsSensitiveCredential(entries) {
 }
 function isPrivateRunnerHost(hostname) {
   const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  // Check literal IP addresses before treating single-label DNS names as internal.
+  // Otherwise IPv6 literals (which normally contain no dot) could bypass the
+  // link-local/metadata guard and permit plaintext HTTP to a reserved address.
   const version = isIP(host);
   if (version === 4) {
     const [a, b] = host.split('.').map(Number);
@@ -44,7 +47,7 @@ function isPrivateRunnerHost(hostname) {
     // ULA and loopback only; link-local IPv6 is intentionally not trusted.
     return host === '::1' || /^(?:fc|fd)/i.test(host);
   }
-  return false;
+  return !host.includes('.');
 }
 async function request(path, options = {}, timeoutMs = 15000) {
   const response = await fetch(configuredBase + path, {
