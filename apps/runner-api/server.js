@@ -13,7 +13,11 @@ const IMAGE = process.env.SWARM_RUNNER_IMAGE || 'swarm-agent-runner:local';
 const ROOT = path.resolve(process.env.RUNNER_STATE_DIR || '/var/lib/swarm-runner');
 const WORKSPACES = path.join(ROOT, 'workspaces');
 const STATE = path.join(ROOT, 'jobs');
-const MAX_CONCURRENCY = Math.max(1, Math.min(2, Number.parseInt(process.env.RUNNER_CONCURRENCY || '1', 10) || 1));
+const REQUESTED_CONCURRENCY = Number.parseInt(process.env.RUNNER_CONCURRENCY || '1', 10);
+if (REQUESTED_CONCURRENCY !== 1) {
+  throw new Error('RUNNER_CONCURRENCY debe ser 1 hasta implementar una red aislada por trabajo; no se permite compartir la red restringida entre ejecuciones concurrentes.');
+}
+const MAX_CONCURRENCY = 1;
 const MAX_PENDING_JOBS = 25;
 const MAX_RETAINED_JOBS = 20;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
