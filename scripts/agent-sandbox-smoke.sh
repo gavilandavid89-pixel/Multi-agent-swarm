@@ -5,7 +5,13 @@ repo_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
 workspace=${RUNNER_TEMP:-/tmp}/swarm-agent-sandbox-smoke
 rm -rf "$workspace"
 mkdir -p "$workspace"
-trap 'docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true; rm -rf "$workspace"' EXIT HUP INT TERM
+api_pid=
+cleanup() {
+  if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
+  docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "$workspace"
+}
+trap cleanup EXIT HUP INT TERM
 
 cd "$repo_root"
 docker build -t swarm-agent-runner:local -f apps/runner/Dockerfile apps/runner
@@ -35,6 +41,58 @@ sh scripts/run-agent-sandbox.sh "$workspace" timeout --signal=TERM --kill-after=
   --dump-dom file:///workspace/index.html > "$workspace/dom.out"
 grep -q 'browser-ok' "$workspace/dom.out"
 echo "PASS Chromium rendered HTML with a bounded headless run"
+
+# Exercise the authenticated Worker-facing API against the actual Docker daemon.
+RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
+RUNNER_API_SENTINEL=must-not-leak \
+RUNNER_STATE_DIR="$workspace/runner-api-state" \
+PORT=3200 node apps/runner-api/server.js > "$workspace/runner-api.log" 2>&1 &
+api_pid=$!
+ready=0
+i=0
+while [ "$i" -lt 45 ]; do
+  if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "$workspace/runner-api.log" >&2; exit 1; fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$ready" -ne 1 ]; then cat "$workspace/runner-api.log" >&2; echo "FAIL runner API readiness timeout" >&2; exit 1; fi
+
+unauthorized=$(curl -sS -o "$workspace/unauthorized.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs -H 'content-type: application/json' -d '{}')
+if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticated request ($unauthorized)" >&2; exit 1; fi
+echo "PASS runner API rejects unauthenticated requests"
+
+job_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[{path:"main.js",content:"console.log(\\"input-file-ok\\")\\n"}],
+  command:["node","-e","const fs=require(\\"node:fs\\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); fs.writeFileSync(\\"generated.txt\\",\\"artifact-ok\\"); console.log(\\"runner-api-ok\\")"],
+  network:"none",timeoutMs:15000
+}))')
+created=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
+  -d "$job_body")
+job_id=$(printf '%s' "$created" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$job_id" ]; then echo "FAIL runner API did not return a job ID: $created" >&2; exit 1; fi
+job_json=
+i=0
+while [ "$i" -lt 60 ]; do
+  job_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$job_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$job_json" | node -e '
+let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
+  const j=JSON.parse(s);
+  if(j.status!=="succeeded" || !String(j.stdout||"").includes("runner-api-ok") || j.exitCode!==0) {
+    console.error("FAIL runner API execution:", JSON.stringify(j)); process.exit(1);
+  }
+})'
+artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok"))process.exit(1)})'
+echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
 # Network must be unavailable inside the sandbox.
 sh scripts/run-agent-sandbox.sh "$workspace" node -e '
