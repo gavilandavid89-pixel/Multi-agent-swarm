@@ -169,7 +169,7 @@ conflict_status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
   -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
-  -d "$(printf '%s' "$job_body" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);j.timeoutMs=14000;process.stdout.write(JSON.stringify(j))}')" )
+  -d "$(printf '%s' "$job_body" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);j.timeoutMs=14000;process.stdout.write(JSON.stringify(j))})')" )
 set -e
 if [ "$conflict_status" != 409 ]; then echo "FAIL runner API accepted a changed request with a reused idempotency key ($conflict_status)" >&2; exit 1; fi
 echo "PASS runner API rejects idempotency-key collisions with changed payloads"
