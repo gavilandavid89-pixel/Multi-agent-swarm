@@ -61,5 +61,8 @@ node -e '
   if (manifest.execution.defaultNetwork !== "none" || manifest.execution.concurrency !== 1) process.exit(43);
   if (manifest.agentToolContract.rolePolicyStatus !== "proposed-not-enforced" || !manifest.agentToolContract.rolePolicy.Desarrollador || !manifest.agentToolContract.rolePolicy.Validador) process.exit(45);
   if (manifest.agentToolContract.notYetImplemented.length === 0) process.exit(44);
+  if (!manifest.output || !manifest.output.streams.includes("stdout") || !manifest.output.streams.includes("stderr") || manifest.output.maxRetainedCharsPerStream !== 65536) process.exit(46);
+  const debuggers = new Set((manifest.debugging?.debuggers || []).map(x => x.id));
+  if (!debuggers.has("python-pdb") || !debuggers.has("node-inspector-cli") || !debuggers.has("java-jdb") || manifest.debugging.stdin.maxBytes !== 16384) process.exit(47);
 '
 echo 'SWARM_RUNNER_CAPABILITIES_CHECKED=1'
