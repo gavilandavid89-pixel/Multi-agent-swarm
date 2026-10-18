@@ -9,7 +9,7 @@ api_pid=
 cleanup() {
   if [ -n "$api_pid" ]; then kill "$api_pid" >/dev/null 2>&1 || true; wait "$api_pid" 2>/dev/null || true; fi
   docker compose -f docker-compose.runner-egress.yml down --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json"
+  rm -rf "$workspace" "${workspace}-runner-state" "${workspace}-runner-api.log" "${workspace}-unauthorized.json" "${workspace}-secret-rejection.json" "${workspace}-create-response.json"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -80,11 +80,13 @@ job_body=$(node -e 'process.stdout.write(JSON.stringify({
   workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
-created=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+create_status=$(curl --max-time 20 -sS -o "${workspace}-create-response.json" -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
   -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
-  -d "$job_body")
+  -d "$job_body") || { echo "FAIL runner API job-creation request failed" >&2; exit 1; }
+created=$(cat "${workspace}-create-response.json")
+if [ "$create_status" != 202 ]; then echo "FAIL runner API job creation HTTP $create_status: $created" >&2; exit 1; fi
 job_id=$(printf '%s' "$created" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
 if [ -z "$job_id" ]; then echo "FAIL runner API did not return a job ID: $created" >&2; exit 1; fi
 job_json=
