@@ -30,7 +30,8 @@ test('agent sandbox applies process, memory, CPU and wall-clock limits', () => {
 test('network is denied by default and restricted mode requires a fixed egress proxy', () => {
   assert.ok(wrapper.includes('network_mode=${SWARM_RUNNER_NETWORK:-none}'));
   assert.ok(wrapper.includes('docker_network=swarm-agent-egress'));
-  assert.ok(wrapper.includes('--env HTTPS_PROXY=http://swarm-egress-proxy:3128'));
+  assert.ok(wrapper.includes('--env HTTPS_PROXY=http://172.30.0.2:3128'));
+  assert.ok(wrapper.includes('--dns 127.0.0.1'));
   assert.ok(wrapper.includes('docker network inspect "$docker_network"'));
   assert.ok(wrapper.includes('--network none'));
 });
