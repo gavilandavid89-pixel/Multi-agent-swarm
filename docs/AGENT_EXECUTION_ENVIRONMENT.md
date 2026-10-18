@@ -40,7 +40,7 @@ La imagen es intencionalmente amplia para un entorno de desarrollo. No significa
 
 ## Uso local
 
-Requisitos: Docker Engine o Docker Desktop en Linux, macOS o Windows con WSL2; `sh` y `timeout` disponibles en el host.
+Requisitos: Docker Engine o Docker Desktop en Linux, macOS o Windows con WSL2; Docker Compose v2 con soporte para `gw_priority` (v2.33 o posterior), `sh` y GNU `timeout` disponibles en el host.
 
 1. Construí la imagen una vez:
 
