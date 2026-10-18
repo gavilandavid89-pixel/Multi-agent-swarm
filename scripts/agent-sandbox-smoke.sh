@@ -62,6 +62,35 @@ if [ "$browser_error_status" -eq 0 ] || ! grep -q 'browser-error-detection' "$wo
 fi
 echo "PASS isolated browser smoke rejects a deliberate JavaScript exception"
 
+mkdir -p "$workspace/godot-smoke"
+cat > "$workspace/godot-smoke/project.godot" <<'GODOT'
+config_version=5
+
+[application]
+config/name="Swarm Runner Smoke"
+run/main_scene="res://main.tscn"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+GODOT
+cat > "$workspace/godot-smoke/main.tscn" <<'SCENE'
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+SCENE
+cat > "$workspace/godot-smoke/main.gd" <<'GDSCRIPT'
+extends Node
+
+func _ready() -> void:
+    print("godot-runner-ok")
+GDSCRIPT
+godot_result=$(sh scripts/run-agent-sandbox.sh "$workspace" bash -lc 'cd /workspace/godot-smoke && bash /opt/swarm-runner/godot-smoke.sh')
+printf '%s\n' "$godot_result" | grep -q 'SWARM_GODOT_CHECKED=1'
+echo "PASS pinned Godot headless import, script parsing and project startup"
+
 # Exercise the authenticated Worker-facing API against the actual Docker daemon.
 RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
 RUNNER_API_SENTINEL=must-not-leak \
