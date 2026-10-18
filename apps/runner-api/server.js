@@ -534,8 +534,12 @@ async function handle(req, res) {
   return json(res, 405, { error: 'Método no permitido.' });
 }
 async function initialize() {
+  await fsp.mkdir(ROOT, { recursive: true, mode: 0o700 });
+  await fsp.chmod(ROOT, 0o700);
   await fsp.mkdir(WORKSPACES, { recursive: true, mode: 0o700 });
+  await fsp.chmod(WORKSPACES, 0o700);
   await fsp.mkdir(STATE, { recursive: true, mode: 0o700 });
+  await fsp.chmod(STATE, 0o700);
   const dockerInfo = await dockerCommand(['info', '--format', '{{.ServerVersion}}'], 90000);
   if (dockerInfo.code !== 0 || !dockerInfo.stdout.trim()) {
     throw new Error('Docker daemon no está disponible después de esperar hasta 90 segundos: ' + String(dockerInfo.stderr || dockerInfo.stdout).slice(0, 400));
