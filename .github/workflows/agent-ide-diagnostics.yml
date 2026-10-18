@@ -47,7 +47,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/worker/package-lock.json
       - run: npm ci --prefix apps/worker --no-audit --no-fund
-      - run: npm --prefix apps/worker test
+      - name: Verify diagnostic tests use the CI PostgreSQL service
+        run: node -e "const u = new URL(process.env.DATABASE_URL); if (u.username !== 'postgres' || u.pathname !== '/swarm_test') process.exit(1); console.log('PostgreSQL test target:', u.username, u.pathname)"
+      - name: Run worker tests against CI PostgreSQL
+        run: npm --prefix apps/worker test
       - run: npm --prefix apps/worker run check
       - run: sh -n apps/agent-ide/start-agent-ide.sh
 
