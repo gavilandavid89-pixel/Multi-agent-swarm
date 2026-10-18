@@ -17,8 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 runner \
     && useradd --uid 10001 --gid runner --create-home --shell /bin/bash runner \
-    && mkdir -p /workspace /tmp/runner-home \
-    && chown -R runner:runner /workspace /tmp/runner-home
+    && mkdir -p /workspace /tmp/runner-home /opt/swarm-runner \
+    && chown -R runner:runner /workspace /tmp/runner-home /opt/swarm-runner
+
+COPY --chown=runner:runner browser-smoke.mjs /opt/swarm-runner/browser-smoke.mjs
 
 ENV HOME=/tmp/runner-home
 WORKDIR /workspace
