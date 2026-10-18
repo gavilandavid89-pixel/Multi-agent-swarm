@@ -31,3 +31,12 @@ test('rechaza rutas de archivo duplicadas en una entrega', async () => {
   assert.equal(result.ok, false);
   assert.match(result.message, /aparece más de una vez/);
 });
+
+
+test('no ejecuta HTML generado dentro del Worker y declara que la prueba de navegador requiere runner aislado', async () => {
+  const delivery = file('index.html', '<!doctype html><html><head></head><body><script>throw new Error("must not execute in worker")</script></body></html>', 'html');
+  const result = await checkJavascriptSyntax(delivery);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.browserChecked, false);
+  assert.match(result.message, /delegada al runner aislado/);
+});
