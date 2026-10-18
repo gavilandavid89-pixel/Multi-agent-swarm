@@ -31,6 +31,14 @@ El dispatcher debe exponer operaciones pequeñas, con JSON Schema estricto y per
 
 **No exponer** herramientas como docker.run, host.exec, network.open, read.hostFile, setEnvironment o editAllowlist. No permitir que el modelo elija una URL de proxy, nombre de red Docker, imagen arbitraria, mount, UID, variables de entorno del host o parámetros de privilegio.
 
+## Output y debugging
+
+La Runner API captura \`stdout\` y \`stderr\` mientras el proceso está activo, retiene como máximo los últimos 64 KiB por stream y devuelve el código de salida, estado, timeout/cancelación, duración y error de infraestructura. El cliente Worker limita cada stream que entrega al siguiente paso del agente a 12 KiB para no saturar el contexto. El agente debe consultar el job mientras está \`queued\`/\`running\` para ver output progresivo; no debe interpretar la ausencia temporal de output como éxito.
+
+El runner permite depuración por lotes mediante los depuradores ya incluidos: Python \`python3 -m pdb\`, Node \`node inspect\` y Java \`jdb\`. La API acepta \`stdin\` opcional de hasta 16 KiB solo con \`network:none\`, de modo que el Worker puede enviar comandos del depurador sin abrir puertos de depuración ni dar acceso al host. La entrada no se persiste; si el runner reinicia antes de ejecutar un trabajo encolado que la requiere, el trabajo falla con un motivo explícito y debe reenviarse. El smoke test de CI comprueba el recorrido de PDB y la captura de stdout/stderr/código de salida.
+
+**Límite actual:** estas capacidades están disponibles para el cliente de confianza Worker→Runner, pero todavía no se exponen como llamadas de herramientas directamente invocables por los modelos. El dispatcher por tarea/rol y la adaptación de tool-calls en los proveedores siguen pendientes; no describas al agente como si ya pudiera llamar \`runner.debug\` o usar un depurador interactivo persistente.
+
 ## Políticas por fase y rol
 
 - **Arquitecto / Coordinador:** puede inspeccionar estructura y pedir perfiles de validación; no tiene permisos para ampliar red ni cambiar configuración del host.
