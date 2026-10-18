@@ -230,6 +230,21 @@ async function runJob(jobId) {
         payload = (await getPayload(jobId))?.payload || {};
         resumeState = getValidationResumeState(payload, round);
       }
+      if (syntax?.runnerExecution?.infraError) {
+        const latest = await getPayload(jobId);
+        if (latest) {
+          const transcript = appendEntries(latest.payload.transcript, [{
+            at: new Date().toISOString(), agent: 'sistema', type: 'error',
+            content: 'La ejecución aislada no estuvo disponible o falló por infraestructura. No se atribuye el fallo al código ni se consumen rondas correctivas; se conserva el checkpoint para reintentar cuando el runner esté operativo.'
+          }]);
+          await updateJob(jobId, {
+            status: 'needs_review', stage: 'Runner no disponible · requiere revisión', progress: 99,
+            error: 'No se pudo confirmar la ejecución aislada por un problema de infraestructura. Revisá la conexión del runner y reintentá.',
+            payload: { ...latest.payload, transcript, syntax, validation, delivery, activeStage: null, lastCheckpoint: 'runner-infra-error', result: { status: 'needs_review', delivery, validation, syntax } }
+          });
+        }
+        return { blocked: true, reason: 'runner-infra-error' };
+      }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const validationLevel = syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
         const result = { status: 'completed', validationLevel, summary: validation.summary, delivery, validation, syntax };
