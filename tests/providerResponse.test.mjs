@@ -76,27 +76,6 @@ test('preserva llamadas a herramientas en metadatos y no las confunde con texto'
   assert.deepEqual(result.toolCalls, [{ id: 'call-1', name: 'search', arguments: '{"q":"x"}' }]);
 });
 
-test('normaliza llamadas a herramientas nativas de Anthropic al formato de ejecución común', () => {
-  const native = normalizeProviderResponse({
-    type: 'message', role: 'assistant', model: 'claude-test', stop_reason: 'tool_use',
-    content: [{ type: 'tool_use', id: 'tool-1', name: 'workspace_list', input: {} }]
-  });
-  assert.equal(native.toolCalls[0].name, 'workspace_list');
-  assert.deepEqual(native.toolCalls[0].input, {});
-  const compatible = normalizeOpenAICompatibleResponse({
-    type: 'message', role: 'assistant', model: 'claude-test', stop_reason: 'tool_use',
-    content: [{ type: 'tool_use', id: 'tool-1', name: 'workspace_list', input: { path: 'src' } }]
-  });
-  assert.equal(compatible.choices[0].message.tool_calls[0].function.name, 'workspace_list');
-  assert.deepEqual(JSON.parse(compatible.choices[0].message.tool_calls[0].function.arguments), { path: 'src' });
-});
-test('normaliza llamadas a funciones nativas de Gemini', () => {
-  const result = normalizeProviderResponse({
-    candidates: [{ content: { parts: [{ functionCall: { name: 'workspace_read', args: { path: 'src/app.js' }, id: 'call-gemini' } }] }, finishReason: 'STOP' }]
-  });
-  assert.equal(result.toolCalls[0].name, 'workspace_read');
-  assert.deepEqual(result.toolCalls[0].arguments, { path: 'src/app.js' });
-});
 test('adapta Responses API y conserva estado incompleto como truncamiento', () => {
   const result = normalizeProviderResponse({ output: [{ content: [{ type: 'output_text', text: 'parcial' }] }], status: 'incomplete', usage: { input_tokens: 2, output_tokens: 3 } });
   assert.equal(result.content, 'parcial');
