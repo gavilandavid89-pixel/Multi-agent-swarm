@@ -23,7 +23,7 @@ const MAX_RETAINED_JOBS = 20;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_WORKSPACE_BYTES = 256 * 1024 * 1024;
-const MAX_WORKSPACE_ENTRIES = 5000;
+const MAX_WORKSPACE_ENTRIES = 50000;
 const MAX_TOTAL_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_FILES = 200;
 const MAX_OUTPUT_CHARS = 64 * 1024;
@@ -250,7 +250,7 @@ async function copyWorkspaceFromContainer(job) {
   const killed = await dockerCommand(['exec', '--user', '65532:65532', cid, 'pkill', '-KILL', '-u', '65532'], 5000);
   if (![0, 1].includes(killed.code)) throw new Error('No se pudieron detener procesos secundarios antes de exportar el workspace.');
 
-  const exportScript = "const fs=require('node:fs');const path=require('node:path');const {spawn}=require('node:child_process');const root='/workspace';const paths=[];let total=0;function safe(p){return p.length<=1024&&!p.startsWith('/')&&!p.includes(String.fromCharCode(92))&&!p.split('/').some(x=>!x||x==='.'||x==='..')&&!p.split('').some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)}function walk(dir,rel='',depth=0){if(depth>32)throw Error('workspace depth limit');for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(e.isSymbolicLink())continue;const n=rel?rel+'/'+e.name:e.name;if(!safe(n))continue;const a=path.join(dir,e.name);if(e.isDirectory()){paths.push(n);if(paths.length>5000)throw Error('workspace entry limit');walk(a,n,depth+1)}else if(e.isFile()){total+=fs.statSync(a).size;if(total>268435456)throw Error('workspace size limit');paths.push(n);if(paths.length>5000)throw Error('workspace entry limit')}}}try{walk(root);const t=spawn('tar',['--create','--file','-','--directory',root,'--no-recursion','--null','--files-from','-'],{stdio:['pipe','inherit','inherit']});t.on('error',e=>{console.error(e.message);process.exit(2)});t.on('close',c=>process.exit(c||0));const nul=Buffer.from([0]);t.stdin.end(Buffer.concat(paths.flatMap(p=>[Buffer.from(p),nul])))}catch(e){console.error('workspace export failed: '+e.message);process.exit(2)}";
+  const exportScript = "const fs=require('node:fs');const path=require('node:path');const {spawn}=require('node:child_process');const root='/workspace';const paths=[];let total=0;function safe(p){return p.length<=1024&&!p.startsWith('/')&&!p.includes(String.fromCharCode(92))&&!p.split('/').some(x=>!x||x==='.'||x==='..')&&!p.split('').some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)}function walk(dir,rel='',depth=0){if(depth>32)throw Error('workspace depth limit');for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(e.isSymbolicLink())continue;const n=rel?rel+'/'+e.name:e.name;if(!safe(n))continue;const a=path.join(dir,e.name);if(e.isDirectory()){paths.push(n);if(paths.length>50000)throw Error('workspace entry limit');walk(a,n,depth+1)}else if(e.isFile()){total+=fs.statSync(a).size;if(total>268435456)throw Error('workspace size limit');paths.push(n);if(paths.length>50000)throw Error('workspace entry limit')}}}try{walk(root);const t=spawn('tar',['--create','--file','-','--directory',root,'--no-recursion','--null','--files-from','-'],{stdio:['pipe','inherit','inherit']});t.on('error',e=>{console.error(e.message);process.exit(2)});t.on('close',c=>process.exit(c||0));const nul=Buffer.from([0]);t.stdin.end(Buffer.concat(paths.flatMap(p=>[Buffer.from(p),nul])))}catch(e){console.error('workspace export failed: '+e.message);process.exit(2)}";
   const snapshot = path.join(WORKSPACES, job.id + '.snapshot');
   await fsp.rm(snapshot, { recursive: true, force: true });
   await fsp.mkdir(snapshot, { recursive: false, mode: 0o755 });
