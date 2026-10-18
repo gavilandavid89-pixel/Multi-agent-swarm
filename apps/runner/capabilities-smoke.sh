@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+# This runs inside the isolated runner image. It is a build-time inventory,
+# not a command executed in the Worker or on the runner host.
+required='node npm npx tsc tsx prettier eslint python3 pytest black flake8 mypy java javac mvn go php composer ruby bundle gcc g++ make rustc cargo chromium xvfb-run godot jq sqlite3 rg fdfind tree shellcheck shfmt'
+missing=''
+for command_name in $required; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    printf 'MISSING_TOOL=%s\n' "$command_name" >&2
+    missing="$missing $command_name"
+  fi
+done
+if [ -n "$missing" ]; then
+  printf 'Runner image is missing required tools:%s\n' "$missing" >&2
+  exit 1
+fi
+
+node --version
+npm --version
+tsc --version
+tsx --version
+prettier --version
+eslint --version
+python3 --version
+pytest --version
+black --version
+flake8 --version
+mypy --version
+java -version 2>&1 | head -n 1
+mvn --version | head -n 1
+go version
+php --version | head -n 1
+ruby --version
+rustc --version
+cargo --version
+chromium --version 2>&1 | head -n 1
+godot --version
+jq --version
+sqlite3 --version | head -n 1
+shellcheck --version | head -n 2
+shfmt --version
+
+node -e '
+  const fs = require("node:fs");
+  const manifest = JSON.parse(fs.readFileSync("/opt/swarm-runner/capabilities.json", "utf8"));
+  if (manifest.schemaVersion !== 1 || manifest.id !== "swarm-agent-runner") process.exit(41);
+  const ids = new Set(manifest.toolchains.map(x => x.id));
+  for (const id of ["javascript-node", "typescript", "python", "java", "go", "php", "ruby", "c-cpp", "rust", "godot", "web-lint-format", "shell", "data-files"]) {
+    if (!ids.has(id)) { console.error("Missing toolchain profile:", id); process.exit(42); }
+  }
+  if (manifest.execution.defaultNetwork !== "none" || manifest.execution.concurrency !== 1) process.exit(43);
+  if (manifest.agentToolContract.notYetImplemented.length === 0) process.exit(44);
+'
+echo 'SWARM_RUNNER_CAPABILITIES_CHECKED=1'
