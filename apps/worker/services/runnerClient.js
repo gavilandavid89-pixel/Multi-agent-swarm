@@ -10,6 +10,14 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function unavailable(message) {
   return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, infraError: required && !configuredBase, message };
 }
+function containsSensitiveCredential(entries) {
+  const patterns = [
+    /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----/i,
+    /\\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\\b/,
+    /https?:\\/\\/[^/\\s:@]+:[^/\\s@]+@/i
+  ];
+  return entries.some(file => patterns.some(pattern => pattern.test(String(file.content || ''))));
+}
 function isPrivateRunnerHost(hostname) {
   const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')) return true;
@@ -250,6 +258,9 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     ? [...files.entries()].map(([filePath, file]) => ({ path: filePath, content: String(file?.content || '') }))
     : Array.isArray(files) ? files : [];
   if (!entries.length) return { available: false, checked: false, ok: true, skipped: true, message: 'No hay archivos extraídos para ejecutar en el runner.' };
+  if (configuredBase && containsSensitiveCredential(entries)) {
+    return { available: true, checked: false, ok: false, infraError: true, message: 'Se detectó una credencial de alta confianza en los archivos; no se envió ningún archivo al runner.' };
+  }
   const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
   const taskKey = String(taskId || workspaceId).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 60);
   const result = await runAgentCommand({
