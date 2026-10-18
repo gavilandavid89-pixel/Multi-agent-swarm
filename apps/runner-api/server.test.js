@@ -15,7 +15,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot',
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
-    'containsCredential', '.npmrc', 'service-account.json', 'PRIVATE KEY',
+    'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY',
     'swarm-agent-egress', 'ensureRestrictedNetwork'
   ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
   assert.equal(source.includes('--privileged'), false);
