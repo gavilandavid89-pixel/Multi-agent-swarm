@@ -11,6 +11,9 @@ index.crates.io
 static.crates.io
 crates.io
 rubygems.org
+repo.packagist.org
+packagist.org
+api.github.com
 repo.maven.apache.org
 repo1.maven.org
 plugins.gradle.org
