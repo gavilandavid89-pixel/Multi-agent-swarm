@@ -326,6 +326,8 @@ async function collectFiles(workspace) {
       if (entry.isSymbolicLink() || ['.git', '.godot', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle', 'vendor', '.cache', '__pycache__', 'target'].includes(entry.name)) continue;
       const name = relative ? relative + '/' + entry.name : entry.name;
       if (!safeRelativePath(name)) continue;
+      const basename = entry.name.toLowerCase();
+      if (basename === '.env' || (basename.startsWith('.env.') && basename !== '.env.example') || ['.npmrc', '.pypirc', '.netrc', '.git-credentials', '.dockerconfigjson', 'auth.json', 'settings.xml', 'gradle.properties', 'local.properties', 'terraform.tfvars', 'terraform.tfstate', 'secrets.yaml', 'secrets.yml', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig'].includes(basename)) continue;
       const target = path.join(directory, entry.name);
       if (entry.isDirectory()) await walk(target, name);
       else if (entry.isFile()) {
