@@ -12,6 +12,8 @@ Este documento describe la integración de herramientas de agentes sin darles ac
 6. La API devuelve salida acotada y una instantánea de archivos validada. El Worker filtra datos sensibles, persiste los resultados y los entrega al agente que pidió la herramienta.
 7. El agente interpreta los resultados y decide si corrige, vuelve a probar o pide revisión a otro rol. Una prueba fallida es evidencia, no se debe etiquetar como éxito ni borrar el error original.
 
+Los IDs de jobs usados para consultar estado, cancelar o leer artefactos deben haber sido devueltos por una herramienta de ejecución de esta misma sesión de dispatcher. Un UUID válido por sí solo no demuestra propiedad y se rechaza si no está registrado como propio.
+
 ## Catálogo de herramientas recomendado
 
 El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos por rol. Estos nombres son herramientas del Worker, no nuevos endpoints HTTP de la Runner API. La API de catálogo solo descubre capacidades; cada llamada de herramienta se valida en el Worker y después pasa por el cliente autenticado del runner.
