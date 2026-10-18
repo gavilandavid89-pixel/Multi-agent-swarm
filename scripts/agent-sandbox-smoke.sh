@@ -19,6 +19,13 @@ SWARM_SANDBOX_SENTINEL=must-not-leak sh scripts/run-agent-sandbox.sh "$workspace
 test "$(cat "$workspace/result.txt")" = "sandbox-ok"
 echo "PASS writable isolated workspace; host sentinel not inherited"
 
+cat > "$workspace/index.html" <<'HTML'
+<!doctype html><html><head><title>Sandbox browser smoke</title></head><body><main id="app">browser-ok</main></body></html>
+HTML
+sh scripts/run-agent-sandbox.sh "$workspace" xvfb-run -a chromium --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check --dump-dom file:///workspace/index.html > "$workspace/dom.out"
+grep -q 'browser-ok' "$workspace/dom.out"
+echo "PASS Chromium rendered HTML under Xvfb"
+
 # Network must be unavailable inside the sandbox.
 sh scripts/run-agent-sandbox.sh "$workspace" node -e '
   fetch("https://example.com", { signal: AbortSignal.timeout(2500) })
