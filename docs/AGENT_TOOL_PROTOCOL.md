@@ -26,7 +26,7 @@ El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos p
 | workspace.read | path | Lee un archivo de proyecto; límites de tamaño y redacción de secretos |
 | workspace.write | path, content | Escribe en el workspace, rechaza rutas absolutas, traversal y archivos de credenciales |
 | runner.check | sin argumentos | Ejecuta las comprobaciones de proyecto configuradas por el Worker; permitido a Desarrollador y Validador |
-| runner.execute | command (argv), network, timeoutMs | Solo Desarrollador; binarios allowlisted, sin shell y con red none por defecto |
+| runner.execute | command (argv), timeoutMs | Solo Desarrollador; binarios allowlisted, sin shell y con red `none` fijada por el Worker; el modelo no puede habilitar egress |
 | runner.prepareDependencies | manifest | Solo Desarrollador; manifiestos allowlisted y red restricted mediante proxy con allowlist, sin secretos |
 | runner.jobStatus | jobId | Desarrollador y Validador; solo IDs devueltos por una herramienta en esa misma sesión de dispatcher |
 | runner.cancel | jobId | Solo Desarrollador; solo IDs devueltos por una herramienta en esa misma sesión |
