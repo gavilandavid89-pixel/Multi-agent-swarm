@@ -58,7 +58,7 @@ function safeRelativePath(input) {
   if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
   const parts = input.split('/');
   if (parts.some(part => !part || part === '.' || part === '..')) return false;
-  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle'].includes(part))) return false;
+  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle'].includes(part))) return false;
   const base = parts.at(-1).toLowerCase();
   if (base === '.env' || (base.startsWith('.env.') && base !== '.env.example')) return false;
   return true;
