@@ -27,6 +27,8 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(engine.includes("import { runProjectToolchainChecks } from './runnerClient.js'"));
   assert.ok(engine.includes('runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) })'));
   assert.ok(engine.includes('ok: Boolean(syntax.ok && runnerExecution.ok)'));
+  assert.ok(engine.includes("runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE'"));
+  assert.ok(engine.includes("'Runner aislado (' + executionStatus + '): '"));
   assert.ok(engine.includes('syntax?.runnerExecution?.infraError'));
   assert.ok(engine.includes("lastCheckpoint: 'runner-infra-error'"));
 });
