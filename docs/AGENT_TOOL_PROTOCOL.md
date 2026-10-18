@@ -1,6 +1,6 @@
 # Contrato de herramientas para agentes y runner
 
-Este documento define cómo conectar agentes al entorno sin darles acceso directo al host, al daemon Docker ni al secreto de la Runner API. La ejecución está disponible a través de la API autenticada y del cliente privado del Worker; **el dispatcher de herramientas para los agentes sigue siendo una capa explícita de integración**, no se debe presentar al modelo como un shell libre.\n\nEl catálogo de capacidades instalado está versionado en `apps/runner/capabilities.json` y se puede consultar en `GET /v1/capabilities` usando la autenticación privada Worker→Runner. Enumera toolchains, perfiles, límites, políticas de red y capacidades que aún no existen. No es una concesión de permisos: el servidor sigue validando cada operación.
+Este documento describe la integración de herramientas de agentes sin darles acceso directo al host, al daemon Docker ni al secreto de la Runner API. La ejecución pasa por la API autenticada y el cliente privado del Worker. **El dispatcher de herramientas ya está conectado al ciclo de tool-calling de los proveedores compatibles**, con permisos por rol; no es un shell libre.\n\nEl catálogo de capacidades instalado está versionado en `apps/runner/capabilities.json` y se puede consultar en `GET /v1/capabilities` usando la autenticación privada Worker→Runner. Enumera toolchains, perfiles, límites, políticas de red y capacidades que aún no existen. No es una concesión de permisos: el servidor sigue validando cada operación.
 
 ## Flujo de control
 
@@ -14,7 +14,7 @@ Este documento define cómo conectar agentes al entorno sin darles acceso direct
 
 ## Catálogo de herramientas recomendado
 
-El dispatcher debe exponer operaciones pequeñas, con JSON Schema estricto y permisos por rol. Estos nombres son el contrato propuesto para la capa de agentes; no son nuevos endpoints HTTP de la Runner API. La API de catálogo no implementa estas herramientas y no debe anunciarse a los modelos como tool-calling activo hasta que exista el dispatcher y pase pruebas de autorización por tarea/rol.
+El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos por rol. Estos nombres son herramientas del Worker, no nuevos endpoints HTTP de la Runner API. La API de catálogo solo descubre capacidades; cada llamada de herramienta se valida en el Worker y después pasa por el cliente autenticado del runner.
 
 | Herramienta | Entrada principal | Permiso y efecto |
 |---|---|---|
@@ -37,7 +37,7 @@ La Runner API captura `stdout` y `stderr` mientras el proceso está activo, reti
 
 El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, con comandos enviados por `stdin` limitado a 16 KiB y solo cuando `network:none`. No abre puertos de depuración ni da acceso al host. La entrada no se persiste; si el runner reinicia antes de ejecutar un trabajo encolado que la requiere, el trabajo falla con un motivo explícito y debe reenviarse. El smoke test de CI verifica PDB, stdout, stderr y código de salida.
 
-**Límites actuales:** el depurador interactivo persistente y los adaptadores de sesión para Node Inspector/Java JDB aún no están implementados. Tampoco existe todavía un dispatcher por tarea/rol ni adaptación de tool-calls en los proveedores, por lo que estas funciones están disponibles para el cliente de confianza Worker→Runner pero todavía no como llamadas de herramientas directamente invocables por los modelos. No se debe describir al agente como si ya pudiera llamar `runner.debug` o controlar un depurador interactivo persistente.
+**Límites actuales:** el depurador interactivo persistente y los adaptadores de sesión para Node Inspector/Java JDB aún no están implementados. El tool-calling sí está conectado para los proveedores compatibles; las herramientas disponibles dependen del rol y el dispatcher aplica una lista permitida, valida argumentos y limita las llamadas. No existe una herramienta `runner.debug` ni control persistente de depuradores.
 
 ## Políticas por fase y rol
 
@@ -47,7 +47,7 @@ El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, c
 - **Árbitro:** consume resultados, fallos y checkpoints; no puede convertir una prueba no ejecutada en aprobada.
 - **Operador administrador:** cualquier cambio de allowlist, imagen, límites de seguridad o host de ejecución queda fuera del control de los agentes y requiere revisión explícita del operador.
 
-La identidad de rol no es un límite de seguridad suficiente por sí sola: el Worker debe validar permisos, propietario de tarea, IDs de jobs y límites en el servidor para cada llamada. Los IDs de workspace aislados y el merge sin conflictos son primitivas ya implementadas, pero el dispatcher de tool-calls y la aplicación efectiva de permisos por rol todavía no están conectados a los modelos.
+La identidad de rol no es un límite de seguridad suficiente por sí sola: el Worker valida las herramientas permitidas y el dispatcher limita las operaciones por rol. Los workspaces aislados y el merge sin conflictos están implementados. La API remota sigue siendo optativa y no debe habilitarse en producción hasta validar un host privado dedicado, firewall, autenticación y pruebas completas.
 
 ## Protocolo de trabajo
 
