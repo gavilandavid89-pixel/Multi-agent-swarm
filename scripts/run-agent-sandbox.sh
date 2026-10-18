@@ -28,8 +28,8 @@ workspace=$(CDPATH= cd -- "$workspace_arg" 2>/dev/null && pwd -P) || {
   exit 2
 }
 case "$workspace" in
-  /|/home|/root|/etc|/usr|/var|/proc|/sys|/dev|/run|/tmp)
-    echo "ERROR: se rechazó un directorio demasiado amplio o sensible: $workspace" >&2
+  /|/home|/home/*|/root|/root/*|/etc|/etc/*|/usr|/usr/*|/var|/var/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*|/tmp|/tmp/*)
+    echo "ERROR: se rechazó un directorio raíz, del sistema o temporal del host: $workspace" >&2
     exit 2
     ;;
 esac
@@ -39,12 +39,25 @@ timeout_seconds=${SWARM_RUNNER_TIMEOUT_SECONDS:-120}
 memory_limit=${SWARM_RUNNER_MEMORY:-1g}
 cpu_limit=${SWARM_RUNNER_CPUS:-2}
 pids_limit=${SWARM_RUNNER_PIDS:-128}
+network_mode=${SWARM_RUNNER_NETWORK:-none}
 
 case "$timeout_seconds" in
   ''|*[!0-9]*|0) echo "ERROR: SWARM_RUNNER_TIMEOUT_SECONDS debe ser un entero positivo." >&2; exit 2 ;;
 esac
 case "$pids_limit" in
   ''|*[!0-9]*|0) echo "ERROR: SWARM_RUNNER_PIDS debe ser un entero positivo." >&2; exit 2 ;;
+esac
+case "$network_mode" in
+  none) docker_network=none ;;
+  restricted)
+    docker_network=swarm-agent-egress
+    if ! docker network inspect "$docker_network" >/dev/null 2>&1; then
+      echo "ERROR: falta la red interna '$docker_network' y su proxy de salida con allowlist." >&2
+      echo "No se habilita acceso directo a Internet como alternativa." >&2
+      exit 125
+    fi
+    ;;
+  *) echo "ERROR: SWARM_RUNNER_NETWORK admite solo none o restricted." >&2; exit 2 ;;
 esac
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
@@ -53,24 +66,36 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
   exit 125
 fi
 
-echo "Sandbox: image=$image timeout=${timeout_seconds}s memory=$memory_limit cpus=$cpu_limit pids=$pids_limit network=none"
+echo "Sandbox: image=$image timeout=${timeout_seconds}s memory=$memory_limit cpus=$cpu_limit pids=$pids_limit network=$network_mode"
 # Intentionally pass no host environment wholesale. Only explicitly safe values enter.
 # The workspace is the sole writable host mount; Docker socket and credentials are never mounted.
-exec timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" docker run --rm --init \
-  --network none \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
-  --pids-limit "$pids_limit" \
-  --memory "$memory_limit" \
-  --cpus "$cpu_limit" \
-  --tmpfs /tmp:rw,nosuid,nodev,size=512m \
-  --mount "type=bind,src=$workspace,dst=/workspace,rw" \
-  --workdir /workspace \
-  --user "$(id -u):$(id -g)" \
-  --env HOME=/tmp \
-  --env CI=true \
-  --env LANG=C.UTF-8 \
-  --env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  --env CHROME_BIN=/usr/bin/chromium \
-  "$image" "$@"
+run_sandbox() {
+  if [ "$network_mode" = restricted ]; then
+    exec timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" docker run --rm --init \
+      --network "$docker_network" --read-only --cap-drop ALL \
+      --security-opt no-new-privileges:true --pids-limit "$pids_limit" \
+      --memory "$memory_limit" --cpus "$cpu_limit" \
+      --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+      --mount "type=bind,src=$workspace,dst=/workspace" \
+      --workdir /workspace --user "$(id -u):$(id -g)" \
+      --env HOME=/tmp --env CI=true --env LANG=C.UTF-8 \
+      --env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      --env CHROME_BIN=/usr/bin/chromium \
+      --env HTTP_PROXY=http://swarm-egress-proxy:3128 \
+      --env HTTPS_PROXY=http://swarm-egress-proxy:3128 \
+      --env ALL_PROXY=http://swarm-egress-proxy:3128 \
+      --env NO_PROXY=localhost,127.0.0.1,::1 "$image" "$@"
+  else
+    exec timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" docker run --rm --init \
+      --network none --read-only --cap-drop ALL \
+      --security-opt no-new-privileges:true --pids-limit "$pids_limit" \
+      --memory "$memory_limit" --cpus "$cpu_limit" \
+      --tmpfs /tmp:rw,nosuid,nodev,size=512m \
+      --mount "type=bind,src=$workspace,dst=/workspace" \
+      --workdir /workspace --user "$(id -u):$(id -g)" \
+      --env HOME=/tmp --env CI=true --env LANG=C.UTF-8 \
+      --env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      --env CHROME_BIN=/usr/bin/chromium "$image" "$@"
+  fi
+}
+run_sandbox "$@"
