@@ -123,6 +123,11 @@ export async function getAgentRunnerCapabilities() {
  * host-shell strings; network and resource policy are enforced by the runner host.
  */
 export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey, includeArtifacts = false, stdin } = {}) {
+  // Agent tool execution can bypass runProjectToolchainChecks, so enforce the same
+  // secret/path boundary before any workspace content is sent to the remote runner.
+  if (Array.isArray(files) && (containsSensitivePath(files) || containsSensitiveCredential(files))) {
+    return { available: Boolean(configuredBase), checked: false, ok: false, infraError: false, skipped: false, message: 'Se detectó una ruta de credenciales/caché o una credencial de alta confianza; no se envió ningún archivo al runner.' };
+  }
   if (!configuredBase) return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.' : 'Runner remoto no configurado; se mantiene la validación determinista local.');
   if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
   let baseUrl;
