@@ -427,7 +427,7 @@
     "artifacts": "GET /v1/jobs/:id/files returns a bounded, filtered snapshot"
   },
   "debugging": {
-    "status": "available-through-runner-execute; not yet exposed as model tool-calls",
+    "status": "python-pdb-batch-input-available-through-trusted-runner-client; no persistent interactive debugger sessions",
     "stdin": {
       "maxBytes": 16384,
       "network": "none-only",
@@ -437,23 +437,19 @@
       {
         "id": "python-pdb",
         "command": "python3 -m pdb <script.py>",
-        "input": "stdin commands, for example p expression followed by q"
-      },
-      {
-        "id": "node-inspector-cli",
-        "command": "node inspect <script.js>",
-        "input": "stdin debugger commands; no public inspector port is opened"
-      },
-      {
-        "id": "java-jdb",
-        "command": "jdb <class>",
-        "input": "stdin debugger commands; no public debug port is opened"
+        "input": "bounded stdin debugger commands, for example p expression followed by q",
+        "verifiedBy": "apps/runner/capabilities-smoke.sh and scripts/agent-sandbox-smoke.sh"
       }
     ],
     "restrictions": [
       "No host debugger access",
       "No ptrace capability or elevated container privileges",
       "No network access for debug sessions"
+    ],
+    "notYetImplemented": [
+      "persistent interactive debugger sessions",
+      "Node Inspector attach/session management",
+      "Java jdb attach/session management"
     ]
   }
 }
