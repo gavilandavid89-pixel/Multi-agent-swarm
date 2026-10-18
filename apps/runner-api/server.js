@@ -408,6 +408,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && !match[2]) return json(res, 200, publicJob(job));
   if (req.method === 'GET' && match[2] === 'files') return json(res, 200, { files: Array.isArray(job.artifactSnapshot) ? job.artifactSnapshot : await collectFiles(job.workspace) });
   if (req.method === 'POST' && match[2] === 'cancel') {
+    if (job.finalizing) return json(res, 409, { error: 'El trabajo está recopilando artefactos y ya no admite cancelación.' });
     if (['succeeded', 'failed', 'timed_out', 'cancelled'].includes(job.status)) return json(res, 200, publicJob(job));
     if (job.status === 'queued') {
       job.status = 'cancelled'; job.cancelled = true; job.finishedAt = new Date().toISOString(); await save(job);
