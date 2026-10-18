@@ -60,7 +60,7 @@ async function readJson(req) {
   catch { throw Object.assign(new Error('JSON inválido.'), { status: 400 }); }
 }
 function safeRelativePath(input) {
-  if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
+  if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || /[\x00-\x1f\x7f]/.test(input) || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
   const parts = input.split('/');
   if (parts.some(part => !part || part === '.' || part === '..')) return false;
   if (parts.some(part => ['.git', '.godot', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle'].includes(part))) return false;
@@ -219,14 +219,12 @@ async function copyWorkspaceFromContainer(job) {
   const copied = await dockerCommand(['cp', cid + ':/workspace/.', job.workspace + path.sep], 15000);
   if (copied.code !== 0) throw new Error('No se pudieron recuperar los archivos de salida del contenedor: ' + copied.stderr.slice(0, 600));
 
-  // Some Docker/container-storage combinations may report success copying a mounted
-  // tmpfs directory but omit newly-created files. Verify the inventory and recover
-  // missing regular files individually, never following symlinks or unsafe paths.
+  // Verify the tmpfs inventory; recover any regular files omitted by a directory copy.
   const inventory = await dockerCommand(['exec', cid, 'find', '/workspace', '-mindepth', '1', '-maxdepth', '8', '-type', 'f', '-print0'], 5000);
   if (inventory.code !== 0) throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + inventory.stderr.slice(0, 400));
-  for (const relative of inventory.stdout.split('\\0').filter(Boolean)) {
-    if (relative.length > 1024 || relative.startsWith('/') || relative.includes('\\\\')
-      || /[\\x00-\\x1f\\x7f]/.test(relative)
+  for (const relative of inventory.stdout.split('\0').filter(Boolean)) {
+    if (relative.length > 1024 || relative.startsWith('/') || relative.includes('\\')
+      || /[\x00-\x1f\x7f]/.test(relative)
       || relative.split('/').some(part => !part || part === '.' || part === '..')) continue;
     const target = path.resolve(job.workspace, ...relative.split('/'));
     if (!target.startsWith(job.workspace + path.sep)) continue;
