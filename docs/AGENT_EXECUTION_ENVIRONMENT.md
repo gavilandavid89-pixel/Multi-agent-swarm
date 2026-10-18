@@ -40,6 +40,8 @@ Requisitos: Docker Engine o Docker Desktop en Linux, macOS o Windows con WSL2; `
    sh scripts/run-agent-sandbox.sh ./ruta/al/proyecto cargo test --offline
    ```
 
+   Para dependencias que necesitan red, arrancá el proxy de salida restringida (ver sección **Red limitada**) y ejecutá explícitamente con `SWARM_RUNNER_NETWORK=restricted`. El modo normal continúa sin red.
+
 4. Para ajustar límites, configurá solo estos parámetros del wrapper:
 
    - `SWARM_RUNNER_IMAGE`: imagen local aprobada; predeterminado `swarm-agent-runner:local`.
@@ -52,7 +54,7 @@ Requisitos: Docker Engine o Docker Desktop en Linux, macOS o Windows con WSL2; `
 
 El wrapper aplica, por ejecución:
 
-- red deshabilitada (`--network none`);
+- red deshabilitada por defecto (`--network none`);
 - sistema de archivos raíz de solo lectura;
 - capacidades Linux eliminadas y `no-new-privileges`;
 - límites de CPU, RAM, PIDs y tiempo;
@@ -68,7 +70,29 @@ El código puede modificar o borrar los archivos dentro del directorio montado. 
 
 ## Dependencias y red
 
-La red se desactiva durante la ejecución. Por diseño, `npm install`, `pip install`, `go get`, `cargo fetch` y descargas de navegadores no deben depender de internet dentro del sandbox. Resolver dependencias en una etapa de preparación separada, revisar archivos de lock y reutilizar cachés/imágenes aprobadas. No habilitar red libre como arreglo rápido para un test fallido.
+**La red normal sigue desactivada.** `npm install`, `pip install`, `go get`, `cargo fetch` y descargas de navegadores deben preferir dependencias preparadas, archivos de lock revisados y cachés/imágenes aprobadas. Nunca habilites una red Docker normal como atajo.
+
+### Modo opcional de salida limitada
+
+Se agregó un proxy Squid con denegación por defecto y una lista explícita de hosts permitidos:
+
+- Configuración: `apps/runner/egress-proxy/squid.conf`.
+- Lista revisable por humanos: `apps/runner/egress-proxy/allowed-domains.txt`.
+- Topología: `docker-compose.runner-egress.yml`. La red `swarm-agent-egress` es `internal: true); el sandbox no se conecta a la red externa. Solo el proxy tiene una segunda interfaz en `swarm-egress-outbound`.
+- Se permiten únicamente los hosts enumerados y los puertos HTTP/HTTPS seguros definidos por Squid; destinos privados, loopback y link-local se bloquean y todo lo demás se deniega. La lista inicial cubre registros comunes de paquetes; no garantiza que todas las dependencias usen esos hosts.
+- No se publican puertos del proxy en el host y no se permiten destinos elegidos arbitrariamente por el modelo.
+
+Preparación local:
+
+```sh
+docker compose -f docker-compose.runner-egress.yml up --build -d
+SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm install
+docker compose -f docker-compose.runner-egress.yml down
+```
+
+El modo restringido **falla cerrado** si no existe la red fija. No cambia a una red abierta como fallback. Para sumar un dominio, revisá primero por qué lo necesita el lockfile o el framework, agregalo a `allowed-domains.txt` y repetí la prueba de red. No agregues comodines amplios como `*`, dominios de almacenamiento genéricos o proveedores de túneles.
+
+**Límites honestos:** Squid restringe los destinos HTTP/HTTPS que pasan por el proxy; la variable `HTTP_PROXY` por sí sola no obliga a programas maliciosos a usarlo. La red Docker interna evita la ruta IP directa habitual, pero el DNS embebido de Docker y la configuración de red del host deben evaluarse en la plataforma final. Para código realmente hostil o multiusuario, bloqueá DNS directo y cualquier salida adicional mediante firewall de host/política de egress, o usá una VM/microVM con política de red aplicada fuera del contenedor. La prueba CI verifica un host permitido y uno denegado, pero no sustituye una auditoría de escape o de exfiltración DNS.
 
 El runner no acepta una imagen Docker, comando de host, volumen adicional o URL de red elegida por el modelo. El comando dentro del contenedor lo elige quien invoca el wrapper; en una futura API del Swarm, el servidor debe mapear perfiles y comandos a una lista permitida, no aceptar argumentos Docker arbitrarios.
 
@@ -94,13 +118,14 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 
 - `sh -n scripts/run-agent-sandbox.sh` comprueba sintaxis del wrapper.
 - `npm run check` ejecuta las comprobaciones unitarias existentes y el test de política del wrapper.
+- `sh scripts/agent-sandbox-smoke.sh` construye el runner y el proxy, prueba workspace, Chromium/Xvfb, red deshabilitada, un destino permitido, uno denegado, timeout y raíz de solo lectura.
 - `docker build ...` construye la imagen local; no despliega nada.
 - La prueba de extremo a extremo contra Render sigue siendo independiente y no debe ejecutarse desde cada rama experimental.
 
 ## Próximas etapas antes de integrarlo
 
 1. Probar construcción de imagen y comandos de ejemplo en CI aislado.
-2. Añadir pruebas de timeout, límite de memoria/PIDs, directorio descartable y red inaccesible.
+2. Mantener las pruebas de timeout, límites de recursos, rutas sensibles y red: modo `none` y proxy con allowlist.
 3. Crear perfiles versionados para runtimes pesados que realmente necesitemos.
 4. Diseñar un protocolo runner/worker con cola, identidad de artefacto, resultados estructurados y autenticación de servicio a servicio.
 5. Elegir una plataforma de ejecución reforzada antes de permitir código hostil multiusuario.
