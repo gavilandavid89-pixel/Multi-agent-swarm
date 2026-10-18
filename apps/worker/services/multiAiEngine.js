@@ -212,7 +212,8 @@ async function runJob(jobId) {
           && runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
         const executionStatus = hasRuntimeTests
           ? (runnerExecution.ok ? 'APROBADO' : 'FALLO')
-          : runnerExecution.checked ? 'SOLO ESTÁTICO'
+          : runnerExecution.checked && !runnerExecution.ok ? 'FALLO'
+            : runnerExecution.checked ? 'SOLO ESTÁTICO'
             : runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE';
         syntax = {
           ...syntax,
