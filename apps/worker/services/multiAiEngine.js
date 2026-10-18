@@ -212,7 +212,7 @@ async function runJob(jobId) {
           ...syntax,
           runnerExecution,
           ok: Boolean(syntax.ok && runnerExecution.ok),
-          message: [syntax.message, runnerExecution.checked || !runnerExecution.ok ? 'Runner aislado: ' + String(runnerExecution.message || (runnerExecution.ok ? 'ejecución omitida' : 'falló la ejecución')).slice(0, 2500) : ''].filter(Boolean).join('\\n')
+          message: [syntax.message, runnerExecution.checked || !runnerExecution.ok ? 'Runner aislado: ' + String(runnerExecution.message || (runnerExecution.ok ? 'ejecución omitida' : 'falló la ejecución')).slice(0, 2500) : ''].filter(Boolean).join('\n')
         };
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
