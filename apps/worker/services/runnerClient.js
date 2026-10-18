@@ -93,7 +93,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
     }
   }
   if (!created?.id) return { available: true, checked: false, ok: false, infraError: true, message: 'No se pudo crear la ejecución aislada: ' + String(lastError?.message || 'el runner no respondió').slice(0, 1000) };
-  const maxWait = Math.min(180000, Math.max(75000, Number(timeoutMs) + 60000));
+  const maxWait = Math.min(300000, Math.max(90000, Number(timeoutMs) + 90000));
   const deadline = Date.now() + maxWait;
   let latest = created;
   while (Date.now() < deadline) {
