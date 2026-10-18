@@ -66,19 +66,19 @@ test('runner API exposes health and async job lifecycle endpoints', () => {
 
 const capabilities = JSON.parse(await readFile(new URL('../runner/capabilities.json', import.meta.url), 'utf8'));
 
-test('capability catalog accurately marks sandbox defaults and future-only model tools', () => {
+test('capability catalog accurately describes implemented dispatcher and sandbox defaults', () => {
   assert.equal(capabilities.schemaVersion, 1);
   assert.equal(capabilities.execution.defaultNetwork, 'none');
   assert.equal(capabilities.execution.concurrency, 1);
   assert.match(capabilities.execution.workspace, /task \+ agent \+ purpose/);
-  assert.equal(capabilities.workspaceIsolation.status, 'worker-primitives-implemented; model-tool-dispatch-pending');
+  assert.equal(capabilities.workspaceIsolation.status, 'worker-primitives-and-model-tool-dispatch-implemented');
   assert.equal(capabilities.workspaceIsolation.concurrency.globalRunner, 1);
   assert.match(capabilities.workspaceIsolation.merge, /fail closed/);
   assert.ok(capabilities.toolchains.some(item => item.id === 'typescript'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'godot'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'data-files'));
-  assert.ok(capabilities.agentToolContract.notYetImplemented.includes('dispatcher de tool-calls LLM'));
-  assert.equal(capabilities.agentToolContract.rolePolicyStatus, 'proposed-not-enforced');
+  assert.deepEqual(capabilities.agentToolContract.notYetImplemented, []);
+  assert.equal(capabilities.agentToolContract.rolePolicyStatus, 'enforced-by-worker-dispatcher');
   assert.ok(capabilities.agentToolContract.rolePolicy.Desarrollador.allow.includes('workspace.write'));
   assert.ok(capabilities.notIncluded.some(item => item.includes('credenciales')));
 });
