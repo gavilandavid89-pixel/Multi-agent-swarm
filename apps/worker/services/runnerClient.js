@@ -11,7 +11,7 @@ function unavailable(message) {
   return { available: Boolean(configuredBase), checked: false, ok: !required && !configuredBase, skipped: !configuredBase && !required, message };
 }
 function isPrivateRunnerHost(hostname) {
-  const host = String(hostname || '').replace(/^\\[|\\]$/g, '').toLowerCase();
+  const host = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')) return true;
   const version = isIP(host);
   if (version === 4) {
