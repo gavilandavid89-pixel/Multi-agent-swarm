@@ -172,14 +172,14 @@ function appendOutput(job, key, chunk) {
   const next = current + chunk.toString('utf8');
   job[key] = next.length > MAX_OUTPUT_CHARS ? next.slice(-MAX_OUTPUT_CHARS) : next;
 }
-async function dockerCommand(args, timeoutMs = 5000) {
+async function dockerCommand(args, timeoutMs = 5000, maxOutputChars = 4000) {
   return new Promise(resolve => {
     const child = spawn(DOCKER, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = ''; let stderr = ''; let done = false;
     const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ code: null, stdout, stderr: 'Docker command timeout.' }); }, timeoutMs);
     const finish = value => { if (done) return; done = true; clearTimeout(timer); resolve(value); };
-    child.stdout.on('data', chunk => { if (stdout.length < 4000) stdout += chunk.toString('utf8'); });
-    child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk.toString('utf8'); });
+    child.stdout.on('data', chunk => { if (stdout.length < maxOutputChars) stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', chunk => { if (stderr.length < maxOutputChars) stderr += chunk.toString('utf8'); });
     child.on('error', error => finish({ code: null, stdout, stderr: error.message }));
     child.on('close', code => finish({ code, stdout, stderr }));
   });
@@ -213,26 +213,92 @@ async function removeJobContainer(job) {
   const cid = await readContainerId(job);
   if (cid) await dockerCommand(['rm', '-f', cid], 5000);
 }
+function safeWorkspaceCopyPath(input) {
+  if (typeof input !== 'string' || !input || input.length > 1024 || input.startsWith('/')
+    || input.includes('\\') || /[\x00-\x1f\x7f]/.test(input)) return false;
+  return input.split('/').every(part => part && part !== '.' && part !== '..');
+}
+async function ensureWorkspaceDirectory(root, relative) {
+  if (!relative) return;
+  let current = root;
+  for (const part of relative.split('/')) {
+    current = path.join(current, part);
+    let stat = null;
+    try { stat = await fsp.lstat(current); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (stat && (stat.isSymbolicLink() || !stat.isDirectory())) {
+      await fsp.rm(current, { recursive: true, force: true });
+      stat = null;
+    }
+    if (!stat) await fsp.mkdir(current, { recursive: false, mode: 0o755 });
+  }
+}
+async function pruneWorkspaceToManifest(root, files, directories, relative = '') {
+  let entries;
+  try { entries = await fsp.readdir(path.join(root, relative), { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const name = relative ? relative + '/' + entry.name : entry.name;
+    const target = path.join(root, ...name.split('/'));
+    const expectedFile = files.has(name);
+    const expectedDirectory = directories.has(name);
+    if (entry.isSymbolicLink() || (!expectedFile && !expectedDirectory)
+      || (expectedFile && !entry.isFile()) || (expectedDirectory && !entry.isDirectory())) {
+      await fsp.rm(target, { recursive: true, force: true });
+      continue;
+    }
+    if (entry.isDirectory()) await pruneWorkspaceToManifest(root, files, directories, name);
+  }
+}
 async function copyWorkspaceFromContainer(job) {
   const cid = await readContainerId(job);
   if (!cid) return;
   const copied = await dockerCommand(['cp', cid + ':/workspace/.', job.workspace + path.sep], 15000);
   if (copied.code !== 0) throw new Error('No se pudieron recuperar los archivos de salida del contenedor: ' + copied.stderr.slice(0, 600));
 
-  // Verify the tmpfs inventory; recover any regular files omitted by a directory copy.
-  const inventory = await dockerCommand(['exec', cid, 'find', '/workspace', '-mindepth', '1', '-maxdepth', '8', '-type', 'f', '-print0'], 5000);
-  if (inventory.code !== 0) throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + inventory.stderr.slice(0, 400));
-  for (const relative of inventory.stdout.split('\0').filter(Boolean)) {
-    if (relative.length > 1024 || relative.startsWith('/') || relative.includes('\\')
-      || /[\x00-\x1f\x7f]/.test(relative)
-      || relative.split('/').some(part => !part || part === '.' || part === '..')) continue;
+  // Hash the live tmpfs manifest so new, modified, and deleted files survive
+  // between sequential toolchain jobs even if a directory-level docker cp omits changes.
+  const manifestScript = "const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');function walk(dir,rel='',depth=0){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const absolute=path.join(dir,entry.name);const name=rel?rel+'/'+entry.name:entry.name;if(entry.isDirectory()){process.stdout.write('D\\0'+name+'\\0\\0');if(depth<32)walk(absolute,name,depth+1);}else if(entry.isFile()){const hash=crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');process.stdout.write('F\\0'+name+'\\0'+hash+'\\0');}}}walk('/workspace');";
+  const inventory = await dockerCommand(['exec', cid, 'node', '-e', manifestScript], 30000, 8 * 1024 * 1024);
+  if (inventory.code !== 0 || !inventory.stdout.endsWith('\0')) {
+    throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + String(inventory.stderr || 'inventario truncado').slice(0, 500));
+  }
+  const fields = inventory.stdout.split('\0');
+  const files = new Set();
+  const directories = new Set();
+  for (let i = 0; i + 2 < fields.length; i += 3) {
+    const type = fields[i];
+    const relative = fields[i + 1];
+    const hash = fields[i + 2];
+    if (!safeWorkspaceCopyPath(relative)) continue;
+    if (type === 'D') {
+      directories.add(relative);
+      await ensureWorkspaceDirectory(job.workspace, relative);
+      continue;
+    }
+    if (type !== 'F' || !/^[a-f0-9]{64}$/.test(hash)) continue;
+    files.add(relative);
+    const parentRelative = relative.split('/').slice(0, -1).join('/');
+    if (parentRelative) await ensureWorkspaceDirectory(job.workspace, parentRelative);
     const target = path.resolve(job.workspace, ...relative.split('/'));
     if (!target.startsWith(job.workspace + path.sep)) continue;
-    try { await fsp.access(target); continue; } catch {}
-    await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
-    const fileCopy = await dockerCommand(['cp', cid + ':/workspace/' + relative, target], 15000);
+    let localHash = null;
+    try {
+      const stat = await fsp.lstat(target);
+      if (stat.isFile() && !stat.isSymbolicLink()) {
+        localHash = createHash('sha256').update(await fsp.readFile(target)).digest('hex');
+      } else {
+        await fsp.rm(target, { recursive: true, force: true });
+      }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (localHash === hash) continue;
+    const temporary = target + '.swarm-copy-' + job.id;
+    await fsp.rm(temporary, { recursive: true, force: true });
+    const fileCopy = await dockerCommand(['cp', cid + ':/workspace/' + relative, temporary], 15000);
     if (fileCopy.code !== 0) throw new Error('No se pudo recuperar el archivo de salida ' + relative.slice(0, 160) + ': ' + fileCopy.stderr.slice(0, 400));
+    const copiedHash = createHash('sha256').update(await fsp.readFile(temporary)).digest('hex');
+    if (copiedHash !== hash) throw new Error('El archivo recuperado no coincide con el contenedor: ' + relative.slice(0, 160));
+    await fsp.rename(temporary, target);
   }
+  await pruneWorkspaceToManifest(job.workspace, files, directories);
 }
 async function collectFiles(workspace) {
   const files = []; let total = 0;
