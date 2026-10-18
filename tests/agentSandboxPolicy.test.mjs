@@ -4,6 +4,9 @@ import { readFile } from 'node:fs/promises';
 
 const wrapper = await readFile(new URL('../scripts/run-agent-sandbox.sh', import.meta.url), 'utf8');
 const image = await readFile(new URL('../apps/runner/Dockerfile', import.meta.url), 'utf8');
+const proxy = await readFile(new URL('../apps/runner/egress-proxy/squid.conf', import.meta.url), 'utf8');
+const allowlist = await readFile(new URL('../apps/runner/egress-proxy/allowed-domains.txt', import.meta.url), 'utf8');
+const compose = await readFile(new URL('../docker-compose.runner-egress.yml', import.meta.url), 'utf8');
 
 test('agent sandbox disables network and uses a read-only container root', () => {
   for (const flag of [
@@ -30,6 +33,18 @@ test('network is denied by default and restricted mode requires a fixed egress p
   assert.ok(wrapper.includes('--env HTTPS_PROXY=http://swarm-egress-proxy:3128'));
   assert.ok(wrapper.includes('docker network inspect "$docker_network"'));
   assert.ok(wrapper.includes('--network none'));
+});
+
+test('restricted egress proxy uses an internal runner network and default-deny allowlist', () => {
+  assert.ok(compose.includes('internal: true'));
+  assert.ok(compose.includes('name: swarm-agent-egress'));
+  assert.ok(compose.includes('name: swarm-egress-outbound'));
+  assert.ok(proxy.includes('http_access allow swarm_runner allowed_domains'));
+  assert.ok(proxy.includes('http_access deny all'));
+  assert.ok(proxy.includes('http_access deny private_dst'));
+  assert.ok(proxy.includes('fc00::/7'));
+  assert.ok(allowlist.includes('registry.npmjs.org'));
+  assert.equal(allowlist.includes('*'), false);
 });
 
 test('only the requested project directory is mounted writable', () => {
