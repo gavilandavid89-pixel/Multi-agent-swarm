@@ -63,8 +63,8 @@ if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticat
 echo "PASS runner API rejects unauthenticated requests"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
-  files:[{path:"main.js",content:"console.log(\\"input-file-ok\\")\\n"}],
-  command:["node","-e","const fs=require(\\"node:fs\\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); fs.writeFileSync(\\"generated.txt\\",\\"artifact-ok\\"); console.log(\\"runner-api-ok\\")"],
+  files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
+  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); fs.writeFileSync(\"generated.txt\",\"artifact-ok\"); console.log(\"runner-api-ok\")"],
   network:"none",timeoutMs:15000
 }))')
 created=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
