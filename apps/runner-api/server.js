@@ -66,8 +66,8 @@ function safeRelativePath(input) {
 }
 function containsCredential(content) {
   return /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----/i.test(content)
-    || /\\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\\b/.test(content)
-    || /https?:\\/\\/[^/\\s:@]+:[^/\\s@]+@/i.test(content);
+    || /\b(?:sk-[A-Za-z0-9]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\b/.test(content)
+    || /https?:\/\/[^/\s:@]+:[^/\s@]+@/i.test(content);
 }
 function validateRequest(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Object.assign(new Error('Cuerpo de solicitud inválido.'), { status: 400 });
