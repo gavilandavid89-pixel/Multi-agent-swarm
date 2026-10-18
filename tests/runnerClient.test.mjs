@@ -52,12 +52,24 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   const checks = await runProjectToolchainChecks({
     taskId: '33333333-3333-4333-8333-333333333333',
     round: 1,
-    files: new Map([['main.js', { content: 'console.log(1)' }]])
+    files: new Map([
+      ['main.js', { content: 'console.log(1)' }],
+      ['package.json', { content: '{"scripts":{"test":"node --test"}}' }],
+      ['package-lock.json', { content: '{"lockfileVersion":3,"packages":{}}' }]
+    ])
   });
   assert.equal(checks.ok, true);
   assert.equal(checks.filesChecked, 2);
+  assert.equal(checks.runtimeChecks.length, 2);
   assert.equal(seen[1].body.command[0], 'bash');
   assert.equal(seen[1].body.network, 'none');
+  assert.equal(seen[2].body.command[0], 'npm');
+  assert.equal(seen[2].body.command[1], 'ci');
+  assert.equal(seen[2].body.network, 'restricted');
+  assert.equal(seen[2].body.resetWorkspace, false);
+  assert.equal(seen[3].body.command[1], 'test');
+  assert.equal(seen[3].body.network, 'none');
+  assert.equal(seen[3].body.resetWorkspace, false);
 });
 
 test('Worker refuses public HTTP runner endpoints and skips optional unconfigured runner', () => {
