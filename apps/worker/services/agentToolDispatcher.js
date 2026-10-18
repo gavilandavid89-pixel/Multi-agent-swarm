@@ -58,9 +58,17 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw error('Argumentos deben ser un objeto.');
     let result;
     switch (name) {
-      case 'workspace_list':
+      case 'workspace_list': {
         if (Object.keys(args).length) throw error('No se aceptan argumentos.');
-        result = await workspace.list(); break;
+        const files = await workspace.list();
+        result = (Array.isArray(files) ? files : []).flatMap(file => {
+          try {
+            const path = safePath(file?.path);
+            return [{ path, bytes: Buffer.byteLength(String(file?.content || ''), 'utf8') }];
+          } catch { return []; }
+        });
+        break;
+      }
       case 'workspace_read':
         if (Object.keys(args).some(k => k !== 'path')) throw error('Argumentos extra no permitidos.');
         result = await workspace.read(safePath(args.path));
@@ -78,6 +86,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = await workspace.write(path, args.content); break;
       }
       case 'runner_execute': {
+        if (Object.keys(args).some(k => !['command', 'network', 'timeoutMs'].includes(k))) throw error('Argumentos extra no permitidos para runner_execute.');
         if (typeof runner?.execute !== 'function') throw error('Runner execute no disponible.');
         if (!Array.isArray(args.command) || !args.command.length || args.command.length > 32 || args.command.some(v => typeof v !== 'string' || v.length > 4096 || v.includes('\0'))) throw error('command inválido.');
         if (!BINARIES.has(args.command[0])) throw error('Binario no permitido.');
@@ -86,11 +95,21 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (args.timeoutMs !== undefined && (!Number.isInteger(args.timeoutMs) || args.timeoutMs < 1000 || args.timeoutMs > 120000)) throw error('Timeout fuera de límites.');
         result = await runner.execute({ jobId, round, workspace, command: args.command, network: args.network || 'none', timeoutMs: args.timeoutMs || 60000 }); break;
       }
-      case 'runner_check': result = await runner.check({ jobId, round, workspace }); break;
-      case 'runner_job_status': result = await runner.jobStatus({ jobId: args.jobId }); break;
-      case 'runner_cancel': result = await runner.cancel({ jobId: args.jobId }); break;
-      case 'runner_artifact': result = await runner.artifact({ jobId: args.jobId, artifactId: args.artifactId }); break;
+      case 'runner_check':
+        if (Object.keys(args).length) throw error('runner_check no acepta argumentos.');
+        if (typeof runner?.check !== 'function') throw error('Runner check no disponible.');
+        result = await runner.check({ jobId, round, workspace }); break;
+      case 'runner_job_status':
+        if (Object.keys(args).some(k => k !== 'jobId') || typeof args.jobId !== 'string' || !args.jobId) throw error('jobId inválido.');
+        result = await runner.jobStatus({ jobId: args.jobId }); break;
+      case 'runner_cancel':
+        if (Object.keys(args).some(k => k !== 'jobId') || typeof args.jobId !== 'string' || !args.jobId) throw error('jobId inválido.');
+        result = await runner.cancel({ jobId: args.jobId }); break;
+      case 'runner_artifact':
+        if (Object.keys(args).some(k => !['jobId', 'artifactId'].includes(k)) || typeof args.jobId !== 'string' || typeof args.artifactId !== 'string') throw error('Identificadores de artefacto inválidos.');
+        result = await runner.artifact({ jobId: args.jobId, artifactId: args.artifactId }); break;
       case 'runner_dependency':
+        if (Object.keys(args).some(k => k !== 'manifest')) throw error('Argumentos extra no permitidos para runner_dependency.');
         if (!['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'].includes(args.manifest)) throw error('Manifest no permitido.');
         result = await runner.dependency({ jobId, round, workspace, manifest: args.manifest }); break;
       default: throw error('Herramienta desconocida.');

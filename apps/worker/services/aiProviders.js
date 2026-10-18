@@ -299,6 +299,8 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
            error.code = 'AGENT_TOOL_ROUND_LIMIT';
            throw error;
          }
+         const usage = data?.usage || {};
+         await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
          const calls = message.tool_calls.slice(0, 8);
          requestMessages = [...requestMessages, { role: 'assistant', content: typeof content === 'string' ? content : '', tool_calls: calls }];
          for (const call of calls) {

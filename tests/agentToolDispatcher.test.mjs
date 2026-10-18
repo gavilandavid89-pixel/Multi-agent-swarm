@@ -27,6 +27,9 @@ test('tool schemas use strict object arguments', () => {
 });
 test('developer can read/write files and execute allowlisted binary without shell', async () => {
   const f = fixture();
+  const listed = (await f.dispatcher.invoke({ name: 'workspace_list', arguments: {} })).result;
+  assert.deepEqual(listed, [{ path: 'src/app.js', bytes: 5 }]);
+  assert.equal(Object.hasOwn(listed[0], 'content'), false);
   assert.equal((await f.dispatcher.invoke({ name: 'workspace_read', arguments: { path: 'src/app.js' } })).result, 'hello');
   await f.dispatcher.invoke({ name: 'workspace_write', arguments: { path: 'src/app.js', content: 'updated' } });
   assert.equal(f.files.get('src/app.js'), 'updated');
