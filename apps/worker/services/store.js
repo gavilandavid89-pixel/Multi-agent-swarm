@@ -135,6 +135,7 @@ export async function saveDiagnosticReport(input) {
       await client.query('COMMIT');
       return { reportId: normalized.reportId, duplicate: true, status: 'queued' };
     }
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [normalized.fingerprint]);
     const recent = await client.query(
       "SELECT report_id FROM diagnostic_reports WHERE fingerprint=$1 AND received_at > now() - interval '10 minutes' ORDER BY received_at DESC LIMIT 1",
       [normalized.fingerprint]
