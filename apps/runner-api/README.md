@@ -17,6 +17,7 @@ cd apps/runner-api
 cp .env.example .env
 # Set RUNNER_SHARED_SECRET to a fresh 32+ character random secret, never commit it.
 chmod 600 .env
+sudo chown swarm-runner:swarm-runner .env
 # Run as the dedicated account with its rootless Docker environment configured.
 sudo -u swarm-runner npm start
 ```
