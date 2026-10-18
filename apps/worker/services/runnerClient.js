@@ -122,6 +122,8 @@ for file in "${'${files[@]}'}"; do
       checked=$((checked + 1)); g++ -fsyntax-only -I. "$file" || { echo "FAIL g++ syntax: $file"; failed=1; } ;;
     *.sh)
       checked=$((checked + 1)); bash -n "$file" || { echo "FAIL bash -n: $file"; failed=1; } ;;
+    *.json)
+      checked=$((checked + 1)); node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$file" || { echo "FAIL JSON parse: $file"; failed=1; } ;;
   esac
 done
 if [ -f go.mod ] && [ -d vendor ]; then
@@ -135,35 +137,140 @@ fi
 if [ -f Cargo.toml ] && [ -f Cargo.lock ] && [ -d vendor ]; then
   checked=$((checked + 1)); CARGO_NET_OFFLINE=true cargo test --offline || { echo "FAIL cargo test --offline"; failed=1; }
 fi
-if [ -f package.json ] && [ -d node_modules ]; then
-  checked=$((checked + 1)); npm test --if-present || { echo "FAIL npm test"; failed=1; }
-fi
-if [ -f requirements.txt ] && find . -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit | grep -q .; then
-  checked=$((checked + 1)); python3 -m pytest -q || { echo "FAIL pytest"; failed=1; }
-fi
 printf 'SWARM_RUNNER_CHECKED=%s\n' "$checked"
 exit "$failed"
 `;
+
+function detectRuntimeProfiles(entries) {
+  const paths = new Set(entries.map(file => file.path));
+  const contents = new Map(entries.map(file => [file.path, file.content]));
+  const profiles = [];
+  let pkg = null;
+  try { if (contents.has('package.json')) pkg = JSON.parse(contents.get('package.json')); } catch {}
+  if (pkg?.scripts?.test && paths.has('package-lock.json') || pkg?.scripts?.test && paths.has('npm-shrinkwrap.json')) {
+    profiles.push({
+      name: 'npm test',
+      prepare: ['npm', 'ci', '--no-audit', '--no-fund', '--ignore-scripts'],
+      prepareTimeoutMs: 120000,
+      test: ['npm', 'test'],
+      testTimeoutMs: 60000
+    });
+  } else if (pkg?.scripts?.test) {
+    profiles.push({ name: 'npm test (offline; no lockfile)', test: ['npm', 'test'], testTimeoutMs: 60000 });
+  }
+  const hasPythonTests = entries.some(file => /(^|\\/)(test_[^/]+\\.py|[^/]+_test\\.py)$/.test(file.path));
+  if (hasPythonTests && paths.has('requirements.txt')) {
+    profiles.push({
+      name: 'pytest',
+      prepare: ['bash', '-lc', 'python3 -m venv .venv && .venv/bin/pip install --disable-pip-version-check --no-input -r requirements.txt'],
+      prepareTimeoutMs: 120000,
+      test: ['bash', '-lc', './.venv/bin/python -m pytest -q'],
+      testTimeoutMs: 60000
+    });
+  } else if (hasPythonTests) {
+    profiles.push({ name: 'pytest (offline; no requirements file)', test: ['python3', '-m', 'pytest', '-q'], testTimeoutMs: 60000 });
+  }
+  if (paths.has('go.mod') && paths.has('go.sum') && entries.some(file => file.path.endsWith('.go')) && !entries.some(file => file.path.startsWith('vendor/'))) {
+    profiles.push({
+      name: 'go test',
+      prepare: ['bash', '-lc', 'GOMODCACHE=/workspace/.swarm-go-modcache GOPROXY=https://proxy.golang.org go mod download'],
+      prepareTimeoutMs: 120000,
+      test: ['bash', '-lc', 'GOMODCACHE=/workspace/.swarm-go-modcache GOPROXY=off go test ./...'],
+      testTimeoutMs: 60000
+    });
+  }
+  if (paths.has('Cargo.toml') && paths.has('Cargo.lock') && entries.some(file => file.path.endsWith('.rs')) && !entries.some(file => file.path.startsWith('vendor/'))) {
+    profiles.push({
+      name: 'cargo test',
+      prepare: ['bash', '-lc', 'CARGO_HOME=/workspace/.swarm-cargo-home cargo fetch --locked'],
+      prepareTimeoutMs: 120000,
+      test: ['bash', '-lc', 'CARGO_HOME=/workspace/.swarm-cargo-home CARGO_NET_OFFLINE=true CARGO_TARGET_DIR=/tmp/swarm-cargo-target cargo test --locked --offline'],
+      testTimeoutMs: 60000
+    });
+  }
+  if (paths.has('pom.xml')) {
+    profiles.push({
+      name: 'maven test',
+      prepare: ['mvn', '-B', '-Dmaven.repo.local=/workspace/.swarm-m2', '-DskipTests', 'dependency:go-offline'],
+      prepareTimeoutMs: 120000,
+      test: ['mvn', '-o', '-B', '-Dmaven.repo.local=/workspace/.swarm-m2', 'test'],
+      testTimeoutMs: 60000
+    });
+  }
+  if (paths.has('gradlew') && (paths.has('build.gradle') || paths.has('build.gradle.kts'))) {
+    profiles.push({
+      name: 'gradle test',
+      prepare: ['bash', '-lc', 'GRADLE_USER_HOME=/workspace/.swarm-gradle bash ./gradlew --no-daemon testClasses'],
+      prepareTimeoutMs: 120000,
+      test: ['bash', '-lc', 'GRADLE_USER_HOME=/workspace/.swarm-gradle bash ./gradlew --no-daemon --offline test'],
+      testTimeoutMs: 60000
+    });
+  }
+  return profiles;
+}
+
+function isDependencyInfrastructureFailure(result) {
+  const output = String(result?.stdout || '') + '\\n' + String(result?.stderr || '') + '\\n' + String(result?.message || '');
+  return Boolean(result?.infraError) || /EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|E403|E404|proxy error|access denied|network is unreachable|could not resolve|no space left on device|disk quota exceeded|failed to download|unable to download/i.test(output);
+}
 
 export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   const entries = files instanceof Map
     ? [...files.entries()].map(([filePath, file]) => ({ path: filePath, content: String(file?.content || '') }))
     : Array.isArray(files) ? files : [];
   if (!entries.length) return { available: false, checked: false, ok: true, skipped: true, message: 'No hay archivos extraídos para ejecutar en el runner.' };
+  const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
+  const taskKey = String(taskId || workspaceId);
   const result = await runAgentCommand({
-    taskId,
-    workspaceId: /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : undefined,
-    resetWorkspace: true,
-    files: entries,
-    command: ['bash', '-lc', CHECK_SCRIPT],
-    network: 'none',
-    timeoutMs: 60000,
-    idempotencyKey: String(taskId || randomUUID()) + ':validation:' + String(round || 1)
+    taskId, workspaceId, resetWorkspace: true, files: entries,
+    command: ['bash', '-lc', CHECK_SCRIPT], network: 'none', timeoutMs: 60000,
+    idempotencyKey: taskKey + ':validation:' + String(round || 1)
   });
   if (!result.checked) return result;
-  const match = (String(result.stdout || '') + '\n' + String(result.stderr || '')).match(/SWARM_RUNNER_CHECKED=(\d+)/);
+  if (!result.ok) {
+    const details = [result.message, result.stdout, result.stderr].filter(Boolean).join('\\n').slice(0, 3500);
+    return { ...result, checked: true, ok: false, message: details };
+  }
+  const match = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_CHECKED=(\\d+)/);
   const checked = Number(match?.[1] || 0);
-  if (!checked && result.ok) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos compatibles con las comprobaciones de toolchain.' };
-  const details = [result.message, result.stdout, result.stderr].filter(Boolean).join('\n').slice(0, 3500);
-  return { ...result, checked: checked > 0, ok: result.ok, filesChecked: checked, message: details };
+  const profiles = detectRuntimeProfiles(entries);
+  if (!checked && !profiles.length) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos o perfiles de prueba compatibles.' };
+  const runtimeChecks = [];
+  for (const profile of profiles) {
+    if (profile.prepare) {
+      const prep = await runAgentCommand({
+        taskId, workspaceId, resetWorkspace: false, files: [],
+        command: profile.prepare, network: 'restricted', timeoutMs: profile.prepareTimeoutMs,
+        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profile.name
+      });
+      runtimeChecks.push({ profile: profile.name, phase: 'dependency-preparation', ok: prep.ok, exitCode: prep.exitCode, durationMs: prep.durationMs });
+      if (!prep.ok) {
+        const infraError = isDependencyInfrastructureFailure(prep);
+        return {
+          ...prep, checked: true, ok: false, infraError,
+          filesChecked: checked, runtimeChecks,
+          message: [result.message, profile.name + ' · preparación de dependencias: ' + prep.message, prep.stdout, prep.stderr].filter(Boolean).join('\\n').slice(0, 5000)
+        };
+      }
+    }
+    const tested = await runAgentCommand({
+      taskId, workspaceId, resetWorkspace: false, files: [],
+      command: profile.test, network: 'none', timeoutMs: profile.testTimeoutMs,
+      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profile.name
+    });
+    runtimeChecks.push({ profile: profile.name, phase: 'tests', ok: tested.ok, exitCode: tested.exitCode, durationMs: tested.durationMs });
+    if (!tested.ok) {
+      const output = String(tested.stdout || '') + '\\n' + String(tested.stderr || '');
+      const missingDependency = /ERR_MODULE_NOT_FOUND|Cannot find module|ModuleNotFoundError|No module named|could not find or load main class/i.test(output);
+      return {
+        ...tested, checked: true, ok: false,
+        infraError: Boolean(tested.infraError || missingDependency || /no space left on device|disk quota exceeded/i.test(output)),
+        filesChecked: checked, runtimeChecks,
+        message: [result.message, profile.name + ' · pruebas: ' + tested.message, tested.stdout, tested.stderr].filter(Boolean).join('\\n').slice(0, 5000)
+      };
+    }
+  }
+  const runtimeSummary = runtimeChecks.map(item => item.profile + ' (' + item.phase + '): ' + (item.ok ? 'OK' : 'FAIL')).join('; ');
+  const details = [result.message, result.stdout, result.stderr, runtimeSummary ? 'Pruebas de proyecto: ' + runtimeSummary : ''].filter(Boolean).join('\\n').slice(0, 5000);
+  return { ...result, checked: checked > 0 || runtimeChecks.length > 0, ok: true, filesChecked: checked, runtimeChecks, message: details };
 }
