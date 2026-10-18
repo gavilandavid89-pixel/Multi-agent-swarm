@@ -8,9 +8,9 @@ El catálogo de capacidades instalado está versionado en `apps/runner/capabilit
 
 1. El Worker valida que la tarea y el agente tengan permiso para usar herramientas.
 2. El dispatcher convierte una llamada tipada del agente en una operación conocida del cliente del runner. El agente nunca recibe AGENT_RUNNER_SHARED_SECRET ni RUNNER_SHARED_SECRET.
-3. El Worker asigna el workspaceId a la tarea actual, crea una clave de idempotencia estable y persiste un checkpoint antes de operaciones largas.
+3. El Worker asigna un workspaceId aislado y una clave de idempotencia determinista. El contenido del workspace se persiste en el payload cifrado de la tarea; la persistencia/reattachment de un checkpoint por cada tool-call en vuelo aún debe validarse tras reinicios del Worker.
 4. La Runner API autentica al Worker, valida límites y archivos, y encola un job. El host de ejecución inicia un contenedor efímero con límites de recursos y filesystem controlado.
-5. El Worker consulta el estado del job. Ante reinicios, reanuda el polling con el ID guardado en el checkpoint en lugar de duplicar la ejecución.
+5. El Worker consulta el estado del job hasta completar la llamada y devuelve el ID cuando corresponde. La Runner API persiste los jobs y protege las solicitudes idempotentes; la reanudación del tool-call de modelo desde un checkpoint tras reiniciar el Worker sigue siendo un criterio de aceptación pendiente y no debe darse por garantizada.
 6. La API devuelve salida acotada y una instantánea de archivos validada. El Worker filtra datos sensibles, persiste los resultados y los entrega al agente que pidió la herramienta.
 7. El agente interpreta los resultados y decide si corrige, vuelve a probar o pide revisión a otro rol. Una prueba fallida es evidencia, no se debe etiquetar como éxito ni borrar el error original.
 
@@ -22,15 +22,15 @@ El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos p
 
 | Herramienta | Entrada principal | Permiso y efecto |
 |---|---|---|
-| workspace.list | path opcional | Lista archivos solo dentro del workspace de la tarea; no lee rutas del host |
+| workspace.list | sin argumentos | Lista rutas y tamaños dentro del workspace; no lee rutas del host |
 | workspace.read | path | Lee un archivo de proyecto; límites de tamaño y redacción de secretos |
 | workspace.write | path, content | Escribe en el workspace, rechaza rutas absolutas, traversal y archivos de credenciales |
-| runner.check | profile | Ejecuta perfiles conocidos de sintaxis/tests/browser/Godot; preferido para validación repetible |
-| runner.execute | argv, timeoutMs | Capacidad avanzada; argumentos validados, cwd fijo, sin shell del host, red none por defecto |
-| runner.prepareDependencies | profile | Operación privilegiada solo para preparar dependencias bloqueadas; red restricted, allowlist aprobada y sin secretos |
-| runner.jobStatus | jobId | Consulta estado y salida acotada de un job creado por esa tarea |
-| runner.cancel | jobId | Cancela solo trabajos propiedad de esa tarea |
-| runner.artifacts.list | jobId | Lista los artefactos del snapshot de un trabajo propio |
+| runner.check | sin argumentos | Ejecuta las comprobaciones de proyecto configuradas por el Worker; permitido a Desarrollador y Validador |
+| runner.execute | command (argv), network, timeoutMs | Solo Desarrollador; binarios allowlisted, sin shell y con red none por defecto |
+| runner.prepareDependencies | manifest | Solo Desarrollador; manifiestos allowlisted y red restricted mediante proxy con allowlist, sin secretos |
+| runner.jobStatus | jobId | Desarrollador y Validador; solo IDs devueltos por una herramienta en esa misma sesión de dispatcher |
+| runner.cancel | jobId | Solo Desarrollador; solo IDs devueltos por una herramienta en esa misma sesión |
+| runner.artifact.read | jobId, artifactId | Desarrollador y Validador; recupera un artefacto por ID para un job de su sesión |
 | runner.artifacts.read | jobId, path | Recupera un artefacto con límites y filtro de datos sensibles |
 
 **No exponer** herramientas como docker.run, host.exec, network.open, read.hostFile, setEnvironment o editAllowlist. No permitir que el modelo elija una URL de proxy, nombre de red Docker, imagen arbitraria, mount, UID, variables de entorno del host o parámetros de privilegio.
@@ -45,10 +45,10 @@ El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, c
 
 ## Políticas por fase y rol
 
-- **Arquitecto / Coordinador:** puede inspeccionar estructura y pedir perfiles de validación; no tiene permisos para ampliar red ni cambiar configuración del host.
+- **Arquitecto / Coordinador:** solo puede inspeccionar el workspace; no tiene herramientas de ejecución o comprobación ni puede cambiar configuración del host.
 - **Desarrollador:** puede editar archivos del workspace y solicitar ejecuciones; no puede leer secretos del servicio ni editar la allowlist.
 - **Validador:** recibe el snapshot de revisión y puede lanzar comprobaciones independientes; su dispatcher solo puede consultar trabajos/artefactos cuyos IDs devuelve esa misma sesión. **Escéptico y Auditor** tienen lectura del workspace, sin ejecución ni comprobaciones directas.
-- **Árbitro:** consume resultados, fallos y checkpoints; no puede convertir una prueba no ejecutada en aprobada.
+- **Árbitro:** no recibe actualmente un dispatcher de herramientas en el ciclo de tool-calling; consume resultados a través de la orquestación del consejo y no puede convertir una prueba no ejecutada en aprobada.
 - **Operador administrador:** cualquier cambio de allowlist, imagen, límites de seguridad o host de ejecución queda fuera del control de los agentes y requiere revisión explícita del operador.
 
 La identidad de rol no es un límite de seguridad suficiente por sí sola: el Worker valida las herramientas permitidas y el dispatcher limita las operaciones por rol. Los workspaces aislados y el merge sin conflictos están implementados. La API remota sigue siendo optativa y no debe habilitarse en producción hasta validar un host privado dedicado, firewall, autenticación y pruebas completas.
@@ -66,7 +66,7 @@ La identidad de rol no es un límite de seguridad suficiente por sí sola: el Wo
 
 ## Recuperación, concurrencia y UX
 
-- La API usa polling autenticado; el Worker debe persistir jobId y checkpoint antes de esperar. El cold start del host puede tardar, así que readiness y polling tienen ventanas mayores que el primer intento HTTP.
+- La API usa polling autenticado; el cold start del host puede tardar, así que readiness y polling tienen ventanas mayores que el primer intento HTTP. La recuperación del vínculo entre un tool-call en vuelo, su jobId y el checkpoint de tarea tras un reinicio del Worker sigue pendiente de una prueba específica.
 - **Aislamiento lógico por agente:** `deriveAgentWorkspaceId(taskId, agentId, purpose)` genera un UUID determinista distinto por tarea, agente y propósito. Dos agentes de la misma tarea no deben compartir su workspace de trabajo. Reintentar el mismo propósito conserva su identidad; una nueva ronda o el workspace de integración usa otro propósito.
 - **Integración separada:** las propuestas de cada agente se comparan contra una base inmutable. `mergeAgentWorkspaceChanges` combina cambios en rutas diferentes, coalesce ediciones idénticas y rechaza el merge entero si dos agentes cambian el mismo archivo de formas incompatibles. No se devuelve una integración parcial en caso de conflicto; el coordinador debe pedir resolución explícita.
 - Un workspace no admite jobs concurrentes. La concurrencia global del host permanece en 1 mientras los trabajos restricted compartan el proxy. Los espacios lógicos ya quedan separados, pero el runner sigue ejecutando un job a la vez; para aumentar paralelismo, cada job necesita su propia red y política de egress aplicada fuera del contenedor, o un host/pool separado.
@@ -80,6 +80,6 @@ La identidad de rol no es un límite de seguridad suficiente por sí sola: el Wo
 - El runner puede crear/modificar/borrar archivos y devolver artefactos correctos, además de reutilizar un workspace secuencialmente.
 - El contenedor no puede escribir en su raíz ni acceder a la red normal; el modo restricted solo alcanza hosts allowlisted mediante el proxy.
 - Timeout y cancelación terminan procesos y no dejan contenedores o procesos secundarios activos.
-- Un reinicio del Worker no duplica jobs ni pierde el vínculo entre checkpoint, job y artefactos.
+- Un reinicio del Worker no duplica jobs ni pierde el vínculo entre checkpoint, job y artefactos (prueba de aceptación pendiente para tool-calls directos).
 - La ejecución de pruebas corre con red desactivada incluso si la preparación de dependencias usó egress restringido.
 - No habilitar la integración de producción hasta que el CI de esta rama pase y un host aislado dedicado supere la prueba completa. El Render Free del Worker no se considera un host Docker disponible.
