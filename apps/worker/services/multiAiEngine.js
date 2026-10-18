@@ -366,7 +366,10 @@ async function runJob(jobId) {
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       await assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const correctedDelivery = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial);
+      const toolContext = await createDeveloperToolContext(jobId, round + 1, repairContext);
+      const correctedOutput = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
+      const workspaceDelivery = workspaceFilesAsDelivery(await toolContext.workspace.list());
+      const correctedDelivery = workspaceDelivery ? mergeDelivery(correctedOutput, workspaceDelivery) : correctedOutput;
       const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
