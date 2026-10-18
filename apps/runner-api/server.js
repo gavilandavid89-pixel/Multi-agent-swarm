@@ -312,14 +312,19 @@ async function runJob(job) {
     }
     job.timedOut = timedOut;
     job.cancelled = cancelled;
-    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : job.error ? 'failed' : job.exitCode === 0 ? 'succeeded' : 'failed';
-    running.delete(job.id);
-    job.durationMs = Date.now() - started;
-    job.finishedAt = new Date().toISOString();
+    job.finalizing = true;
     try {
       job.artifactSnapshot = await collectFiles(job.workspace);
       job.artifactCount = job.artifactSnapshot.length;
-    } catch { job.artifactSnapshot = []; job.artifactCount = 0; }
+    } catch {
+      job.artifactSnapshot = []; job.artifactCount = 0;
+      job.error = job.error || 'No se pudieron recopilar los artefactos del workspace.';
+    }
+    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : job.error ? 'failed' : job.exitCode === 0 ? 'succeeded' : 'failed';
+    delete job.finalizing;
+    running.delete(job.id);
+    job.durationMs = Date.now() - started;
+    job.finishedAt = new Date().toISOString();
     await save(job).catch(() => {});
     active--;
     if (workspaceBusy.get(job.workspaceId) === job.id) workspaceBusy.delete(job.workspaceId);
