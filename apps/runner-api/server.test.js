@@ -30,6 +30,9 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("const exportScript ="));
   assert.ok(source.includes("Buffer.from([0])"));
   assert.ok(source.includes("Buffer.concat(paths.flatMap(p=>[Buffer.from(p),nul]))"));
+  assert.ok(source.includes("function safe(p)"));
+  assert.ok(source.includes("p.split('/').some(x=>!x||x==='.'||x==='..')"));
+  assert.ok(source.includes("if(paths.length>50000)"));
   assert.ok(source.includes("chmod 0777 {} +"));
   assert.ok(source.includes("chmod a+rw {} +"));
   assert.ok(source.includes("test -w /workspace && test -z"));
