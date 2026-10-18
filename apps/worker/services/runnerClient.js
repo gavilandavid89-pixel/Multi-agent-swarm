@@ -185,7 +185,7 @@ function detectRuntimeProfiles(entries) {
   if (paths.has('project.godot')) {
     profiles.push({
       name: 'Godot headless import and startup',
-      test: ['bash', '-lc', 'bash /opt/swarm-runner/godot-smoke.sh'],
+      test: ['bash', '/opt/swarm-runner/godot-smoke.sh'],
       testTimeoutMs: 60000
     });
   }
