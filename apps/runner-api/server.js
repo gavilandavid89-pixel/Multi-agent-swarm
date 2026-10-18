@@ -185,9 +185,9 @@ async function ensureRestrictedNetwork() {
   if (net.code !== 0 || net.stdout.trim() !== 'true') {
     throw Object.assign(new Error('La red swarm-agent-egress no existe o no es internal=true.'), { status: 503 });
   }
-  const proxy = await dockerCommand(['inspect', '--format', '{{.State.Health.Status}}', 'swarm-egress-proxy']);
-  if (proxy.code !== 0 || proxy.stdout.trim() !== 'healthy') {
-    throw Object.assign(new Error('El proxy swarm-egress-proxy no está healthy.'), { status: 503 });
+  const proxy = await dockerCommand(['inspect', '--format', '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}', 'swarm-egress-proxy'], 5000);
+  if (proxy.code !== 0 || String(proxy.stdout).trim() !== 'true|healthy') {
+    throw Object.assign(new Error('El proxy swarm-egress-proxy no está healthy; se rechaza la preparación de dependencias.'), { status: 503 });
   }
 }
 async function readContainerId(job) {
