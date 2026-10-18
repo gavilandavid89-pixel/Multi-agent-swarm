@@ -88,6 +88,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(checks.filesChecked, 2);
   assert.equal(checks.runtimeChecks.length, 2);
   assert.equal(seen[1].body.command[0], 'bash');
+  assert.match(seen[1].key, /:validation:1:[a-f0-9]{16}$/i, 'validation idempotency keys should include a source-content fingerprint');
   assert.equal(seen[1].body.network, 'none');
   assert.equal(seen[2].body.command[0], 'npm');
   assert.equal(seen[2].body.command[1], 'ci');
