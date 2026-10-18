@@ -99,7 +99,7 @@ PORT=3200 node apps/runner-api/server.js > "${workspace}-runner-api.log" 2>&1 &
 api_pid=$!
 ready=0
 i=0
-while [ "$i" -lt 75 ]; do
+while [ "$i" -lt 100 ]; do
   if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
   if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "${workspace}-runner-api.log" >&2; exit 1; fi
   sleep 1
