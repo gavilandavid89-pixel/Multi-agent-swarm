@@ -63,7 +63,7 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `SWARM_DATABASE_URL`: la misma base de cuentas que usa el bridge.
 - `SWARM_API_ENCRYPTION_KEY`: la misma clave de cifrado de APIs que usa el bridge.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
-- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 1; admite valores entre 1 y 8).
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 1.000.000; ajustable entre 4.000 y 1.000.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
