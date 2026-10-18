@@ -186,16 +186,34 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     const converted = [];
     for (const item of Array.isArray(messages) ? messages : []) {
       if (item?.role === 'system') continue;
-      const role = item?.role === 'assistant' ? 'assistant' : 'user';
-      const rawContent = String(item?.content ?? '');
-      if (!rawContent) continue;
-      const content = ['user', 'assistant'].includes(item?.role) ? rawContent : `Resultado de herramienta (${String(item?.name || item?.role || 'tool')}): ${rawContent}`;
+      let role = item?.role === 'assistant' ? 'assistant' : 'user';
+      let content;
+      if (role === 'assistant' && Array.isArray(item?.tool_calls)) {
+        content = item.tool_calls.map(call => {
+          let input = {};
+          try { input = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
+          return { type: 'tool_use', id: String(call.id || ''), name: String(call?.function?.name || ''), input };
+        });
+        if (typeof item.content === 'string' && item.content) content.unshift({ type: 'text', text: item.content });
+      } else if (item?.role === 'tool') {
+        content = [{ type: 'tool_result', tool_use_id: String(item.tool_call_id || ''), content: String(item.content || '') }];
+      } else {
+        const rawContent = String(item?.content ?? '');
+        if (!rawContent) continue;
+        content = rawContent;
+      }
       const previous = converted[converted.length - 1];
-      if (previous?.role === role) previous.content += `\n\n${content}`;
+      if (previous?.role === role && typeof previous.content === 'string' && typeof content === 'string') previous.content += '\n\n' + content;
+      else if (previous?.role === role && Array.isArray(previous.content) && Array.isArray(content)) previous.content.push(...content);
       else converted.push({ role, content });
     }
     if (!converted.length) throw new Error('Anthropic recibió una conversación vacía.');
-    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}) };
+    const nativeTools = Array.isArray(tools) ? tools.map(item => ({
+      name: String(item?.function?.name || ''),
+      description: String(item?.function?.description || ''),
+      input_schema: item?.function?.parameters || { type: 'object', properties: {}, additionalProperties: false }
+    })).filter(item => item.name) : [];
+    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}), ...(nativeTools.length ? { tools: nativeTools, tool_choice: { type: 'auto' } } : {}) };
     return { url: endpoint, options: { method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) } };
   }
   return {
