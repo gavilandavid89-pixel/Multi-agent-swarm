@@ -21,7 +21,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.equal(source.includes('--privileged'), false);
   assert.equal(source.includes('/var/run/docker.sock'), false);
   assert.equal(source.includes('dst=/workspace,rw'), false);
-  assert.ok(source.includes('cp -R -P /input/. /workspace/ && chmod -R a+rwX,u-s,g-s,o-t /workspace && touch /tmp/swarm-runner-ready && exec tail -f /dev/null'));
+  assert.ok(source.includes('cp -R -P /input/. /workspace/ && find /workspace -mindepth 1 -exec chmod a+rwX,u-s,g-s,o-t {} + && touch /tmp/swarm-runner-ready && exec tail -f /dev/null'));
   assert.ok(source.includes("'exec', '--user', '10001:10001', cid, 'timeout'"));
   assert.ok(source.includes("'--user', '65532:65532'"));
   assert.ok(source.includes("mode: 0o755"));
