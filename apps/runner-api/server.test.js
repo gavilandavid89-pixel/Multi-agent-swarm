@@ -6,7 +6,7 @@ const source = await readFile(new URL('./server.js', import.meta.url), 'utf8');
 
 test('runner API is authenticated, bounded, and uses a fixed hardened Docker invocation', () => {
   for (const required of [
-    'RUNNER_SHARED_SECRET', 'RUNNER_BIND_HOST', 'RUNNER_CONCURRENCY', 'docker info', 'image', 'inspect', 'Construí apps/runner/Dockerfile antes de iniciar la API.', 'MAX_CONCURRENCY = 1', 'red aislada por trabajo', "'127.0.0.1'", 'initialized', 'starting; retry shortly', 'timingSafeEqual', 'MAX_BODY_BYTES',
+    'RUNNER_SHARED_SECRET', 'RUNNER_BIND_HOST', 'RUNNER_CONCURRENCY', 'ServerVersion', "'info'", 'image', 'inspect', 'Construí apps/runner/Dockerfile antes de iniciar la API.', 'MAX_CONCURRENCY = 1', 'red aislada por trabajo', "'127.0.0.1'", 'initialized', 'starting; retry shortly', 'timingSafeEqual', 'MAX_BODY_BYTES',
     'MAX_TOTAL_FILE_BYTES', 'MAX_FILES', '--network', '--read-only',
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
     '--pids-limit', '--memory', '--cpus', '--tmpfs',
