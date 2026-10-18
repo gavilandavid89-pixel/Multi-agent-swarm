@@ -168,6 +168,7 @@ La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI
 
 - Diseño, capacidades, límites, integración y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
 - Contrato de herramientas futuras para agentes, permisos por rol, recuperación, artefactos y criterios de aceptación: [docs/AGENT_TOOL_PROTOCOL.md](docs/AGENT_TOOL_PROTOCOL.md).
+- La vista en vivo con escritorio remoto está documentada como una fase segura posterior; Xvfb/Chromium ya sirven para pruebas automatizadas, pero no se expone un VNC público.
 - API autenticada de ejecución: [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 
