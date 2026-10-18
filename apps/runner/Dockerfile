@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils findutils git make gcc g++ pkg-config \
       python3 python3-dev python3-pip python3-venv python3-pytest \
-      default-jdk-headless maven golang-go php-cli ruby-full rustc cargo \
+      default-jdk-headless maven golang-go php-cli composer ruby-full ruby-bundler rustc cargo \
       chromium chromium-sandbox xvfb xauth x11-utils fonts-liberation libnss3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 runner \
