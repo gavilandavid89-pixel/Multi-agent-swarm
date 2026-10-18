@@ -176,6 +176,7 @@ if [ -f Cargo.toml ] && [ -f Cargo.lock ] && [ -d vendor ]; then
   checked=$((checked + 1)); runtime_checked=$((runtime_checked + 1)); CARGO_NET_OFFLINE=true cargo test --offline || { echo "FAIL cargo test --offline"; failed=1; }
 fi
 printf 'SWARM_RUNNER_CHECKED=%s\n' "$checked"
+printf 'SWARM_RUNNER_TESTS=%s\n' "$runtime_checked"
 exit "$failed"
 `;
 
@@ -321,7 +322,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   const checked = Number(match?.[1] || 0);
   const profiles = detectRuntimeProfiles(entries);
   if (!checked && !profiles.length) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos o perfiles de prueba compatibles.' };
-  const bundledTestMatch = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_TESTS=(\\d+)/);
+  const bundledTestMatch = (String(result.stdout || '') + '\\n' + String(result.stderr || '')).match(/SWARM_RUNNER_TESTS=(\d+)/);
   const bundledTestCount = Number(bundledTestMatch?.[1] || 0);
   const runtimeChecks = bundledTestCount > 0
     ? [{ profile: 'tests vendorizados', phase: 'tests', ok: true, exitCode: 0 }]
