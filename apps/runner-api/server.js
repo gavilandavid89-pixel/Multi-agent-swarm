@@ -13,6 +13,8 @@ const ROOT = path.resolve(process.env.RUNNER_STATE_DIR || '/var/lib/swarm-runner
 const WORKSPACES = path.join(ROOT, 'workspaces');
 const STATE = path.join(ROOT, 'jobs');
 const MAX_CONCURRENCY = Math.max(1, Math.min(2, Number.parseInt(process.env.RUNNER_CONCURRENCY || '1', 10) || 1));
+const MAX_PENDING_JOBS = 25;
+const MAX_RETAINED_JOBS = 20;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
 const MAX_TOTAL_FILE_BYTES = 2 * 1024 * 1024;
@@ -114,11 +116,12 @@ function dockerArgs(job) {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
   const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
   const args = [
-    'run', '--rm', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
+    'run', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
     '--pids-limit', '128', '--memory', '1g', '--cpus', '2',
-    '--tmpfs', '/tmp:rw,nosuid,nodev,size=512m',
-    '--mount', 'type=bind,src=' + job.workspace + ',dst=/workspace',
+    '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+    '--tmpfs', '/workspace:rw,nosuid,nodev,size=256m,mode=1777',
+    '--mount', 'type=bind,src=' + job.workspace + ',dst=/input,readonly',
     '--workdir', '/workspace', '--user', uid + ':' + gid,
     '--env', 'HOME=/tmp', '--env', 'CI=true', '--env', 'LANG=C.UTF-8',
     '--env', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
@@ -131,7 +134,9 @@ function dockerArgs(job) {
       '--env', 'ALL_PROXY=http://172.30.0.2:3128',
       '--env', 'NO_PROXY=localhost,127.0.0.1,::1');
   } else args.push('--network', 'none');
-  args.push(IMAGE, ...job.command);
+  // Input is read-only; project execution happens on a size-limited tmpfs.
+  // A fixed wrapper copies input into tmpfs and then execs the supplied argv without a host shell.
+  args.push(IMAGE, 'bash', '-c', 'cp -a /input/. /workspace/ && exec "$@"', 'swarm-runner', ...job.command);
   return args;
 }
 function appendOutput(job, key, chunk) {
@@ -161,13 +166,25 @@ async function ensureRestrictedNetwork() {
     throw Object.assign(new Error('El proxy swarm-egress-proxy no está healthy.'), { status: 503 });
   }
 }
+async function readContainerId(job) {
+  try {
+    const cid = (await fsp.readFile(path.join(STATE, job.id + '.cid'), 'utf8')).trim();
+    return /^[0-9a-f]{12,64}$/i.test(cid) ? cid : '';
+  } catch { return ''; }
+}
 async function killJobContainer(job) {
-  let cid = '';
-  try { cid = (await fsp.readFile(path.join(STATE, job.id + '.cid'), 'utf8')).trim(); } catch {}
-  if (cid && /^[0-9a-f]{12,64}$/i.test(cid)) {
-    await dockerCommand(['kill', cid], 5000);
-    await dockerCommand(['rm', '-f', cid], 5000);
-  }
+  const cid = await readContainerId(job);
+  if (cid) await dockerCommand(['kill', cid], 5000);
+}
+async function removeJobContainer(job) {
+  const cid = await readContainerId(job);
+  if (cid) await dockerCommand(['rm', '-f', cid], 5000);
+}
+async function copyWorkspaceFromContainer(job) {
+  const cid = await readContainerId(job);
+  if (!cid) return;
+  const copied = await dockerCommand(['cp', cid + ':/workspace/.', job.workspace + path.sep], 15000);
+  if (copied.code !== 0) throw new Error('No se pudieron recuperar los archivos de salida del contenedor: ' + copied.stderr.slice(0, 600));
 }
 async function collectFiles(workspace) {
   const files = []; let total = 0;
@@ -197,32 +214,47 @@ async function collectFiles(workspace) {
 async function runJob(job) {
   active++;
   job.status = 'running'; job.startedAt = new Date().toISOString(); await save(job);
-  const started = Date.now(); let timedOut = false; let cancelled = false; let settled = false; let timer;
+  const started = Date.now(); let timedOut = false; let cancelled = false; let timer; let currentChild = null;
+  const cancel = () => {
+    cancelled = true;
+    void killJobContainer(job);
+    try { currentChild?.kill('SIGTERM'); } catch {}
+  };
+  running.set(job.id, { cancel });
+  timer = setTimeout(() => {
+    timedOut = true;
+    void (async () => { await new Promise(resolve => setTimeout(resolve, 300)); await killJobContainer(job); })();
+    try { currentChild?.kill('SIGTERM'); } catch {}
+    setTimeout(() => { try { currentChild?.kill('SIGKILL'); } catch {} }, 3000).unref();
+  }, job.timeoutMs);
   try {
     if (job.network === 'restricted') await ensureRestrictedNetwork();
     await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
-    const child = spawn(DOCKER, dockerArgs(job), { stdio: ['ignore', 'pipe', 'pipe'] });
-    running.set(job.id, { child, cancel: () => { cancelled = true; void killJobContainer(job); child.kill('SIGTERM'); } });
-    child.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
-    child.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
     const result = await new Promise(resolve => {
-      const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
-      timer = setTimeout(() => {
-        timedOut = true;
-        void (async () => { await new Promise(resolve => setTimeout(resolve, 300)); await killJobContainer(job); })();
-        child.kill('SIGTERM');
-        setTimeout(() => child.kill('SIGKILL'), 3000).unref();
-      }, job.timeoutMs);
-      child.on('error', error => finish({ code: null, error: error.message }));
-      child.on('close', code => finish({ code, error: null }));
+      let settled = false;
+      const finish = value => { if (settled) return; settled = true; resolve(value); };
+      currentChild = spawn(DOCKER, dockerArgs(job), { stdio: ['ignore', 'pipe', 'pipe'] });
+      currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
+      currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
+      currentChild.on('error', error => finish({ code: null, error: error.message }));
+      currentChild.on('close', code => finish({ code, error: null }));
     });
     job.exitCode = result.code;
     job.timedOut = timedOut;
     job.cancelled = cancelled;
     job.error = result.error || null;
-    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : result.code === 0 ? 'succeeded' : 'failed';
+    // docker run intentionally does not use --rm: bounded tmpfs output must be copied
+    // back before the stopped container is removed.
+    if (await readContainerId(job)) {
+      try { await copyWorkspaceFromContainer(job); }
+      catch (error) { job.error = String(error?.message || error).slice(0, 1200); }
+      await removeJobContainer(job);
+    }
+    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : result.code === 0 && !job.error ? 'succeeded' : 'failed';
   } catch (error) {
-    job.status = 'failed'; job.error = String(error?.message || error).slice(0, 1200);
+    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : 'failed';
+    job.error = String(error?.message || error).slice(0, 1200);
+    await removeJobContainer(job);
   } finally {
     clearTimeout(timer);
     running.delete(job.id);
@@ -233,6 +265,24 @@ async function runJob(job) {
     active--;
     pump();
   }
+}
+async function pruneOldJobs() {
+  const now = Date.now();
+  for (const job of jobs.values()) {
+    if (running.has(job.id) || job.status === 'queued') continue;
+    if (now - Date.parse(job.updatedAt) > JOB_TTL_MS) await deleteJob(job);
+  }
+  const completed = [...jobs.values()]
+    .filter(job => !running.has(job.id) && job.status !== 'queued' && job.status !== 'running')
+    .sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt));
+  while (completed.length > MAX_RETAINED_JOBS) await deleteJob(completed.shift());
+}
+async function deleteJob(job) {
+  jobs.delete(job.id);
+  if (job.idempotencyKey && idempotency.get(job.idempotencyKey) === job.id) idempotency.delete(job.idempotencyKey);
+  await fsp.rm(path.join(STATE, job.id + '.json'), { force: true });
+  await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
+  await fsp.rm(job.workspace, { recursive: true, force: true });
 }
 async function pump() {
   if (closing) return;
@@ -260,6 +310,8 @@ async function handle(req, res) {
     if (key && !/^[A-Za-z0-9._:-]{8,128}$/.test(key)) return json(res, 400, { error: 'Clave de idempotencia inválida.' });
     if (key && idempotency.has(key)) return json(res, 200, publicJob(jobs.get(idempotency.get(key))));
     if (closing) return json(res, 503, { error: 'El runner se está apagando.' });
+    if (queue.length + active >= MAX_PENDING_JOBS) return json(res, 429, { error: 'La cola del runner está llena; reintentá con la misma clave de idempotencia.' });
+    await pruneOldJobs();
     const id = randomUUID(); const now = new Date().toISOString();
     const job = { id, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, id), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null };
     await writeWorkspace(job, body.files);
@@ -300,7 +352,9 @@ async function initialize() {
       if (job.status === 'queued') queue.push(job.id);
     } catch {}
   }
+  await pruneOldJobs();
   await pump();
+  setInterval(() => { void pruneOldJobs().catch(() => {}); }, 10 * 60 * 1000).unref();
 }
 const server = createServer((req, res) => {
   void handle(req, res).catch(error => {
