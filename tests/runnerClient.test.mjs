@@ -8,6 +8,7 @@ const moduleUrl = new URL('../apps/worker/services/runnerClient.js', import.meta
 
 test('Worker client authenticates, sends idempotency, polls asynchronously, and parses toolchain results', async t => {
   const seen = [];
+  const pollSecrets = [];
   const server = createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -19,9 +20,15 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
       return;
     }
     if (req.url === '/v1/jobs/11111111-1111-4111-8111-111111111111' && req.method === 'GET') {
-      seen.push({ method: req.method, secret: req.headers['x-swarm-runner-secret'] });
+      pollSecrets.push(req.headers['x-swarm-runner-secret']);
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ id: '11111111-1111-4111-8111-111111111111', status: 'succeeded', exitCode: 0, timedOut: false, stdout: 'SWARM_RUNNER_CHECKED=2\\nrunner-ok', stderr: '', durationMs: 15 }));
+      return;
+    }
+    if (req.url === '/v1/jobs/11111111-1111-4111-8111-111111111111/files' && req.method === 'GET') {
+      pollSecrets.push(req.headers['x-swarm-runner-secret']);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ files: [{ path: 'generated.txt', content: 'artifact-ok' }] }));
       return;
     }
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -39,13 +46,16 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
     files: [{ path: 'main.js', content: 'console.log(1)' }],
     command: ['node', 'main.js'],
     idempotencyKey: 'worker-client-test-key-0001',
-    timeoutMs: 5000
+    timeoutMs: 5000,
+    includeArtifacts: true
   });
   assert.equal(job.ok, true);
   assert.equal(job.checked, true);
   assert.equal(job.exitCode, 0);
   assert.equal(seen[0].secret, 'test-runner-secret-that-is-long-enough-32');
-  assert.equal(seen.find(item => item.method === 'GET')?.secret, 'test-runner-secret-that-is-long-enough-32');
+  assert.ok(pollSecrets.length > 0);
+  assert.ok(pollSecrets.every(secret => secret === 'test-runner-secret-that-is-long-enough-32'));
+  assert.deepEqual(job.artifacts, [{ path: 'generated.txt', content: 'artifact-ok' }]);
   assert.equal(seen[0].key, 'worker-client-test-key-0001');
   assert.equal(seen[0].body.network, 'none');
   assert.equal(seen[0].body.workspaceId, '22222222-2222-4222-8222-222222222222');
