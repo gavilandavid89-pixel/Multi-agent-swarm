@@ -156,7 +156,7 @@ let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
   }
 })'
 artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
-printf '%s' "$artifacts" | SWARM_JOB_JSON="$job_json" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")||!f.some(x=>x.path==="main.js"&&x.content==="main-modified")||f.some(x=>x.path==="deleted.txt")){console.error("FAIL missing generated artifact",JSON.stringify({files:f,job:JSON.parse(process.env.SWARM_JOB_JSON||"{}")}));process.exit(1)}if(f.some(x=>x.path==="credential-output.txt")){console.error("FAIL credential-like output was returned",JSON.stringify(f));process.exit(1)}})'
+printf '%s' "$artifacts" | SWARM_JOB_JSON="$job_json" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")||!f.some(x=>x.path==="main.js"&&x.content==="main-modified")||f.some(x=>x.path==="deleted.txt")){console.error("FAIL missing generated artifact",JSON.stringify({files:f,job:JSON.parse(process.env.SWARM_JOB_JSON||"{}")}));process.exit(1)}if(f.some(x=>x.path==="credential-output.txt"||x.path===".env.generated")){console.error("FAIL sensitive-path output was returned",JSON.stringify(f));process.exit(1)}})'
 repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
