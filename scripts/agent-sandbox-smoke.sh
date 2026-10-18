@@ -61,6 +61,23 @@ if [ "$status" -ne 0 ]; then
 fi
 echo "PASS restricted egress denies non-allowlisted hosts"
 
+set +e
+SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh "$workspace" python3 -c '
+import socket
+try:
+    socket.getaddrinfo("example.com", 443)
+except OSError:
+    raise SystemExit(0)
+raise SystemExit(42)
+'
+status=$?
+set -e
+if [ "$status" -ne 0 ]; then
+  echo "FAIL ordinary DNS resolution worked inside restricted mode" >&2
+  exit 1
+fi
+echo "PASS ordinary DNS resolution disabled inside restricted mode"
+
 # Host-side timeout must terminate a long-running process.
 set +e
 SWARM_RUNNER_TIMEOUT_SECONDS=2 sh scripts/run-agent-sandbox.sh "$workspace" node -e 'setTimeout(() => {}, 15000)'
