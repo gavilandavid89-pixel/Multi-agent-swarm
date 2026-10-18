@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "report_id": "<uuid>",
+  "occurred_at": "<ISO-8601-with-timezone>",
+  "severity": "error",
+  "environment": "production",
+  "component": "worker",
+  "service": "swarm-worker",
+  "release": {
+    "branch": "<branch>",
+    "commit": "<short-sha>",
+    "deploy_id": "<optional-render-deploy-id>"
+  },
+  "correlation": {
+    "task_id": "<non-secret-task-id-or-null>",
+    "checkpoint": "<checkpoint-or-null>",
+    "attempt": 1,
+    "request_id": "<request-id-or-null>"
+  },
+  "summary": "<one-sentence-summary>",
+  "expected": "<expected-behavior>",
+  "observed": "<actual-behavior>",
+  "error": {
+    "name": "<error-name>",
+    "code": "<provider-or-http-code-or-null>",
+    "message": "<redacted-original-message>",
+    "stack_excerpt": "<optional-short-redacted-stack>"
+  },
+  "reproduction": {
+    "steps": [
+      "<minimal-step-1>"
+    ],
+    "frequency": "<always|intermittent|once|unknown>"
+  },
+  "evidence": {
+    "log_excerpt": "<short-redacted-excerpt>",
+    "metrics": "<relevant-numbers-or-null>"
+  },
+  "hypotheses": [
+    {
+      "description": "<possible-cause>",
+      "confidence": "<low|medium|high>",
+      "evidence_for": [
+        "<fact>"
+      ],
+      "evidence_against": []
+    }
+  ],
+  "attempted_actions": [
+    "<safe-action-already-tried>"
+  ],
+  "impact": {
+    "scope": "<single-task|service|multiple-users|unknown>",
+    "data_loss_suspected": false,
+    "user_visible": true
+  },
+  "redaction": {
+    "secrets_removed": true,
+    "personal_data_removed": true,
+    "reviewed_by": "<emitter-or-reviewer>"
+  },
+  "triage": {
+    "status": "new",
+    "owner": null,
+    "notes": "<not-yet-investigated>",
+    "resolved_at": null
+  }
+}
