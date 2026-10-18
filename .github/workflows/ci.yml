@@ -43,7 +43,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb xauth
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node apps/worker/scripts/browser-smoke-test.mjs
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node scripts/ui-layout-smoke.mjs
-      - name: Validate isolated agent sandbox wrapper
-        run: sh -n scripts/run-agent-sandbox.sh
+      - name: Validate isolated agent sandbox scripts
+        run: sh -n scripts/run-agent-sandbox.sh scripts/agent-sandbox-smoke.sh
+      - name: Build and exercise isolated agent runner
+        run: sh scripts/agent-sandbox-smoke.sh
       - name: Build worker Docker image
         run: docker build -f apps/worker/Dockerfile apps/worker
