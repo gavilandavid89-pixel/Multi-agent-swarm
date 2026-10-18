@@ -183,3 +183,17 @@ La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI
 - **No desplegar la API de runner en el Render Free del Worker** suponiendo que habrá un daemon Docker disponible. La API necesita un host de ejecución dedicado con Docker (preferentemente rootless), red privada y firewall; el servicio no está desplegado. La integración en el Worker permanece desactivada por defecto.
 
 - Frontera de seguridad y arquitectura: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
+
+### Variables del host Runner API (no son variables de Render Worker)
+
+| Variable | Dónde se configura | Propósito y regla |
+|---|---|---|
+| `RUNNER_SHARED_SECRET` | Host dedicado de ejecución | Secreto aleatorio de 32+ caracteres; debe coincidir con `AGENT_RUNNER_SHARED_SECRET` del Worker y ser distinto de `WORKER_SHARED_SECRET`. Nunca se registra ni se entrega a agentes. |
+| `RUNNER_BIND_HOST` | Host dedicado | `127.0.0.1` por defecto. Cambiar solo a una interfaz privada después de configurar firewall/red privada; nunca publicar la API en Internet. |
+| `PORT` | Host dedicado | Puerto HTTP de la API, predeterminado `3200`; el firewall solo debe permitir al Worker. |
+| `RUNNER_STATE_DIR` | Host dedicado | Directorio persistente para jobs/workspaces, predeterminado `/var/lib/swarm-runner`; propietario del usuario de servicio y permisos restrictivos. |
+| `RUNNER_CONCURRENCY` | Host dedicado | Debe ser `1` por ahora; la API rechaza otros valores hasta que cada job tenga su propia frontera de red. |
+| `RUNNER_DOCKER_BIN` | Host dedicado | Ruta del cliente Docker si no está en `PATH`; preferir Docker rootless y nunca montar el socket en los contenedores de trabajos. |
+| `SWARM_RUNNER_IMAGE` | Host dedicado | Imagen de ejecución preconstruida; valor predeterminado `swarm-agent-runner:local`. No permitir que el agente elija imágenes. |
+
+**Integración por etapas:** la CI de la rama construye y prueba el runner, el proxy y la API real contra Docker. Eso no significa que haya un host dedicado provisionado. Para activarlo, primero construí la imagen y ejecutá `sh scripts/agent-sandbox-smoke.sh` en el host aislado; configurá el secreto y el firewall; probá el Worker con `AGENT_RUNNER_REQUIRED=false`; solo después de verificar resultados reales se debe considerar `true`. No se cambia Render ni se habilita la ejecución remota de producción como parte de esta rama.
