@@ -155,3 +155,19 @@ Una ejecución no disponible no puede convertirse en éxito. El agente corrector
 5. Provisionar el host privado de ejecución, generar un secreto independiente y configurar el firewall antes de habilitar `AGENT_RUNNER_BASE_URL`.
 6. Mantener `AGENT_RUNNER_REQUIRED=false` hasta pasar pruebas en el host real; luego probar el flujo de corrección completo con tareas de ejemplo.
 7. Integrar solo tras revisión del PR y pruebas; no desplegar automáticamente la API en Render Free.
+
+
+## Observación visual en tiempo real: frontera de seguridad
+
+La imagen actual incluye Chromium y Xvfb para pruebas automatizadas, pero **todavía no publica un escritorio remoto ni una sesión noVNC**. No se debe confundir la comprobación headless con una consola visual accesible desde el navegador.
+
+Para añadir la vista en vivo sin abrir una puerta al host, la arquitectura debe mantener estos límites:
+
+- El contenedor de ejecución sigue privado; el VNC/noVNC no publica puertos directamente en Internet ni se une a la red pública del Worker.
+- La entrada pasa por una ruta autenticada del Bridge/Worker, después de validar que el usuario tiene rol administrador y permiso sobre esa tarea concreta.
+- El backend emite un token de sesión de vida corta, ligado al ID de tarea y a una sola sesión; al terminar/cancelar el job, revoca el token y cierra el túnel.
+- La vista es de solo observación por defecto. Cualquier interacción de teclado/ratón debe ser una capacidad separada, explícita y auditada.
+- El servicio de visualización no comparte secretos del Worker ni acceso al socket Docker con el navegador; el agente no puede elegir el puerto, la dirección de escucha ni la identidad de la sesión.
+- La ruta visual solo se habilita cuando las pruebas de autorización confirman que un usuario normal, un enlace expirado y una sesión de otra tarea reciben rechazo. Hasta entonces, Xvfb permanece como capacidad interna de pruebas.
+
+Esta separación permite sumar una vista web en vivo después sin debilitar el aislamiento de la ejecución actual.
