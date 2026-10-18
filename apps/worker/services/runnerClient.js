@@ -35,10 +35,21 @@ function isPrivateRunnerHost(hostname) {
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')) return true;
   const version = isIP(host);
   if (version === 4) {
-    const [a, b] = host.split('.').map(Number);
-    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    const [a, b, c] = host.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2)))
+      || (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100)))
+      || (a === 203 && b === 0 && c === 113);
   }
-  if (version === 6) return host === '::1' || /^(?:fc|fd)/i.test(host) || /^fe[89ab]/i.test(host);
+  if (version === 6) {
+    return host === '::' || host === '::1'
+      || /^(?:fc|fd)/i.test(host) || /^fe[89ab]/i.test(host)
+      || /^2001:db8:/i.test(host)
+      || /^::ffff:(?:0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(host);
+  }
   return false;
 }
 async function request(path, options = {}, timeoutMs = 15000) {
