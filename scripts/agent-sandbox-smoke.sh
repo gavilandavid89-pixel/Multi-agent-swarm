@@ -211,6 +211,31 @@ printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s
 echo "PASS runner API idempotency and sequential task-scoped workspace reuse"
 echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
+# Exercise stdin-driven Python pdb through the authenticated runner API.
+debug_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[{path:"debug_target.py",content:"print(\\"debug target reached\\")\\n"}],
+  workspaceId:"55555555-5555-4555-8555-555555555555",resetWorkspace:true,
+  command:["python3","-m","pdb","debug_target.py"],stdin:"p 6 * 7\\nq\\n",
+  network:"none",timeoutMs:15000
+}))')
+debug_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-debugger-01' \
+  -d "$debug_body")
+debug_id=$(printf '%s' "$debug_created" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+debug_json=
+i=0
+while [ "$i" -lt 20 ]; do
+  debug_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$debug_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$debug_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$debug_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||j.exitCode!==0||!String(j.stdout||"").includes("42")){console.error("FAIL debugger stdin/output:",JSON.stringify(j));process.exit(1)}})'
+echo "PASS runner accepts bounded debugger stdin and returns debugger output"
+
 timeout_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
   command:["node","-e","setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
