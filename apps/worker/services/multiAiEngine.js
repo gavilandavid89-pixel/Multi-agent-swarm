@@ -208,9 +208,12 @@ async function runJob(jobId) {
         }
         syntax = await checkJavascriptSyntax(delivery);
         const runnerExecution = await runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) });
-        const executionStatus = runnerExecution.checked
+        const hasRuntimeTests = Array.isArray(runnerExecution.runtimeChecks)
+          && runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
+        const executionStatus = hasRuntimeTests
           ? (runnerExecution.ok ? 'APROBADO' : 'FALLO')
-          : runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE';
+          : runnerExecution.checked ? 'SOLO ESTÁTICO'
+            : runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE';
         syntax = {
           ...syntax,
           runnerExecution,
@@ -250,19 +253,21 @@ async function runJob(jobId) {
         return { blocked: true, reason: 'runner-infra-error' };
       }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
-        const validationLevel = syntax.runnerExecution?.checked
+        const runtimeTestsExecuted = Array.isArray(syntax.runnerExecution?.runtimeChecks)
+          && syntax.runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
+        const validationLevel = runtimeTestsExecuted
           ? 'ai_syntax_and_runtime'
           : syntax.checked ? 'ai_and_syntax' : 'ai_review_only';
-        const validationDescription = syntax.runnerExecution?.checked
+        const validationDescription = runtimeTestsExecuted
           ? 'revisión de IA, sintaxis y pruebas ejecutadas'
-          : syntax.checked ? 'revisión de IA y sintaxis; ejecución aislada no confirmada' : 'revisión de IA';
+          : syntax.checked ? 'revisión de IA y sintaxis; pruebas de proyecto no confirmadas' : 'revisión de IA';
         const result = { status: 'completed', validationLevel, executionStatus: syntax.executionStatus || 'NO EJECUTADO', summary: validation.summary, delivery, validation, syntax };
         const latestPayload = (await getPayload(jobId))?.payload || {};
         const transcript = appendEntries(latestPayload.transcript, [{
           at: new Date().toISOString(), agent: 'sistema', type: 'check',
           content: `El comité terminó la tarea y la validación final fue aprobada (${validationDescription}). El resultado está listo para revisar.`
         }]);
-        await updateJob(jobId, { status: 'completed', stage: syntax.runnerExecution?.checked ? 'Completado · IA + sintaxis + ejecución' : syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
+        await updateJob(jobId, { status: 'completed', stage: runtimeTestsExecuted ? 'Completado · IA + sintaxis + ejecución' : syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
       if (round >= MAX_ROUNDS) break;
