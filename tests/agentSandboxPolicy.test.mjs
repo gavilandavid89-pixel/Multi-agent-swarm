@@ -55,6 +55,7 @@ test('restricted egress proxy uses an internal runner network and default-deny a
   assert.ok(proxy.includes('http_access allow swarm_runner allowed_domains'));
   assert.ok(proxy.includes('http_access deny all'));
   assert.ok(proxy.includes('http_access deny private_dst'));
+  assert.equal(proxy.includes('http_access deny to_linklocal'), false);
   assert.ok(proxy.includes('fc00::/7'));
   assert.ok(allowlist.includes('registry.npmjs.org'));
   assert.equal(allowlist.includes('*'), false);
