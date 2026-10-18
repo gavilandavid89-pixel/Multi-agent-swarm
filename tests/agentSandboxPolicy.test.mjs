@@ -7,6 +7,8 @@ const image = await readFile(new URL('../apps/runner/Dockerfile', import.meta.ur
 const proxy = await readFile(new URL('../apps/runner/egress-proxy/squid.conf', import.meta.url), 'utf8');
 const allowlist = await readFile(new URL('../apps/runner/egress-proxy/allowed-domains.txt', import.meta.url), 'utf8');
 const compose = await readFile(new URL('../docker-compose.runner-egress.yml', import.meta.url), 'utf8');
+const runnerApi = await readFile(new URL('../apps/runner-api/server.js', import.meta.url), 'utf8');
+const workerClient = await readFile(new URL('../apps/worker/services/runnerClient.js', import.meta.url), 'utf8');
 
 test('agent sandbox disables network and uses a read-only container root', () => {
   for (const flag of [
@@ -72,4 +74,6 @@ test('runner image includes common language toolchains and browser tools', () =>
     assert.ok(image.includes(tool), `missing runner capability: ${tool}`);
   }
   assert.ok(image.includes('USER runner'));
+  assert.ok(runnerApi.includes("'.godot'"));
+  assert.ok(workerClient.includes("'.godot'"));
 });
