@@ -15,6 +15,8 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("'x-swarm-idempotency-key': key"));
   assert.ok(client.includes("network: 'none'"));
   assert.ok(client.includes("timeoutMs: 60000"));
+  assert.ok(client.includes("infraError: true"));
+  assert.ok(client.includes("isPrivateRunnerHost"));
   assert.ok(render.includes('key: AGENT_RUNNER_REQUIRED\n        value: "false"'));
 });
 
@@ -23,4 +25,6 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(engine.includes("import { runProjectToolchainChecks } from './runnerClient.js'"));
   assert.ok(engine.includes('runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) })'));
   assert.ok(engine.includes('ok: Boolean(syntax.ok && runnerExecution.ok)'));
+  assert.ok(engine.includes('syntax?.runnerExecution?.infraError'));
+  assert.ok(engine.includes("lastCheckpoint: 'runner-infra-error'"));
 });
