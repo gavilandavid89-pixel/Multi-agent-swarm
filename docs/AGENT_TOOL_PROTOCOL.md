@@ -47,7 +47,7 @@ El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, c
 
 - **Arquitecto / Coordinador:** puede inspeccionar estructura y pedir perfiles de validación; no tiene permisos para ampliar red ni cambiar configuración del host.
 - **Desarrollador:** puede editar archivos del workspace y solicitar ejecuciones; no puede leer secretos del servicio ni editar la allowlist.
-- **Validador / Escéptico:** recibe snapshot de la revisión y puede lanzar pruebas independientes; los resultados deben etiquetarse por job/commit para evitar confundir ejecuciones.
+- **Validador:** recibe el snapshot de revisión y puede lanzar comprobaciones independientes; su dispatcher solo puede consultar trabajos/artefactos cuyos IDs devuelve esa misma sesión. **Escéptico y Auditor** tienen lectura del workspace, sin ejecución ni comprobaciones directas.
 - **Árbitro:** consume resultados, fallos y checkpoints; no puede convertir una prueba no ejecutada en aprobada.
 - **Operador administrador:** cualquier cambio de allowlist, imagen, límites de seguridad o host de ejecución queda fuera del control de los agentes y requiere revisión explícita del operador.
 
