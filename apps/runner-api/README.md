@@ -18,8 +18,13 @@ cp .env.example .env
 # Set RUNNER_SHARED_SECRET to a fresh 32+ character random secret, never commit it.
 chmod 600 .env
 sudo chown swarm-runner:swarm-runner .env
-# Run as the dedicated account with its rootless Docker environment configured.
-sudo -u swarm-runner npm start
+# Ensure the rootless Docker user service is running for swarm-runner.
+# If its socket uses the default path, pass that environment explicitly:
+runner_uid=$(id -u swarm-runner)
+sudo -u swarm-runner env \\
+  XDG_RUNTIME_DIR="/run/user/$runner_uid" \\
+  DOCKER_HOST="unix:///run/user/$runner_uid/docker.sock" \\
+  npm start
 ```
 
 Set `RUNNER_SHARED_SECRET` to the exact same random secret configured as `AGENT_RUNNER_SHARED_SECRET` on the Worker; it must be different from `WORKER_SHARED_SECRET`. Keep the API reachable only over a private network/firewall rule from the Worker.
