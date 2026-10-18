@@ -49,7 +49,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
   }
-  const key = String(idempotencyKey || (String(taskId || randomUUID()) + ':exec:' + randomUUID())).slice(0, 128);
+  const key = String(idempotencyKey || (String(taskId || randomUUID()) + ':exec:' + randomUUID())).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 128);
   const selectedWorkspaceId = String(workspaceId || taskId || randomUUID());
   const safeWorkspaceId = /^[0-9a-f-]{36}$/i.test(selectedWorkspaceId) ? selectedWorkspaceId : randomUUID();
   let created;
@@ -220,7 +220,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     : Array.isArray(files) ? files : [];
   if (!entries.length) return { available: false, checked: false, ok: true, skipped: true, message: 'No hay archivos extraídos para ejecutar en el runner.' };
   const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
-  const taskKey = String(taskId || workspaceId);
+  const taskKey = String(taskId || workspaceId).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 60);
   const result = await runAgentCommand({
     taskId, workspaceId, resetWorkspace: true, files: entries,
     command: ['bash', '-lc', CHECK_SCRIPT], network: 'none', timeoutMs: 60000,
@@ -237,11 +237,12 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   if (!checked && !profiles.length) return { ...result, checked: false, ok: true, skipped: true, message: 'El runner respondió, pero no encontró archivos o perfiles de prueba compatibles.' };
   const runtimeChecks = [];
   for (const profile of profiles) {
+    const profileKey = profile.name.toLowerCase().replace(/[^a-z0-9._:-]+/g, '-').slice(0, 30);
     if (profile.prepare) {
       const prep = await runAgentCommand({
         taskId, workspaceId, resetWorkspace: false, files: [],
         command: profile.prepare, network: 'restricted', timeoutMs: profile.prepareTimeoutMs,
-        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profile.name
+        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profileKey
       });
       runtimeChecks.push({ profile: profile.name, phase: 'dependency-preparation', ok: prep.ok, exitCode: prep.exitCode, durationMs: prep.durationMs });
       if (!prep.ok) {
@@ -256,7 +257,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     const tested = await runAgentCommand({
       taskId, workspaceId, resetWorkspace: false, files: [],
       command: profile.test, network: 'none', timeoutMs: profile.testTimeoutMs,
-      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profile.name
+      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profileKey
     });
     runtimeChecks.push({ profile: profile.name, phase: 'tests', ok: tested.ok, exitCode: tested.exitCode, durationMs: tested.durationMs });
     if (!tested.ok) {
