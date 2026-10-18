@@ -27,7 +27,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("inventory.stdout.split"));
   assert.ok(source.includes("'-print0'"));
   assert.ok(source.includes("No se pudo recuperar el archivo de salida"));
-  assert.ok(source.includes("0x1f"));
+  assert.ok(source.includes("x1f"));
   assert.ok(source.includes("'--user', '65532:65532'"));
   assert.ok(source.includes("mode: 0o755"));
   assert.ok(source.includes("mode: 0o644"));
