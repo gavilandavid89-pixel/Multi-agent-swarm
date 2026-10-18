@@ -6,27 +6,31 @@ const wrapper = await readFile(new URL('../scripts/run-agent-sandbox.sh', import
 const image = await readFile(new URL('../apps/runner/Dockerfile', import.meta.url), 'utf8');
 
 test('agent sandbox disables network and uses a read-only container root', () => {
-  assert.match(wrapper, /--network none/);
-  assert.match(wrapper, /--read-only/);
-  assert.match(wrapper, /--cap-drop ALL/);
-  assert.match(wrapper, /--security-opt no-new-privileges:true/);
+  for (const flag of [
+    '--network none',
+    '--read-only',
+    '--cap-drop ALL',
+    '--security-opt no-new-privileges:true'
+  ]) assert.ok(wrapper.includes(flag), `missing security control: ${flag}`);
 });
 
 test('agent sandbox applies process, memory, CPU and wall-clock limits', () => {
-  assert.ok(wrapper.includes('--pids-limit "$pids_limit"'));
-  assert.ok(wrapper.includes('--memory "$memory_limit"'));
-  assert.ok(wrapper.includes('--cpus "$cpu_limit"'));
-  assert.match(wrapper, /timeout --signal=TERM --kill-after=5s/);
-  assert.match(wrapper, /--tmpfs \/tmp:rw,nosuid,nodev,size=512m/);
+  for (const flag of [
+    '--pids-limit "$pids_limit"',
+    '--memory "$memory_limit"',
+    '--cpus "$cpu_limit"',
+    '--tmpfs /tmp:rw,nosuid,nodev,size=512m'
+  ]) assert.ok(wrapper.includes(flag), `missing resource limit: ${flag}`);
+  assert.ok(wrapper.includes('timeout --signal=TERM --kill-after=5s'));
 });
 
 test('only the requested project directory is mounted writable', () => {
   assert.ok(wrapper.includes('--mount "type=bind,src=$workspace,dst=/workspace,rw"'));
-  assert.doesNotMatch(wrapper, /\/var\/run\/docker\.sock/);
-  assert.doesNotMatch(wrapper, /--privileged/);
-  assert.doesNotMatch(wrapper, /--network host/);
-  assert.match(wrapper, /--env HOME=\/tmp/);
-  assert.doesNotMatch(wrapper, /docker run[^\n]*--env-file/);
+  assert.equal(wrapper.includes('/var/run/docker.sock'), false);
+  assert.equal(wrapper.includes('--privileged'), false);
+  assert.equal(wrapper.includes('--network host'), false);
+  assert.ok(wrapper.includes('--env HOME=/tmp'));
+  assert.equal(wrapper.includes('--env-file'), false);
 });
 
 test('runner image includes common language toolchains and browser tools', () => {
@@ -37,5 +41,5 @@ test('runner image includes common language toolchains and browser tools', () =>
   ]) {
     assert.ok(image.includes(tool), `missing runner capability: ${tool}`);
   }
-  assert.match(image, /USER runner/);
+  assert.ok(image.includes('USER runner'));
 });
