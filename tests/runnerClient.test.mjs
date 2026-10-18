@@ -19,6 +19,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
       return;
     }
     if (req.url === '/v1/jobs/11111111-1111-4111-8111-111111111111' && req.method === 'GET') {
+      seen.push({ method: req.method, secret: req.headers['x-swarm-runner-secret'] });
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ id: '11111111-1111-4111-8111-111111111111', status: 'succeeded', exitCode: 0, timedOut: false, stdout: 'SWARM_RUNNER_CHECKED=2\\nrunner-ok', stderr: '', durationMs: 15 }));
       return;
@@ -44,6 +45,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(job.checked, true);
   assert.equal(job.exitCode, 0);
   assert.equal(seen[0].secret, 'test-runner-secret-that-is-long-enough-32');
+  assert.equal(seen.find(item => item.method === 'GET')?.secret, 'test-runner-secret-that-is-long-enough-32');
   assert.equal(seen[0].key, 'worker-client-test-key-0001');
   assert.equal(seen[0].body.network, 'none');
   assert.equal(seen[0].body.workspaceId, '22222222-2222-4222-8222-222222222222');
