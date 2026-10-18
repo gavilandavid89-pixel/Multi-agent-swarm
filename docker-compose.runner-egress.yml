@@ -1,0 +1,34 @@
+services:
+  swarm-egress-proxy:
+    build:
+      context: ./apps/runner/egress-proxy
+    image: swarm-agent-egress-proxy:local
+    container_name: swarm-egress-proxy
+    restart: unless-stopped
+    networks:
+      swarm-agent-egress:
+        ipv4_address: 172.30.0.2
+      swarm-egress-outbound: {}
+    expose:
+      - "3128"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+      - /var/spool/squid:rw,noexec,nosuid,nodev,size=32m
+    mem_limit: 256m
+    cpus: 0.50
+    pids_limit: 64
+
+networks:
+  swarm-agent-egress:
+    name: swarm-agent-egress
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  swarm-egress-outbound:
+    name: swarm-egress-outbound
