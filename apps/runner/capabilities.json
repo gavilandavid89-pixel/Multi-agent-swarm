@@ -261,12 +261,8 @@
     "concurrency": 1
   },
   "agentToolContract": {
-    "current": "El Worker usa el runner para checks deterministas; la API ofrece jobs, polling, cancelación y snapshots.",
-    "notYetImplemented": [
-      "dispatcher de tool-calls LLM",
-      "herramientas directas workspace.list/read/write",
-      "permisos por rol aplicados a llamadas de herramientas del modelo"
-    ],
+    "current": "El Worker integra tool-calls de los proveedores con un dispatcher de herramientas, workspaces aislados por agente, permisos por rol y ejecución mediante el runner autenticado.",
+    "notYetImplemented": [],
     "plannedTools": [
       "workspace.list",
       "workspace.read",
@@ -280,7 +276,7 @@
       "runner.artifacts.read"
     ],
     "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo.",
-    "rolePolicyStatus": "proposed-not-enforced",
+    "rolePolicyStatus": "enforced-by-worker-dispatcher",
     "rolePolicy": {
       "Arquitecto": {
         "allow": [
@@ -453,7 +449,7 @@
     ]
   },
   "workspaceIsolation": {
-    "status": "worker-primitives-implemented; model-tool-dispatch-pending",
+    "status": "worker-primitives-and-model-tool-dispatch-implemented",
     "identity": "deterministic UUID derived from taskId, agentId and purpose; distinct agents never share a working workspace",
     "integration": "separate coordinator-controlled integration workspace; agent workspaces are treated as proposals until merged",
     "merge": "three-way merge against an immutable base; identical edits coalesce; conflicting edits fail closed with file and agent IDs",
