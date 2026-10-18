@@ -30,6 +30,20 @@ function estimateInputTokens(messages) {
   return Math.ceil(characters / 2.5) + (Array.isArray(messages) ? messages.length * 8 : 0);
 }
 
+function geminiSchema(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return { type: 'OBJECT', properties: {} };
+  const output = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (['additionalProperties', 'minItems', 'maxItems', 'minimum', 'maximum'].includes(key)) continue;
+    if (key === 'properties' && value && typeof value === 'object') {
+      output.properties = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, geminiSchema(child)]));
+    } else if (key === 'items') output.items = geminiSchema(value);
+    else if (key === 'type' && typeof value === 'string') output.type = value.toUpperCase();
+    else output[key] = value;
+  }
+  return output;
+}
+
 function toGeminiContents(messages) {
   const contents = [];
   const systemParts = [];
@@ -113,7 +127,7 @@ export async function consultarGemini({
         tools: [{ functionDeclarations: tools.map(item => ({
           name: String(item?.function?.name || ''),
           description: String(item?.function?.description || ''),
-          parameters: item?.function?.parameters || { type: 'object', properties: {}, additionalProperties: false }
+          parameters: geminiSchema(item?.function?.parameters || { type: 'object', properties: {} })
         })).filter(item => item.name) }],
         toolConfig: { functionCallingConfig: { mode: 'AUTO' } }
       } : {})
