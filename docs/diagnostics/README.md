@@ -28,7 +28,8 @@ Este directorio define un formato de diagnóstico seguro y reutilizable para el 
 - `observed`: hechos mínimos reproducibles.
 - `hypotheses`: hipótesis explícitamente no confirmadas.
 - `redaction`: confirmación del emisor de que se eliminaron secretos.
-- `triage`: estado y responsable; no afirmar resolución hasta verificar.
+- El informe de entrada usa `reportId`, `occurredAt`, `correlation`, `operation`, `reproduction`, `runtime` y `evidence`, tal como los normaliza el colector de diagnósticos del Worker en la rama experimental. El triage se actualiza por separado mediante su endpoint autenticado; no se envía como parte del informe inicial.
+- El normalizador actual no persiste metadatos arbitrarios de release ni un objeto de impacto; hasta ampliar el esquema, anotá commit/deploy en el sistema de incidentes externo y usá referencias seguras en `evidence`.
 
 ## Reglas para análisis asistido por IA
 
