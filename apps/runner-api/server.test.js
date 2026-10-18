@@ -15,7 +15,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot', 'finalizing', 'recopilando artefactos', 'finalizing', 'recopilando artefactos',
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
-    'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY',
+    'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY', 'createHash', 'requestHash', 'clave de idempotencia ya se usó',
     'swarm-agent-egress', 'ensureRestrictedNetwork'
   ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
   assert.equal(source.includes('--privileged'), false);
@@ -23,6 +23,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.equal(source.includes('dst=/workspace,rw'), false);
   assert.ok(source.includes('cp -R -P /input/. /workspace/ && find /workspace -mindepth 1 ! -type l -exec chmod a+rwX,u-s,g-s,o-t {} + && touch /tmp/swarm-runner-ready && exec tail -f /dev/null'));
   assert.ok(source.includes("'exec', '--workdir', '/workspace', '--user', '10001:10001', cid, 'timeout'"));
+  assert.ok(source.includes("content.includes('\\u0000') || containsCredential(content)"));
   assert.ok(source.includes("'--user', '65532:65532'"));
   assert.ok(source.includes("mode: 0o755"));
   assert.ok(source.includes("mode: 0o644"));
