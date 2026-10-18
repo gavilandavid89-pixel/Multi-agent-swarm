@@ -58,6 +58,24 @@ async function request(path, options = {}, timeoutMs = 15000) {
   return body;
 }
 
+async function waitForRunnerReady(maxWaitMs = 120000) {
+  const deadline = Date.now() + maxWaitMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1000, deadline - Date.now());
+    try {
+      const ready = await request('/readyz', {}, Math.min(65000, remaining));
+      if (ready.ok === true && ready.docker === 'ready' && ready.image === 'ready') return ready;
+      lastError = new Error('El Runner API todavía no está listo.');
+    } catch (error) {
+      if (error.status && ![429, 502, 503, 504].includes(error.status)) throw error;
+      lastError = error;
+    }
+    await delay(1000);
+  }
+  throw Object.assign(new Error('El Runner API no alcanzó estado ready en 120 segundos. ' + String(lastError?.message || '').slice(0, 300)), { status: 503 });
+}
+
 /**
  * Trusted Worker -> private Runner API protocol. Commands are argv arrays, never
  * host-shell strings; network and resource policy are enforced by the runner host.
@@ -73,6 +91,10 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   }
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
+  }
+  try { await waitForRunnerReady(); }
+  catch (error) {
+    return { available: true, checked: true, ok: false, infraError: true, skipped: false, message: 'El runner no está listo para aceptar trabajos: ' + String(error?.message || error).slice(0, 600) };
   }
   const key = String(idempotencyKey || (String(taskId || randomUUID()) + ':exec:' + randomUUID())).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 128);
   const selectedWorkspaceId = String(workspaceId || taskId || randomUUID());
