@@ -182,6 +182,13 @@ function detectRuntimeProfiles(entries) {
   const paths = new Set(entries.map(file => file.path));
   const contents = new Map(entries.map(file => [file.path, file.content]));
   const profiles = [];
+  if (entries.some(file => /\\.html?$/i.test(file.path))) {
+    profiles.push({
+      name: 'Chromium/Xvfb browser smoke',
+      test: ['node', '/opt/swarm-runner/browser-smoke.mjs'],
+      testTimeoutMs: 45000
+    });
+  }
   let pkg = null;
   try { if (contents.has('package.json')) pkg = JSON.parse(contents.get('package.json')); } catch {}
   const hasNodeTest = Boolean(pkg?.scripts?.test);
