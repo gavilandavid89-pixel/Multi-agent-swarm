@@ -37,7 +37,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("spawn('tar'"));
   assert.ok(source.includes("'--no-recursion'"));
   assert.ok(source.includes("MAX_WORKSPACE_BYTES = 256 * 1024 * 1024"));
-  assert.ok(source.includes("MAX_WORKSPACE_ENTRIES = 5000"));
+  assert.ok(source.includes("MAX_WORKSPACE_ENTRIES = 50000"));
   assert.ok(source.includes("archiveBytes > MAX_WORKSPACE_BYTES + 64 * 1024 * 1024"));
   assert.ok(source.includes("pkill', '-KILL', '-u', '65532'"));
   assert.ok(source.includes("maxOutputChars = 4000"));
