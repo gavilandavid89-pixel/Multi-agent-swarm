@@ -262,6 +262,7 @@ async function runJob(job) {
   timer = setTimeout(() => {
     if (cancelled || timedOut) return;
     timedOut = true;
+    job.error = 'El contenedor excedió el límite de seguridad externo del runner.';
     stop();
   }, job.timeoutMs + 5000);
   try {
