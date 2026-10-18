@@ -26,6 +26,16 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
       }
       return;
     }
+    if (req.url === '/v1/capabilities' && req.method === 'GET') {
+      pollSecrets.push(req.headers['x-swarm-runner-secret']);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        schemaVersion: 1,
+        execution: { defaultNetwork: 'none', concurrency: 1 },
+        toolchains: [{ id: 'typescript', commands: ['tsc', 'tsx'] }]
+      }));
+      return;
+    }
     if (req.url === '/v1/jobs' && req.method === 'POST') {
       seen.push({ method: req.method, secret: req.headers['x-swarm-runner-secret'], key: req.headers['x-swarm-idempotency-key'], body: JSON.parse(raw) });
       res.writeHead(202, { 'content-type': 'application/json' });
@@ -52,7 +62,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   process.env.AGENT_RUNNER_BASE_URL = 'http://127.0.0.1:' + server.address().port;
   process.env.AGENT_RUNNER_SHARED_SECRET = 'test-runner-secret-that-is-long-enough-32';
   process.env.AGENT_RUNNER_REQUIRED = 'false';
-  const { runAgentCommand, runProjectToolchainChecks } = await import('../apps/worker/services/runnerClient.js?test=' + randomUUID());
+  const { getAgentRunnerCapabilities, runAgentCommand, runProjectToolchainChecks } = await import('../apps/worker/services/runnerClient.js?test=' + randomUUID());
 
   const job = await runAgentCommand({
     taskId: '22222222-2222-4222-8222-222222222222',
@@ -74,6 +84,12 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(seen[0].body.network, 'none');
   assert.equal(seen[0].body.workspaceId, '22222222-2222-4222-8222-222222222222');
   assert.equal(seen[0].body.resetWorkspace, true);
+
+  const catalog = await getAgentRunnerCapabilities();
+  assert.equal(catalog.ok, true);
+  assert.equal(catalog.capabilities.execution.defaultNetwork, 'none');
+  assert.equal(catalog.capabilities.toolchains[0].id, 'typescript');
+  assert.ok(pollSecrets.every(secret => secret === 'test-runner-secret-that-is-long-enough-32'));
 
   const checks = await runProjectToolchainChecks({
     taskId: '33333333-3333-4333-8333-333333333333',
