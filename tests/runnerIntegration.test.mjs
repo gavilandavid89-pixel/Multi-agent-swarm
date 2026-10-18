@@ -28,6 +28,8 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("infraError: true"));
   assert.ok(client.includes("isPrivateRunnerHost"));
   assert.ok(client.includes("baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)"));
+  assert.ok(client.includes('baseUrl.username || baseUrl.password'));
+  assert.ok(client.includes('sin rutas, query, fragmentos ni credenciales embebidas'));
   assert.ok(render.includes('key: AGENT_RUNNER_REQUIRED\n        value: "false"'));
 });
 
