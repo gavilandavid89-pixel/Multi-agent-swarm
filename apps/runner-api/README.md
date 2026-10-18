@@ -27,12 +27,13 @@ The host must already have `swarm-agent-runner:local` built from `apps/runner/Do
 
 Every `/v1/*` request requires `x-swarm-runner-secret`. Use `x-swarm-idempotency-key` on job creation to make retries safe.
 
-- `POST /v1/jobs`: `{ "files": [{"path":"main.py","content":"print(1)"}], "command":["python3","main.py"], "network":"none", "timeoutMs":60000 }`. Returns HTTP 202 and a job ID.
+- `POST /v1/jobs`: `{ "files": [{"path":"main.py","content":"print(1)"}], "command":["python3","main.py"], "network":"none", "timeoutMs":60000, "workspaceId":"<uuid>", "resetWorkspace":true }`. Returns HTTP 202 and a job ID. Omit `workspaceId` for an isolated one-shot workspace.
+- Sequential tool calls can reuse the same task-scoped `workspaceId`: after a completed job, send `files: []` and `resetWorkspace: false` to continue from its filesystem. The API rejects concurrent jobs for the same workspace. Each job receives a new container and a fresh tmpfs; use `network:"restricted"` only for a dependency-preparation command, then submit a separate job with `network:"none"` for tests.
 - `GET /v1/jobs/:id`: poll `queued`, `running`, `succeeded`, `failed`, `timed_out`, or `cancelled`; output is bounded.
-- `GET /v1/jobs/:id/files`: read bounded workspace files after execution, including generated artifacts.
+- `GET /v1/jobs/:id/files`: read the immutable, bounded file snapshot captured when that job completed, including generated artifacts. Dependency directories such as `node_modules` are kept in the task workspace for sequential jobs but omitted from the returned artifact snapshot.
 - `POST /v1/jobs/:id/cancel`: cancel queued/running work.
 
-Limits: 200 files, 2 MiB total input, 256 KiB per file, 1–32 argv items, 1–120 seconds wall clock, 1 GiB RAM, 2 CPUs, 128 PIDs, 64 KiB each stdout/stderr, and a 24-hour result TTL. The API passes arguments directly to Docker; it does not invoke a host shell or forward host environment variables.
+Limits: 200 files, 2 MiB total input, 256 KiB per file, 1–32 argv items, 1–120 seconds wall clock per job, 1 GiB RAM, 2 CPUs, 128 PIDs, 256 MiB workspace tmpfs, 64 KiB each stdout/stderr, a queue cap, at most 20 retained results and a 24-hour TTL. The API passes arguments directly to Docker; it does not invoke a host shell or forward host environment variables.
 
 ## Network modes
 
