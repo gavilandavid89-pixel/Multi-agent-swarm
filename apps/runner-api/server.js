@@ -379,7 +379,7 @@ async function initialize() {
       if (!job || !/^[0-9a-f-]{36}$/i.test(job.id) || !['queued', 'running', 'succeeded', 'failed', 'timed_out', 'cancelled'].includes(job.status)) continue;
       if (Date.now() - Date.parse(job.updatedAt) > JOB_TTL_MS) {
         await fsp.rm(path.join(STATE, name), { force: true });
-        await fsp.rm(path.join(WORKSPACES, job.id), { recursive: true, force: true });
+        await fsp.rm(path.join(WORKSPACES, job.workspaceId || job.id), { recursive: true, force: true });
         continue;
       }
       if (job.status === 'running') { job.status = 'failed'; job.error = 'El servicio se reinició durante la ejecución; se requiere reintentar.'; job.finishedAt = new Date().toISOString(); await save(job); }
