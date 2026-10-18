@@ -164,12 +164,12 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 
 ## Entorno aislado de ejecución para agentes
 
-La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js, Python, Java, Go, PHP, Ruby, C/C++, Rust, Godot 4.4.1 headless y Chromium/Xvfb.
+La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js/TypeScript, Python con pytest/Black/Flake8/mypy, Java/Maven, Go, PHP/Composer, Ruby/Bundler, C/C++, Rust, Godot 4.4.1 headless, Chromium/Xvfb, ESLint/Prettier, ShellCheck/shfmt, SQLite y utilidades de búsqueda/JSON. El inventario legible por máquina vive en `apps/runner/capabilities.json` y se verifica en CI.
 
 - Diseño, capacidades, límites, integración y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
 - Contrato de herramientas futuras para agentes, permisos por rol, recuperación, artefactos y criterios de aceptación: [docs/AGENT_TOOL_PROTOCOL.md](docs/AGENT_TOOL_PROTOCOL.md).
 - La vista en vivo con escritorio remoto está documentada como una fase segura posterior; Xvfb/Chromium ya sirven para pruebas automatizadas, pero no se expone un VNC público.
-- API autenticada de ejecución: [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
+- API autenticada de ejecución y descubrimiento de capacidades (`GET /v1/capabilities`): [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 
 ### Cómo se conecta con los agentes
@@ -182,7 +182,7 @@ El modelo no recibe la clave de Runner API ni acceso directo a Docker. El camino
 4. El Worker recibe salida acotada y artefactos filtrados. Los fallos de sintaxis/tests se convierten en evidencia para el ciclo de corrección; la nueva entrega se vuelve a ejecutar en modo sin red.
 5. La preparación de dependencias, cuando es necesaria, es un paso separado con egress restringido; nunca comparte secretos y no se usa como fase de pruebas.
 
-**Interfaz de herramientas para agentes:** el runner ya proporciona los bloques seguros de ejecución, estado, cancelación y lectura de artefactos; el validador del Worker los usa para comprobaciones automáticas. El modelo todavía no tiene una herramienta de shell libre ni invoca directamente la API. La próxima capa debe exponer acciones nombradas (`inspect_project`, `run_test_profile`, `get_job_status`, `read_artifacts`, `cancel_job`) que el Worker valide contra la tarea activa. El modelo no debe elegir imagen Docker, volúmenes, variables de entorno, secretos, política de red ni límites. Así los agentes pueden usar capacidades del entorno sin convertir el runner en una vía de acceso al host.
+**Interfaz de herramientas para agentes:** el runner ya proporciona los bloques seguros de ejecución, estado, cancelación y lectura de artefactos; el validador del Worker los usa para comprobaciones automáticas. El catálogo describe lo instalado y sus límites, pero el modelo todavía no tiene tool-calls ejecutables ni invoca directamente la API; el dispatcher por rol/tarea sigue pendiente. La próxima capa debe exponer acciones nombradas (`inspect_project`, `run_test_profile`, `get_job_status`, `read_artifacts`, `cancel_job`) que el Worker valide contra la tarea activa. El modelo no debe elegir imagen Docker, volúmenes, variables de entorno, secretos, política de red ni límites. Así los agentes pueden usar capacidades del entorno sin convertir el runner en una vía de acceso al host.
 
 ### Modos de red del runner experimental
 
