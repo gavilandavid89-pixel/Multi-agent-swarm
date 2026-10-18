@@ -279,7 +279,122 @@
       "runner.artifacts.list",
       "runner.artifacts.read"
     ],
-    "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo."
+    "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo.",
+    "rolePolicyStatus": "proposed-not-enforced",
+    "rolePolicy": {
+      "Arquitecto": {
+        "allow": [
+          "catalog.read",
+          "workspace.list",
+          "workspace.read",
+          "runner.check"
+        ],
+        "deny": [
+          "runner.prepareDependencies",
+          "runner.execute",
+          "host.configure",
+          "network.configure"
+        ]
+      },
+      "Coordinador de coherencia": {
+        "allow": [
+          "catalog.read",
+          "workspace.list",
+          "workspace.read",
+          "runner.check"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.prepareDependencies",
+          "host.configure",
+          "network.configure"
+        ]
+      },
+      "Desarrollador": {
+        "allow": [
+          "catalog.read",
+          "workspace.list",
+          "workspace.read",
+          "workspace.write",
+          "runner.check",
+          "runner.execute",
+          "runner.jobStatus",
+          "runner.cancel",
+          "runner.artifacts.list",
+          "runner.artifacts.read"
+        ],
+        "deny": [
+          "runner.prepareDependencies",
+          "host.configure",
+          "network.configure",
+          "secret.read"
+        ]
+      },
+      "Escéptico": {
+        "allow": [
+          "catalog.read",
+          "workspace.list",
+          "workspace.read",
+          "runner.check",
+          "runner.jobStatus",
+          "runner.artifacts.list",
+          "runner.artifacts.read"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.prepareDependencies",
+          "host.configure",
+          "network.configure"
+        ]
+      },
+      "Validador": {
+        "allow": [
+          "catalog.read",
+          "workspace.list",
+          "workspace.read",
+          "runner.check",
+          "runner.jobStatus",
+          "runner.artifacts.list",
+          "runner.artifacts.read"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.prepareDependencies",
+          "host.configure",
+          "network.configure"
+        ]
+      },
+      "Árbitro": {
+        "allow": [
+          "catalog.read",
+          "runner.jobStatus",
+          "runner.artifacts.list",
+          "runner.artifacts.read"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.execute",
+          "runner.prepareDependencies",
+          "host.configure",
+          "network.configure"
+        ]
+      },
+      "Operador": {
+        "allow": [
+          "catalog.read",
+          "runner.jobStatus"
+        ],
+        "deny": [
+          "agent-controlled-host-configuration"
+        ],
+        "requiresHumanApproval": [
+          "allowlist changes",
+          "image changes",
+          "resource-limit changes",
+          "host/network configuration"
+        ]
+      }
+    }
   },
   "notIncluded": [
     "Docker socket o ejecución de contenedores hermanos desde el sandbox",
