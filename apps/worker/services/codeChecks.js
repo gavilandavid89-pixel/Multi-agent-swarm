@@ -100,7 +100,7 @@ async function runBrowserSmokeCheck(files) {
   }
 }
 
-function extractFiles(delivery) {
+export function extractFiles(delivery) {
   const files = new Map();
   const re = /(?:^|\n)(?:#{1,6}\s+([^\n]+)|\*\*([^*\n]+)\*\*|(?:Archivo|File|Ruta)\s*:\s*([^\n]+))\s*\n\s*`{3}([^\n]*)\n([\s\S]*?)\n`{3}/g;
   let match;
