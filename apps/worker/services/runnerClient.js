@@ -86,6 +86,9 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   let baseUrl;
   try { baseUrl = new URL(configuredBase); } catch { return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_BASE_URL no es una URL válida.' }; }
   if (!['http:', 'https:'].includes(baseUrl.protocol)) return { available: true, checked: false, ok: false, infraError: true, message: 'El protocolo del runner debe ser HTTP(S) sobre una red privada.' };
+  if (baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password) {
+    return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_BASE_URL debe ser el origen del Runner API, sin rutas, query, fragmentos ni credenciales embebidas.' };
+  }
   if (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)) {
     return { available: true, checked: false, ok: false, infraError: true, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
   }
