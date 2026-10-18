@@ -31,7 +31,9 @@ jobs:
     env:
       CI: true
       NODE_OPTIONS: --unhandled-rejections=strict
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/swarm_test?sslmode=disable
       SWARM_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/swarm_test?sslmode=disable
+      HISTORY_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       SWARM_API_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
     steps:
       - uses: actions/checkout@v4
