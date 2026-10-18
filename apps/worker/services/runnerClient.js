@@ -191,7 +191,7 @@ function detectRuntimeProfiles(entries) {
   if (paths.has('pom.xml')) {
     profiles.push({
       name: 'maven test',
-      prepare: ['mvn', '-B', '-Dmaven.repo.local=/workspace/.swarm-m2', '-DskipTests', 'dependency:go-offline'],
+      prepare: ['bash', '-lc', 'MAVEN_OPTS="-Dhttps.proxyHost=172.30.0.2 -Dhttps.proxyPort=3128 -Dhttp.proxyHost=172.30.0.2 -Dhttp.proxyPort=3128" mvn -B -Dmaven.repo.local=/workspace/.swarm-m2 -DskipTests dependency:go-offline'],
       prepareTimeoutMs: 120000,
       test: ['mvn', '-o', '-B', '-Dmaven.repo.local=/workspace/.swarm-m2', 'test'],
       testTimeoutMs: 60000
@@ -200,7 +200,7 @@ function detectRuntimeProfiles(entries) {
   if (paths.has('gradlew') && (paths.has('build.gradle') || paths.has('build.gradle.kts'))) {
     profiles.push({
       name: 'gradle test',
-      prepare: ['bash', '-lc', 'GRADLE_USER_HOME=/workspace/.swarm-gradle bash ./gradlew --no-daemon testClasses'],
+      prepare: ['bash', '-lc', 'GRADLE_OPTS="-Dhttps.proxyHost=172.30.0.2 -Dhttps.proxyPort=3128 -Dhttp.proxyHost=172.30.0.2 -Dhttp.proxyPort=3128" GRADLE_USER_HOME=/workspace/.swarm-gradle bash ./gradlew --no-daemon testClasses'],
       prepareTimeoutMs: 120000,
       test: ['bash', '-lc', 'GRADLE_USER_HOME=/workspace/.swarm-gradle bash ./gradlew --no-daemon --offline test'],
       testTimeoutMs: 60000
