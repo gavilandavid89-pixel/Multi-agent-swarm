@@ -205,6 +205,26 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   return { available: true, checked: true, ok: false, infraError: true, jobId: created.id, timedOut: true, message: 'El runner no completó la tarea dentro de la ventana de espera; se solicitó cancelación y se conserva el ID ' + created.id + '. ' + String(lastError?.message || '').slice(0, 300) };
 }
 
+export async function getAgentJobStatus({ jobId } = {}) {
+  if (!configuredBase || configuredSecret.length < 32) return { available: false, ok: false, message: 'Runner API no configurado.' };
+  if (!/^[0-9a-f-]{36}$/i.test(String(jobId || ''))) throw new Error('jobId inválido.');
+  return request('/v1/jobs/' + encodeURIComponent(jobId));
+}
+export async function cancelAgentJob({ jobId } = {}) {
+  if (!configuredBase || configuredSecret.length < 32) return { available: false, ok: false, message: 'Runner API no configurado.' };
+  if (!/^[0-9a-f-]{36}$/i.test(String(jobId || ''))) throw new Error('jobId inválido.');
+  return request('/v1/jobs/' + encodeURIComponent(jobId) + '/cancel', { method: 'POST' });
+}
+export async function getAgentJobArtifact({ jobId, artifactId } = {}) {
+  if (!configuredBase || configuredSecret.length < 32) return { available: false, ok: false, message: 'Runner API no configurado.' };
+  if (!/^[0-9a-f-]{36}$/i.test(String(jobId || ''))) throw new Error('jobId inválido.');
+  if (typeof artifactId !== 'string' || !artifactId || artifactId.length > 240 || artifactId.includes('..') || artifactId.startsWith('/') || artifactId.includes('\\')) throw new Error('artifactId inválido.');
+  const response = await request('/v1/jobs/' + encodeURIComponent(jobId) + '/files');
+  const file = (Array.isArray(response.files) ? response.files : []).find(item => item.path === artifactId);
+  if (!file) throw Object.assign(new Error('Artefacto no encontrado.'), { status: 404 });
+  return { path: String(file.path).slice(0, 240), content: String(file.content || '').slice(0, 256 * 1024) };
+}
+
 const CHECK_SCRIPT = String.raw`#!/usr/bin/env bash
 set -uo pipefail
 failed=0
