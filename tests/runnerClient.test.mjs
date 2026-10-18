@@ -35,6 +35,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
         execution: { defaultNetwork: 'none', concurrency: 1 },
         output: { streams: ['stdout', 'stderr'], maxRetainedCharsPerStream: 65536 },
         debugging: { stdin: { maxBytes: 16384 }, debuggers: [{ id: 'python-pdb' }] },
+        workspaceIsolation: { status: 'worker-primitives-implemented; model-tool-dispatch-pending', concurrency: { globalRunner: 1 }, merge: 'conflicts fail closed' },
         toolchains: [{ id: 'typescript', commands: ['tsc', 'tsx'] }]
       }));
       return;
@@ -94,6 +95,7 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(catalog.capabilities.toolchains[0].id, 'typescript');
   assert.deepEqual(catalog.capabilities.output.streams, ['stdout', 'stderr']);
   assert.equal(catalog.capabilities.debugging.debuggers[0].id, 'python-pdb');
+  assert.equal(catalog.capabilities.workspaceIsolation.concurrency.globalRunner, 1);
   assert.ok(pollSecrets.every(secret => secret === 'test-runner-secret-that-is-long-enough-32'));
 
   const checks = await runProjectToolchainChecks({
