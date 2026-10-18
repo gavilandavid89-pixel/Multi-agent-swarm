@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
+import { deriveAgentWorkspaceId } from './agentWorkspace.js';
 
 const configuredBase = String(process.env.AGENT_RUNNER_BASE_URL || '').trim().replace(/\/+$/, '');
 const configuredSecret = String(process.env.AGENT_RUNNER_SHARED_SECRET || '');
@@ -373,7 +374,8 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   if (configuredBase && (containsSensitivePath(entries) || containsSensitiveCredential(entries))) {
     return { available: true, checked: false, ok: false, infraError: true, message: 'Se detectó una ruta de credenciales/caché o una credencial de alta confianza; no se envió ningún archivo al runner.' };
   }
-  const workspaceId = /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : randomUUID();
+  const workspaceSeed = String(taskId || randomUUID());
+  const workspaceId = deriveAgentWorkspaceId(workspaceSeed, 'validador', 'round-' + String(round || 1));
   const contentFingerprint = createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
   const taskKey = String(taskId || workspaceId).replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 60);
   const result = await runAgentCommand({
