@@ -76,7 +76,7 @@ echo "PASS runner API rejects credential-like paths before job creation"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
-  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); fs.writeFileSync(\"generated.txt\",\"artifact-ok\"); console.log(\"runner-api-ok\")"],
+  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
   workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
@@ -117,7 +117,7 @@ if [ "$repeat_id" != "$job_id" ]; then echo "FAIL runner API idempotency returne
 
 step_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:false,
-  command:["node","-e","const fs=require(\"node:fs\"); if(!fs.readFileSync(\"generated.txt\",\"utf8\").includes(\"artifact-ok\")) process.exit(42); fs.writeFileSync(\"second-step.txt\",\"workspace-reused\"); console.log(\"runner-api-step-2-ok\")"],
+  command:["node","-e","const fs=require(\"node:fs\"); if(!fs.readFileSync(\"/workspace/generated.txt\",\"utf8\").includes(\"artifact-ok\")) process.exit(42); fs.writeFileSync(\"/workspace/second-step.txt\",\"workspace-reused\"); console.log(\"runner-api-step-2-ok cwd=\"+process.cwd())"],
   network:"none",timeoutMs:15000
 }))')
 second=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
