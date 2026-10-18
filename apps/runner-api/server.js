@@ -463,6 +463,7 @@ async function pruneOldJobs() {
   while (completed.length > MAX_RETAINED_JOBS) await deleteJob(completed.shift());
 }
 async function deleteJob(job) {
+  pendingInput.delete(job.id);
   jobs.delete(job.id);
   if (job.idempotencyKey && idempotency.get(job.idempotencyKey) === job.id) idempotency.delete(job.idempotencyKey);
   await fsp.rm(path.join(STATE, job.id + '.json'), { force: true });
@@ -522,6 +523,7 @@ async function handle(req, res) {
       await save(job); queue.push(id); void pump();
     } catch (error) {
       if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
+      pendingInput.delete(id);
       if (body.resetWorkspace) await fsp.rm(job.workspace, { recursive: true, force: true }).catch(() => {});
       job.status = 'failed';
       job.error = String(error?.message || error).slice(0, 1200);
@@ -541,6 +543,7 @@ async function handle(req, res) {
     if (job.finalizing) return json(res, 409, { error: 'El trabajo está recopilando artefactos y ya no admite cancelación.' });
     if (['succeeded', 'failed', 'timed_out', 'cancelled'].includes(job.status)) return json(res, 200, publicJob(job));
     if (job.status === 'queued') {
+      pendingInput.delete(job.id);
       job.status = 'cancelled'; job.cancelled = true; job.finishedAt = new Date().toISOString(); await save(job);
       if (workspaceBusy.get(job.workspaceId) === job.id) workspaceBusy.delete(job.workspaceId);
     }
