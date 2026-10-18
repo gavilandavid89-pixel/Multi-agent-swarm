@@ -18,6 +18,7 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("process.env.AGENT_RUNNER_SHARED_SECRET"));
   assert.ok(client.includes("process.env.AGENT_RUNNER_REQUIRED === 'true'"));
   assert.ok(client.includes("'x-swarm-runner-secret': configuredSecret"));
+  assert.ok(client.includes("redirect: 'error'"));
   assert.ok(client.includes("'x-swarm-idempotency-key': key"));
   assert.ok(client.includes("network: 'none'"));
   assert.ok(client.includes("timeoutMs: 60000"));
