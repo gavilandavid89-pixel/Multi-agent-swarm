@@ -32,6 +32,8 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
       res.end(JSON.stringify({
         schemaVersion: 1,
         execution: { defaultNetwork: 'none', concurrency: 1 },
+        output: { streams: ['stdout', 'stderr'], maxRetainedCharsPerStream: 65536 },
+        debugging: { stdin: { maxBytes: 16384 }, debuggers: [{ id: 'python-pdb' }] },
         toolchains: [{ id: 'typescript', commands: ['tsc', 'tsx'] }]
       }));
       return;
