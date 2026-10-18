@@ -1,6 +1,8 @@
 # Contrato de herramientas para agentes y runner
 
-Este documento describe la integración de herramientas de agentes sin darles acceso directo al host, al daemon Docker ni al secreto de la Runner API. La ejecución pasa por la API autenticada y el cliente privado del Worker. **El dispatcher de herramientas ya está conectado al ciclo de tool-calling de los proveedores compatibles**, con permisos por rol; no es un shell libre.\n\nEl catálogo de capacidades instalado está versionado en `apps/runner/capabilities.json` y se puede consultar en `GET /v1/capabilities` usando la autenticación privada Worker→Runner. Enumera toolchains, perfiles, límites, políticas de red y capacidades que aún no existen. No es una concesión de permisos: el servidor sigue validando cada operación.
+Este documento describe la integración de herramientas de agentes sin darles acceso directo al host, al daemon Docker ni al secreto de la Runner API. La ejecución pasa por la API autenticada y el cliente privado del Worker. **El dispatcher de herramientas ya está conectado al ciclo de tool-calling de los proveedores compatibles**, con permisos por rol; no es un shell libre.
+
+El catálogo de capacidades instalado está versionado en `apps/runner/capabilities.json` y se puede consultar en `GET /v1/capabilities` usando la autenticación privada Worker→Runner. Enumera toolchains, perfiles, límites, políticas de red y capacidades que aún no existen. No es una concesión de permisos: el servidor sigue validando cada operación.
 
 ## Flujo de control
 
