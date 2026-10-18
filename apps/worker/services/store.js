@@ -4,7 +4,7 @@ import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash }
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
 import { generateTaskTitle } from './taskTitle.js';
-import { normalizeDiagnosticReport } from './diagnosticNormalizer.js';
+import { normalizeDiagnosticReport, sanitizeDiagnosticText } from './diagnosticNormalizer.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
