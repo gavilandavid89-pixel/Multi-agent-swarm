@@ -25,6 +25,10 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("'exec', '--workdir', '/workspace', '--user', '10001:10001', cid, 'timeout'"));
   assert.ok(source.includes("content.includes('\\u0000') || containsCredential(content)"));
   assert.ok(source.includes("inventory.stdout.split"));
+  assert.ok(source.includes("safeWorkspaceCopyPath"));
+  assert.ok(source.includes("pruneWorkspaceToManifest"));
+  assert.ok(source.includes("copiedHash !== hash"));
+  assert.ok(source.includes("maxOutputChars = 4000"));
   assert.ok(source.includes("'-print0'"));
   assert.ok(source.includes("No se pudo recuperar el archivo de salida"));
   assert.ok(source.includes("x1f"));
