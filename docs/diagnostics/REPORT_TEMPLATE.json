@@ -1,68 +1,46 @@
 {
-  "schema_version": "1.0",
-  "report_id": "<uuid>",
-  "occurred_at": "<ISO-8601-with-timezone>",
-  "severity": "error",
+  "schemaVersion": 1,
+  "reportId": "<uuid>",
+  "occurredAt": "<ISO-8601-with-timezone>",
+  "service": "worker",
   "environment": "production",
-  "component": "worker",
-  "service": "swarm-worker",
-  "release": {
-    "branch": "<branch>",
-    "commit": "<short-sha>",
-    "deploy_id": "<optional-render-deploy-id>"
-  },
-  "correlation": {
-    "task_id": "<non-secret-task-id-or-null>",
-    "checkpoint": "<checkpoint-or-null>",
-    "attempt": 1,
-    "request_id": "<request-id-or-null>"
-  },
+  "severity": "error",
+  "category": "runtime",
   "summary": "<one-sentence-summary>",
-  "expected": "<expected-behavior>",
-  "observed": "<actual-behavior>",
   "error": {
     "name": "<error-name>",
-    "code": "<provider-or-http-code-or-null>",
     "message": "<redacted-original-message>",
-    "stack_excerpt": "<optional-short-redacted-stack>"
+    "stack": "<optional-short-redacted-stack>"
+  },
+  "correlation": {
+    "taskId": "<non-secret-task-id-or-empty>",
+    "checkpoint": "<checkpoint-or-empty>",
+    "requestId": "<request-id-or-empty>",
+    "traceId": "<trace-id-or-empty>"
+  },
+  "operation": {
+    "name": "<operation-name>",
+    "attempt": 1,
+    "elapsedMs": 0,
+    "retryable": false,
+    "idempotencyKey": "<non-secret-key-or-empty>"
   },
   "reproduction": {
     "steps": [
       "<minimal-step-1>"
     ],
-    "frequency": "<always|intermittent|once|unknown>"
+    "expected": "<expected-behavior>",
+    "actual": "<actual-behavior>"
+  },
+  "runtime": {
+    "coldStartSuspected": false,
+    "serviceReady": false,
+    "httpStatus": 500
   },
   "evidence": {
-    "log_excerpt": "<short-redacted-excerpt>",
-    "metrics": "<relevant-numbers-or-null>"
-  },
-  "hypotheses": [
-    {
-      "description": "<possible-cause>",
-      "confidence": "<low|medium|high>",
-      "evidence_for": [
-        "<fact>"
-      ],
-      "evidence_against": []
-    }
-  ],
-  "attempted_actions": [
-    "<safe-action-already-tried>"
-  ],
-  "impact": {
-    "scope": "<single-task|service|multiple-users|unknown>",
-    "data_loss_suspected": false,
-    "user_visible": true
-  },
-  "redaction": {
-    "secrets_removed": true,
-    "personal_data_removed": true,
-    "reviewed_by": "<emitter-or-reviewer>"
-  },
-  "triage": {
-    "status": "new",
-    "owner": null,
-    "notes": "<not-yet-investigated>",
-    "resolved_at": null
+    "logReferences": [
+      "<safe-log-reference>"
+    ],
+    "artifactReferences": []
   }
 }
