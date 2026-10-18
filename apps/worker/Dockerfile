@@ -7,7 +7,7 @@ ENV CHROME_BIN=/usr/bin/chromium
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY . .
-RUN npm run check && mkdir -p /app/data/artifacts && chown -R node:node /app/data
+RUN npm run check:syntax && mkdir -p /app/data/artifacts && chown -R node:node /app/data
 ENV NODE_ENV=production
 USER node
 CMD ["node", "server.js"]
