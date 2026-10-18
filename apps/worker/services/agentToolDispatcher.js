@@ -23,7 +23,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   tool('workspace_list', 'Lista archivos del workspace asignado.'),
   tool('workspace_read', 'Lee un archivo de texto.', { path: { type: 'string' } }, ['path']),
   tool('workspace_write', 'Crea o reemplaza un archivo de texto.', { path: { type: 'string' }, content: { type: 'string' } }, ['path', 'content']),
-  tool('runner_execute', 'Ejecuta un binario permitido sin shell.', { command: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 32 }, network: { type: 'string', enum: ['none', 'restricted'] }, timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 } }, ['command']),
+  tool('runner_execute', 'Ejecuta un binario permitido sin shell y sin red.', { command: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 32 }, timeoutMs: { type: 'integer', minimum: 1000, maximum: 120000 } }, ['command']),
   tool('runner_check', 'Ejecuta las comprobaciones configuradas por el Worker.'),
   tool('runner_job_status', 'Consulta estado de un trabajo.', { jobId: { type: 'string' } }, ['jobId']),
   tool('runner_cancel', 'Cancela un trabajo.', { jobId: { type: 'string' } }, ['jobId']),
@@ -118,14 +118,13 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = await workspace.write(path, args.content); break;
       }
       case 'runner_execute': {
-        if (Object.keys(args).some(k => !['command', 'network', 'timeoutMs'].includes(k))) throw error('Argumentos extra no permitidos para runner_execute.');
+        if (Object.keys(args).some(k => !['command', 'timeoutMs'].includes(k))) throw error('Argumentos extra no permitidos para runner_execute; la política de red no es elegible por el modelo.');
         if (typeof runner?.execute !== 'function') throw error('Runner execute no disponible.');
         if (!Array.isArray(args.command) || !args.command.length || args.command.length > 32 || args.command.some(v => typeof v !== 'string' || v.length > 4096 || v.includes('\0'))) throw error('command inválido.');
         if (!BINARIES.has(args.command[0])) throw error('Binario no permitido.');
         if (args.command.some(v => /(?:^|[;&|\n])\s*(?:sh|bash|cmd|powershell)\b|\$\(/.test(v))) throw error('Shell o encadenamiento no permitido.');
-        if (args.network !== undefined && !['none', 'restricted'].includes(args.network)) throw error('Red no permitida.');
         if (args.timeoutMs !== undefined && (!Number.isInteger(args.timeoutMs) || args.timeoutMs < 1000 || args.timeoutMs > 120000)) throw error('Timeout fuera de límites.');
-        result = rememberRunnerJobs(await runner.execute({ jobId, round, workspace, command: args.command, network: args.network || 'none', timeoutMs: args.timeoutMs || 60000 })); break;
+        result = rememberRunnerJobs(await runner.execute({ jobId, round, workspace, command: args.command, network: 'none', timeoutMs: args.timeoutMs || 60000 })); break;
       }
       case 'runner_check':
         if (Object.keys(args).length) throw error('runner_check no acepta argumentos.');
