@@ -5,7 +5,8 @@ import { before, after } from 'node:test';
 
 process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:5432/test';
 process.env.HISTORY_ENCRYPTION_KEY ||= '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const { normalizeDiagnosticReport, initStore, closeStore, saveDiagnosticReport, getDiagnosticReport, listDiagnosticReports, updateDiagnosticTriage } = await import('../services/store.js');
+const { initStore, closeStore, saveDiagnosticReport, getDiagnosticReport, listDiagnosticReports, updateDiagnosticTriage } = await import('../services/store.js');
+const { normalizeDiagnosticReport } = await import('../services/diagnosticNormalizer.js');
 
 before(async () => { await initStore(); });
 after(async () => { await closeStore(); });
