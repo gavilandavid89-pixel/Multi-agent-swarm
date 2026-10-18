@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 export function sanitizeDiagnosticText(value, max = 2000) {
   return String(value ?? '')
-    .replace(/\\b(authorization|proxy-authorization|cookie|set-cookie)\\s*[:=]\\s*[^\\r\\n]+/ig, '$1=[REDACTED]')
+    .replace(/\b(authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]+/ig, '$1=[REDACTED]')
     .replace(/(bearer|token|api[_-]?key|password|secret)\s*[:=]\s*[^\s,;]+/ig, '$1=[REDACTED]')
     .replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/ig, 'https://[REDACTED]@')
     .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED]')
