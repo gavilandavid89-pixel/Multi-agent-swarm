@@ -422,6 +422,7 @@ async function runJob(job) {
     job.error = String(error?.message || error).slice(0, 1200);
   } finally {
     clearTimeout(timer);
+    pendingInput.delete(job.id);
     if (timedOut || cancelled) await stopPromise;
     if (await readContainerId(job)) {
       if (!workspaceCopied) {
