@@ -22,7 +22,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.equal(source.includes('/var/run/docker.sock'), false);
   assert.equal(source.includes('dst=/workspace,rw'), false);
   assert.ok(source.includes('cp -R -P /input/. /workspace/ && find /workspace -mindepth 1 -type d -exec chmod 0777 {} + && find /workspace -mindepth 1 -type f -exec chmod a+rw {} + && touch /tmp/swarm-runner-ready && exec tail -f /dev/null'));
-  assert.ok(source.includes("'exec', '--workdir', '/workspace', '--user', '65532:65532', cid, 'timeout'"));
+  assert.ok(source.includes("['exec', ...(job.hasStdin ? ['-i'] : []), '--workdir', '/workspace', '--user', '65532:65532', cid, 'timeout'"));
   assert.ok(source.includes("'--workdir', '/workspace', '--user', '10001:10001'"));
   assert.ok(source.includes("content.includes('\\u0000') || containsCredential(content)"));
   assert.ok(source.includes("safeWorkspaceCopyPath"));
