@@ -91,8 +91,8 @@ function workspaceFilesAsDelivery(files) {
   return (Array.isArray(files) ? files : []).map(file => {
     const ext = String(file.path || '').split('.').pop().toLowerCase();
     const lang = ({ js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', py: 'python', html: 'html', css: 'css', json: 'json', yml: 'yaml', yaml: 'yaml', md: 'markdown', sh: 'bash' })[ext] || '';
-    return '### Archivo: ' + file.path + '\\n\\n' + String.fromCharCode(96, 96, 96) + lang + '\\n' + file.content + '\\n' + String.fromCharCode(96, 96, 96);
-  }).join('\\n\\n');
+    return '### Archivo: ' + file.path + '\n\n' + String.fromCharCode(96, 96, 96) + lang + '\n' + file.content + '\n' + String.fromCharCode(96, 96, 96);
+  }).join('\n\n');
 }
 
 function appendEntries(existing, entries) { return [...(Array.isArray(existing) ? existing : []), ...entries].slice(-MAX_TRANSCRIPT_ENTRIES); }
