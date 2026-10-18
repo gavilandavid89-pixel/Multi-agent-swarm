@@ -102,6 +102,11 @@ function fromGemini(data, options) {
   const candidate = data.candidates?.[0];
   const parts = candidate?.content?.parts || [];
   const content = textFromParts(parts);
+  const toolCalls = parts.filter(part => part?.functionCall && typeof part.functionCall.name === 'string').map(part => ({
+    id: String(part.functionCall.id || ''),
+    name: String(part.functionCall.name),
+    arguments: part.functionCall.args ?? {}
+  }));
   const blocked = !candidate && Boolean(data.promptFeedback?.blockReason);
   return canonical(content, {
     ...options,
@@ -110,6 +115,7 @@ function fromGemini(data, options) {
     status: blocked ? 'blocked' : 'success',
     usage: data.usageMetadata || {},
     finishReason: blocked ? 'content_filter' : candidate?.finishReason,
+    toolCalls,
     warnings: blocked ? ['GEMINI_PROMPT_BLOCKED'] : []
   });
 }
