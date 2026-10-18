@@ -106,7 +106,7 @@ let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
   }
 })'
 artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
-printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok"))process.exit(1)})'
+printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL missing generated artifact",JSON.stringify(f));process.exit(1)}})'
 repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
@@ -137,7 +137,7 @@ while [ "$i" -lt 60 ]; do
 done
 printf '%s' "$second_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-api-step-2-ok")){console.error(JSON.stringify(j));process.exit(1)}})'
 second_artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$second_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
-printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="second-step.txt"&&x.content==="workspace-reused"))process.exit(1)})'
+printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="second-step.txt"&&x.content==="workspace-reused")){console.error("FAIL missing reused-workspace artifact",JSON.stringify(f));process.exit(1)}})'
 echo "PASS runner API idempotency and sequential task-scoped workspace reuse"
 echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
