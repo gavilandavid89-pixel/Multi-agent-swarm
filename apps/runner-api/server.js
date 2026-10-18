@@ -6,6 +6,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 
 const PORT = Number(process.env.PORT || 3200);
+const BIND_HOST = process.env.RUNNER_BIND_HOST || '127.0.0.1';
 const SECRET = process.env.RUNNER_SHARED_SECRET || '';
 const DOCKER = process.env.RUNNER_DOCKER_BIN || 'docker';
 const IMAGE = process.env.SWARM_RUNNER_IMAGE || 'swarm-agent-runner:local';
@@ -427,7 +428,7 @@ const server = createServer((req, res) => {
 server.requestTimeout = 15000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 5000;
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, BIND_HOST, () => {
   void initialize().then(() => {
     console.log('[runner-api] listening', JSON.stringify({ port: PORT, concurrency: MAX_CONCURRENCY, image: IMAGE }));
   }).catch(error => {
