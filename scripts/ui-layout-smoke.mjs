@@ -140,24 +140,26 @@ function launchChrome(profile) {
       '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
       '--disable-extensions', '--no-first-run', '--remote-debugging-port=0',
       `--user-data-dir=${profile}`, 'about:blank'
-    ], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
-    let stderr = '';
+    ], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    let output = '';
     let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill('SIGKILL');
-      reject(new Error('Timed out waiting for Chromium DevTools.'));
-    }, 15000);
-    child.stderr.setEncoding('utf8').on('data', chunk => {
-      stderr += chunk;
-      const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+    const inspectOutput = chunk => {
+      output += chunk;
+      const match = output.match(/DevTools listening on (ws:\/\/[^\s]+)/);
       if (match && !settled) {
         settled = true;
         clearTimeout(timeout);
         resolve({ child, websocketUrl: match[1] });
       }
-    });
+    };
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+      reject(new Error('Timed out waiting for Chromium DevTools. Output: ' + output.slice(-1600)));
+    }, 30000);
+    child.stdout.setEncoding('utf8').on('data', inspectOutput);
+    child.stderr.setEncoding('utf8').on('data', inspectOutput);
     child.on('error', error => {
       if (settled) return;
       settled = true;
@@ -168,7 +170,7 @@ function launchChrome(profile) {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      reject(new Error(`Chromium exited ${code} before DevTools was ready: ${stderr.slice(-1600)}`));
+      reject(new Error(`Chromium exited ${code} before DevTools was ready: ${output.slice(-1600)}`));
     });
   });
 }
