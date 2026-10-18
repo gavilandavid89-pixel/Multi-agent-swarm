@@ -63,3 +63,28 @@ test('Anthropic native tool_use is converted, dispatched, and returned as tool_r
     assert.match(requests[1].body.messages.at(-1).content[0].content, /README.md/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('Gemini native function calling dispatches and returns a function response', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  let call = 0;
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), body: JSON.parse(options.body) });
+    call++;
+    if (call === 1) return jsonResponse({ candidates: [{ content: { parts: [{ functionCall: { name: 'workspace_list', args: {}, id: 'gem-call-1' } }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } });
+    return jsonResponse({ candidates: [{ content: { parts: [{ text: 'Gemini listo.' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } });
+  };
+  try {
+    let dispatched = 0;
+    const result = await consultarWithProviderContext({
+      model: 'gemini-test', maxTokens: 500, messages: [{ role: 'user', content: 'Listá archivos' }],
+      tools: [{ type: 'function', function: { name: 'workspace_list', description: 'list', parameters: { type: 'object', properties: {}, additionalProperties: false } } }],
+      onToolCall: async input => { dispatched++; assert.equal(input.name, 'workspace_list'); return { ok: true, result: [{ path: 'README.md' }] }; }
+    }, null, { NODE_ENV: 'test', GEMINI_API_KEY: 'test-gemini-key', GEMINI_MODEL_CODING: 'gemini-test' });
+    assert.equal(result, 'Gemini listo.');
+    assert.equal(dispatched, 1);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.tools[0].functionDeclarations[0].name, 'workspace_list');
+    assert.equal(requests[1].body.contents.at(-1).parts[0].functionResponse.name, 'workspace_list');
+  } finally { globalThis.fetch = originalFetch; }
+});
