@@ -10,7 +10,8 @@ Este entorno se desarrolla en la rama `feature/agent-execution-sandbox`. No se h
 |---|---|
 | JavaScript / TypeScript | Node.js 22, npm; ejecutar tests y scripts de proyecto |
 | Python | Python 3, venv, pytest del sistema y herramientas de compilación |
-| Java | JDK headless, compilación y tests que ya tengan sus dependencias |
+| Java | JDK headless, Maven, compilación y tests que ya tengan sus dependencias |
+| Godot | Godot 4.4.1 fijado por versión y checksum; importación headless, análisis de scripts y arranque de escena |
 | Go | compilador y toolchain de Go |
 | PHP / Ruby | intérpretes y herramientas de proyecto |
 | C / C++ / Rust | GCC, G++, make, rustc y cargo |
@@ -29,11 +30,13 @@ La API `apps/runner-api` proporciona el plano de control autenticado y asíncron
 - Java/Maven: compila fuentes simples o resuelve dependencias con Maven bajo egress limitado y ejecuta `mvn -o test`.
 - Gradle: usa el wrapper del proyecto para resolver/compilar con proxy y después ejecuta `test` offline.
 - PHP/Composer y Ruby/Bundler: cuando hay lockfile y scripts de test, prepara dependencias con egress restringido y ejecuta tests offline.
-- C/C++ y shell: comprobación sintáctica. Chromium/Xvfb está disponible para pruebas de navegador.
+- C/C++ y shell: comprobación sintáctica.
+- Godot: cuando hay `project.godot`, importa el proyecto en modo headless, detecta errores comunes de parseo y arranca la escena principal durante 10 frames.
+- HTML: Chromium/Xvfb ejecuta una copia temporal y detecta excepciones JavaScript; no se evalúa el HTML generado dentro del Worker.
 
-La comprobación de HTML se ejecuta en el runner aislado con Chromium/Xvfb y una copia temporal del proyecto; el Worker no evalúa JavaScript HTML generado dentro de su propio contenedor. La detección automática está pensada para manifiestos de la raíz del proyecto; monorepos con varios gestores, SDK de Godot/Android/.NET/CUDA y builds que superan el tmpfs necesitan perfiles/imágenes específicas. El límite de 256 MiB por workspace hace que proyectos de dependencias pesadas fallen de forma explícita en vez de consumir disco del host.
+La comprobación de HTML se ejecuta en el runner aislado con Chromium/Xvfb y una copia temporal del proyecto; el Worker no evalúa JavaScript HTML generado dentro de su propio contenedor. La detección automática está pensada para manifiestos de la raíz del proyecto; monorepos con varios gestores, SDK de Android/.NET/CUDA y builds que superan el tmpfs necesitan perfiles/imágenes específicas. El límite de 256 MiB por workspace hace que proyectos de dependencias pesadas fallen de forma explícita en vez de consumir disco del host.
 
-La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Godot, Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
+La imagen es intencionalmente amplia para un entorno de desarrollo. No significa que todos los frameworks o SDK estén instalados. Para motores o SDK grandes (por ejemplo Android, .NET, CUDA, iOS/macOS), se deben crear imágenes de perfil versionadas y separadas, no inflar el runner general sin límite.
 
 ## Uso local
 
