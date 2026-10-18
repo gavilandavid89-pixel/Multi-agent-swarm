@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates coreutils findutils git make gcc g++ pkg-config \
       python3 python3-dev python3-pip python3-venv python3-pytest \
       default-jdk-headless golang-go php-cli ruby-full rustc cargo \
-      chromium chromium-sandbox xvfb xauth fonts-liberation libnss3 \
+      chromium chromium-sandbox xvfb xauth x11-utils fonts-liberation libnss3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 runner \
     && useradd --uid 10001 --gid runner --create-home --shell /bin/bash runner \
