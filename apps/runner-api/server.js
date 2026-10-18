@@ -34,6 +34,8 @@ const idempotency = new Map();
 const queue = [];
 const running = new Map();
 const workspaceBusy = new Map();
+// stdin is kept in memory only: debugger input must never be persisted in job records.
+const pendingInput = new Map();
 let active = 0;
 let closing = false;
 let initialized = false;
@@ -87,6 +89,11 @@ function validateRequest(body) {
   if (!command[0] || command[0].startsWith('-')) throw Object.assign(new Error('El ejecutable debe ser explícito.'), { status: 400 });
   const network = body.network === undefined ? 'none' : body.network;
   if (!['none', 'restricted'].includes(network)) throw Object.assign(new Error('network solo admite none o restricted.'), { status: 400 });
+  const hasStdin = Object.prototype.hasOwnProperty.call(body, 'stdin');
+  const stdin = hasStdin ? body.stdin : '';
+  if (typeof stdin !== 'string') throw Object.assign(new Error('stdin debe ser texto.'), { status: 400 });
+  if (Buffer.byteLength(stdin, 'utf8') > 16 * 1024) throw Object.assign(new Error('stdin supera el límite de 16 KiB.'), { status: 413 });
+  if (hasStdin && network !== 'none') throw Object.assign(new Error('stdin interactivo solo se permite con network none.'), { status: 400 });
   const workspaceId = body.workspaceId === undefined ? null : String(body.workspaceId);
   if (workspaceId !== null && !/^[0-9a-f-]{36}$/i.test(workspaceId)) throw Object.assign(new Error('workspaceId debe ser un UUID.'), { status: 400 });
   const resetWorkspace = body.resetWorkspace !== false;
@@ -106,7 +113,7 @@ function validateRequest(body) {
     return { path: file.path, content: file.content };
   });
   if (!resetWorkspace && (!workspaceId || files.length)) throw Object.assign(new Error('Reutilizar workspace requiere workspaceId y files vacío.'), { status: 400 });
-  return { command, network, timeoutMs, files, workspaceId, resetWorkspace };
+  return { command, network, timeoutMs, files, workspaceId, resetWorkspace, stdin, hasStdin };
 }
 function publicJob(job) {
   return {
@@ -399,9 +406,12 @@ async function runJob(job) {
     const result = await new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; resolve(value); };
-      currentChild = spawn(DOCKER, ['exec', '--workdir', '/workspace', '--user', '65532:65532', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const stdin = pendingInput.get(job.id);
+      pendingInput.delete(job.id);
+      currentChild = spawn(DOCKER, ['exec', ...(job.hasStdin ? ['-i'] : []), '--workdir', '/workspace', '--user', '65532:65532', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: [job.hasStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
       currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
       currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
+      if (job.hasStdin) currentChild.stdin.end(stdin || '');
       currentChild.on('error', error => finish({ code: null, error: error.message }));
       currentChild.on('close', code => finish({ code, error: null }));
     });
@@ -502,12 +512,13 @@ async function handle(req, res) {
     const id = randomUUID(); const now = new Date().toISOString();
     const workspaceId = body.workspaceId || id;
     if (workspaceBusy.has(workspaceId)) return json(res, 409, { error: 'Ya hay una ejecución en cola o activa para este workspace.' });
-    const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, requestHash, artifactSnapshot: [] };
+    const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, hasStdin: body.hasStdin, stdinBytes: Buffer.byteLength(body.stdin, 'utf8'), workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, requestHash, artifactSnapshot: [] };
     workspaceBusy.set(workspaceId, id);
     jobs.set(id, job);
     if (key) idempotency.set(key, id);
     try {
       await writeWorkspace(job, body.files, body.resetWorkspace);
+      if (body.hasStdin) pendingInput.set(id, body.stdin);
       await save(job); queue.push(id); void pump();
     } catch (error) {
       if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
@@ -572,6 +583,11 @@ async function initialize() {
       jobs.set(job.id, job);
       if (job.idempotencyKey) idempotency.set(job.idempotencyKey, job.id);
       if (job.status === 'queued') {
+        if (job.hasStdin) {
+          job.status = 'failed'; job.error = 'La entrada interactiva del depurador no se conserva tras reiniciar el runner; reenviá el trabajo.';
+          job.finishedAt = new Date().toISOString(); await save(job);
+          continue;
+        }
         if (workspaceBusy.has(job.workspaceId)) {
           job.status = 'failed'; job.error = 'Se detectaron trabajos duplicados para el mismo workspace durante la recuperación.';
           job.finishedAt = new Date().toISOString(); await save(job);
