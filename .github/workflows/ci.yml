@@ -1,4 +1,7 @@
 name: Swarm checks
+concurrency:
+  group: swarm-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 on:
   pull_request:
   push:
