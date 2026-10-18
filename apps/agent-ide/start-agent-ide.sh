@@ -5,6 +5,12 @@ if [ -z "${PASSWORD:-}" ] || [ "${#PASSWORD}" -lt 24 ]; then
   echo '[agent-ide] PASSWORD must be configured and contain at least 24 characters.' >&2
   exit 78
 fi
+case "$PASSWORD" in
+  *[!A-Za-z0-9._~!@#%+=:-]*)
+    echo '[agent-ide] PASSWORD contains unsupported characters; use letters, numbers and . _ ~ ! @ # % + = : -' >&2
+    exit 78
+    ;;
+esac
 
 mkdir -p "$HOME/.config/code-server" /tmp/agent-ide/user-data /tmp/agent-ide/extensions
 chmod 700 "$HOME/.config/code-server"
