@@ -1,6 +1,7 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
-import { checkJavascriptSyntax } from './codeChecks.js';
+import { checkJavascriptSyntax, extractFiles } from './codeChecks.js';
+import { runProjectToolchainChecks } from './runnerClient.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -206,6 +207,13 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
+        const runnerExecution = await runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) });
+        syntax = {
+          ...syntax,
+          runnerExecution,
+          ok: Boolean(syntax.ok && runnerExecution.ok),
+          message: [syntax.message, runnerExecution.checked || !runnerExecution.ok ? 'Runner aislado: ' + String(runnerExecution.message || (runnerExecution.ok ? 'ejecución omitida' : 'falló la ejecución')).slice(0, 2500) : ''].filter(Boolean).join('\\n')
+        };
         const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir durante la validación.');
         const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
         for (let i = transcript.length - 1; i >= 0; i--) {
