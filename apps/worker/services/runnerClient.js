@@ -115,7 +115,7 @@ export async function getAgentRunnerCapabilities() {
  * Trusted Worker -> private Runner API protocol. Commands are argv arrays, never
  * host-shell strings; network and resource policy are enforced by the runner host.
  */
-export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey, includeArtifacts = false } = {}) {
+export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey, includeArtifacts = false, stdin } = {}) {
   if (!configuredBase) return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.' : 'Runner remoto no configurado; se mantiene la validación determinista local.');
   if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, infraError: true, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
   let baseUrl;
@@ -126,6 +126,9 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   }
   if (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)) {
     return { available: true, checked: false, ok: false, infraError: true, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
+  }
+  if (stdin !== undefined && (typeof stdin !== 'string' || Buffer.byteLength(stdin, 'utf8') > 16 * 1024 || network !== 'none')) {
+    return { available: true, checked: false, ok: false, infraError: false, message: 'stdin del depurador debe ser texto de hasta 16 KiB y solo puede usarse con network none.' };
   }
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
@@ -148,7 +151,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
           'x-swarm-runner-secret': configuredSecret,
           'x-swarm-idempotency-key': key
         },
-        body: JSON.stringify({ files, command, network, timeoutMs, workspaceId: safeWorkspaceId, resetWorkspace })
+        body: JSON.stringify({ files, command, network, timeoutMs, workspaceId: safeWorkspaceId, resetWorkspace, ...(stdin === undefined ? {} : { stdin }) })
       }, 65000);
       break;
     } catch (error) {
