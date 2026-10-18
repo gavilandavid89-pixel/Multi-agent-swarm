@@ -65,6 +65,7 @@ echo "PASS runner API rejects unauthenticated requests"
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
   command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); fs.writeFileSync(\"generated.txt\",\"artifact-ok\"); console.log(\"runner-api-ok\")"],
+  workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
 created=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
@@ -92,6 +93,38 @@ let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
 })'
 artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
 printf '%s' "$artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok"))process.exit(1)})'
+repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
+  -d "$job_body")
+repeat_id=$(printf '%s' "$repeat" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ "$repeat_id" != "$job_id" ]; then echo "FAIL runner API idempotency returned a duplicate job" >&2; exit 1; fi
+
+step_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:false,
+  command:["node","-e","const fs=require(\"node:fs\"); if(!fs.readFileSync(\"generated.txt\",\"utf8\").includes(\"artifact-ok\")) process.exit(42); fs.writeFileSync(\"second-step.txt\",\"workspace-reused\"); console.log(\"runner-api-step-2-ok\")"],
+  network:"none",timeoutMs:15000
+}))')
+second=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-job-0002' \
+  -d "$step_body")
+second_id=$(printf '%s' "$second" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+second_json=
+i=0
+while [ "$i" -lt 60 ]; do
+  second_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$second_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$second_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$second_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-api-step-2-ok")){console.error(JSON.stringify(j));process.exit(1)}})'
+second_artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$second_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="second-step.txt"&&x.content==="workspace-reused"))process.exit(1)})'
+echo "PASS runner API idempotency and sequential task-scoped workspace reuse"
 echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
 # Network must be unavailable inside the sandbox.
