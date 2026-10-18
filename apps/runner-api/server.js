@@ -59,7 +59,7 @@ function safeRelativePath(input) {
   if (typeof input !== 'string' || !input || input.length > 240 || input.includes('\\') || input.includes('\0') || input.startsWith('/') || /^[a-z]:/i.test(input)) return false;
   const parts = input.split('/');
   if (parts.some(part => !part || part === '.' || part === '..')) return false;
-  if (parts.some(part => ['.git', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle'].includes(part))) return false;
+  if (parts.some(part => ['.git', '.godot', '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.docker', 'node_modules', '.venv', 'venv', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle'].includes(part))) return false;
   const base = parts.at(-1).toLowerCase();
   if (base === '.env' || (base.startsWith('.env.') && base !== '.env.example')) return false;
   if (['.npmrc', '.pypirc', '.netrc', '.git-credentials', '.gitconfig', '.envrc', '.dockerconfigjson', 'pip.conf', 'pip.ini', 'nuget.config', 'auth.json', 'settings.xml', 'gradle.properties', 'local.properties', 'terraform.tfvars', 'terraform.tfstate', 'secrets.yaml', 'secrets.yml', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'service-account.json', 'kubeconfig'].includes(base)) return false;
