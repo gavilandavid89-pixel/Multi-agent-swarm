@@ -4,6 +4,17 @@
 **Idioma de la interfaz:** español  
 **Arquitectura:** interfaz web + puente HTTP + worker de IA separado.
 
+## Guía operativa y estado real del sistema
+
+Antes de cambiar servicios o bases de datos, consultá [la guía de operaciones](docs/OPERATIONS_RUNBOOK.md).
+
+**Regla de seguridad:** un despliegue verde no demuestra que el flujo completo funcione. Separá siempre los estados *documentado*, *implementado en la rama*, *desplegado* y *verificado de extremo a extremo*. No publiques secretos, no cambies URLs de bases de datos sin backup verificado y no habilites ejecución arbitraria de código en un servicio público.
+
+- **Diagnóstico de fallos:** el colector persistente y su plantilla estructurada siguen en una rama experimental; todavía no están integrados en `main`. No asumir que los errores se envían o investigan automáticamente.
+- **Ejecución aislada:** Chromium + Xvfb para comprobaciones de HTML no equivale a un runner general seguro. La ejecución multi-lenguaje requiere infraestructura separada, límites de recursos y control de red a nivel de infraestructura.
+- **Visor de escritorio:** tratá el visor como experimental hasta verificar autenticación, health checks y conexión con la versión del Bridge desplegada.
+- **Bases de datos:** el Worker usa actualmente `DATABASE_URL` para el almacén de tareas/checkpoints de Render y `SWARM_DATABASE_URL` para cuentas en Neon. No son intercambiables.
+
 ## Componentes
 
 - `apps/web/public`: interfaz adaptable, historial bajo demanda y panel de actividad.
@@ -52,7 +63,7 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `SWARM_DATABASE_URL`: la misma base de cuentas que usa el bridge.
 - `SWARM_API_ENCRYPTION_KEY`: la misma clave de cifrado de APIs que usa el bridge.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
-- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 1; admite valores entre 1 y 8).
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 1.000.000; ajustable entre 4.000 y 1.000.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
