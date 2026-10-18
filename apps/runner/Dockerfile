@@ -36,6 +36,7 @@ RUN set -eux; \
     mkdir -p /opt/godot; \
     unzip -q /tmp/Godot_v4.4.1-stable_linux.x86_64.zip -d /opt/godot; \
     install -m 0755 /opt/godot/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot; \
+    if ldd /usr/local/bin/godot | grep -q 'not found'; then ldd /usr/local/bin/godot; exit 1; fi; \
     rm -rf /tmp/Godot_v4.4.1-stable_linux.x86_64.zip /tmp/godot-sha512.txt /tmp/godot-checksum.txt /opt/godot
 
 COPY --chown=runner:runner browser-smoke.mjs /opt/swarm-runner/browser-smoke.mjs
