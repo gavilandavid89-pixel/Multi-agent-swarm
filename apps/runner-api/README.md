@@ -21,9 +21,9 @@ sudo chown swarm-runner:swarm-runner .env
 # Ensure the rootless Docker user service is running for swarm-runner.
 # If its socket uses the default path, pass that environment explicitly:
 runner_uid=$(id -u swarm-runner)
-sudo -u swarm-runner env \\
-  XDG_RUNTIME_DIR="/run/user/$runner_uid" \\
-  DOCKER_HOST="unix:///run/user/$runner_uid/docker.sock" \\
+sudo -u swarm-runner env \
+  XDG_RUNTIME_DIR="/run/user/$runner_uid" \
+  DOCKER_HOST="unix:///run/user/$runner_uid/docker.sock" \
   npm start
 ```
 
