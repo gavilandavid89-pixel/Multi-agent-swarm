@@ -111,6 +111,11 @@ done
 if [ -f go.mod ] && [ -d vendor ]; then
   checked=$((checked + 1)); GOPROXY=off go test -mod=vendor ./... || { echo "FAIL go test -mod=vendor"; failed=1; }
 fi
+mapfile -d '' java_files < <(find . -type f -name '*.java' -not -path './.git/*' -not -path './target/*' -print0)
+if [ "${#java_files[@]}" -gt 0 ] && [ ! -f pom.xml ] && [ ! -f build.gradle ] && [ ! -f build.gradle.kts ]; then
+  checked=$((checked + 1)); mkdir -p /tmp/swarm-java-classes
+  javac -proc:none -d /tmp/swarm-java-classes "${java_files[@]}" || { echo "FAIL javac"; failed=1; }
+fi
 if [ -f Cargo.toml ] && [ -f Cargo.lock ] && [ -d vendor ]; then
   checked=$((checked + 1)); CARGO_NET_OFFLINE=true cargo test --offline || { echo "FAIL cargo test --offline"; failed=1; }
 fi
