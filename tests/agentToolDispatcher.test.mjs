@@ -12,7 +12,7 @@ function fixture(role = 'desarrollador', maxCalls = 40) {
     write: async (path, content) => { files.set(path, content); return { path, bytes: Buffer.byteLength(content) }; }
   };
   const runner = {
-    execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: 'ok' }; },
+    execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: args.command.includes('--large-output') ? 'x'.repeat(15000) : 'ok' }; },
     check: async () => ({ ok: true }),
     jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded' }),
     cancel: async ({ jobId }) => ({ jobId, cancelled: true }),
@@ -36,6 +36,18 @@ test('developer can read/write files and execute allowlisted binary without shel
   assert.equal(f.files.get('src/app.js'), 'updated');
   assert.equal((await f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } })).result.exitCode, 0);
   assert.deepEqual(f.executed[0].command, ['node', '--version']);
+});
+test('oversized runner output is returned as a valid bounded result', async () => {
+  const f = fixture();
+  const response = await f.dispatcher.invoke({
+    name: 'runner_execute',
+    arguments: { command: ['node', '--large-output'] }
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.truncated, true);
+  assert.ok(response.result.serializedChars > 12000);
+  assert.ok(response.result.preview.length < 12000);
+  assert.match(response.result.preview, /large-output|stdout/);
 });
 test('effective role permissions deny writes and execution to validator/auditor', async () => {
   const validator = fixture('validador').dispatcher;
