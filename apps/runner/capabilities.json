@@ -244,7 +244,7 @@
   },
   "execution": {
     "invocation": "argv array; no host shell",
-    "workspace": "por tarea, secuencial; entradas y artefactos limitados",
+    "workspace": "isolated per task + agent + purpose; sequential within each workspace",
     "defaultNetwork": "none",
     "dependencyNetwork": "restricted only; exact-host allowlist; proxy healthy required",
     "timeoutMs": {
@@ -451,5 +451,17 @@
       "Node Inspector attach/session management",
       "Java jdb attach/session management"
     ]
+  },
+  "workspaceIsolation": {
+    "status": "worker-primitives-implemented; model-tool-dispatch-pending",
+    "identity": "deterministic UUID derived from taskId, agentId and purpose; distinct agents never share a working workspace",
+    "integration": "separate coordinator-controlled integration workspace; agent workspaces are treated as proposals until merged",
+    "merge": "three-way merge against an immutable base; identical edits coalesce; conflicting edits fail closed with file and agent IDs",
+    "pathSafety": "reject traversal, credential paths and detected credential-like content before merge",
+    "concurrency": {
+      "perWorkspace": 1,
+      "globalRunner": 1,
+      "parallelExecution": "not enabled until each job has an independently enforced egress policy"
+    }
   }
 }
