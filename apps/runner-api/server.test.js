@@ -50,6 +50,12 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.equal(source.includes('process.env, stdio'), false);
 });
 
+test('runner API exposes authenticated capability discovery without widening job permissions', () => {
+  assert.ok(source.includes("new URL('../runner/capabilities.json', import.meta.url)"));
+  assert.ok(source.includes("req.method === 'GET' && url.pathname === '/v1/capabilities'"));
+  assert.ok(source.includes("safeEqual(req.headers['x-swarm-runner-secret'], SECRET)"));
+});
+
 test('runner API exposes health and async job lifecycle endpoints', () => {
   for (const route of [
     '/healthz', '/readyz', '/v1/jobs', '([0-9a-f-]{36})',
