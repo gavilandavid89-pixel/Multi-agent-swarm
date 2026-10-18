@@ -47,22 +47,25 @@ El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, c
 - **Árbitro:** consume resultados, fallos y checkpoints; no puede convertir una prueba no ejecutada en aprobada.
 - **Operador administrador:** cualquier cambio de allowlist, imagen, límites de seguridad o host de ejecución queda fuera del control de los agentes y requiere revisión explícita del operador.
 
-La identidad de rol no es un límite de seguridad suficiente por sí sola: el Worker debe validar permisos, propietario de tarea, IDs de jobs y límites en el servidor para cada llamada.
+La identidad de rol no es un límite de seguridad suficiente por sí sola: el Worker debe validar permisos, propietario de tarea, IDs de jobs y límites en el servidor para cada llamada. Los IDs de workspace aislados y el merge sin conflictos son primitivas ya implementadas, pero el dispatcher de tool-calls y la aplicación efectiva de permisos por rol todavía no están conectados a los modelos.
 
 ## Protocolo de trabajo
 
-1. El Worker crea un workspace efímero asociado a la tarea y un ID estable.
+1. El Worker crea un workspace efímero con ID determinista para la combinación tarea/agente/propósito. La base del proyecto es de solo lectura lógica para las propuestas; cada agente escribe únicamente en su espacio propio.
 2. El agente modifica archivos mediante operaciones de workspace; las rutas se validan en servidor.
 3. Para dependencias, el Worker elige un perfil de preparación revisado y ejecuta un job separado con red restricted. No pasa secretos, tokens de repositorios privados ni variables del host.
 4. Tras preparar, el Worker ejecuta los tests en un nuevo contenedor con red none.
 5. Cada ejecución usa idempotencia, timeout, estado persistido y cancelación. Los reintentos reutilizan la clave solo si el cuerpo de la solicitud no cambia; para contenido diferente se crea otra clave.
 6. El Worker recoge los artefactos del snapshot, limita bytes y cantidad de archivos, rechaza symlinks/rutas inseguras y aplica filtros de credenciales antes de que el agente vea el resultado.
 7. Los agentes reciben un resultado estructurado: jobId, status, exitCode, timedOut, stdout, stderr, artifacts, durationMs e infraError. Los resultados de infraestructura se distinguen de fallos del código del proyecto.
+8. El coordinador integra propuestas con merge de tres vías contra la base inmutable. Si hay conflicto, no pisa archivos ni ejecuta tests sobre una integración ambigua: solicita una resolución y luego vuelve a ejecutar toda la validación sobre el workspace de integración.
 
 ## Recuperación, concurrencia y UX
 
 - La API usa polling autenticado; el Worker debe persistir jobId y checkpoint antes de esperar. El cold start del host puede tardar, así que readiness y polling tienen ventanas mayores que el primer intento HTTP.
-- Un workspace no admite jobs concurrentes. La concurrencia global del host permanece en 1 mientras los trabajos restricted compartan el proxy. Para aumentar paralelismo, cada job necesita su propia red y política de egress, o un host/pool separado.
+- **Aislamiento lógico por agente:** `deriveAgentWorkspaceId(taskId, agentId, purpose)` genera un UUID determinista distinto por tarea, agente y propósito. Dos agentes de la misma tarea no deben compartir su workspace de trabajo. Reintentar el mismo propósito conserva su identidad; una nueva ronda o el workspace de integración usa otro propósito.
+- **Integración separada:** las propuestas de cada agente se comparan contra una base inmutable. `mergeAgentWorkspaceChanges` combina cambios en rutas diferentes, coalesce ediciones idénticas y rechaza el merge entero si dos agentes cambian el mismo archivo de formas incompatibles. No se devuelve una integración parcial en caso de conflicto; el coordinador debe pedir resolución explícita.
+- Un workspace no admite jobs concurrentes. La concurrencia global del host permanece en 1 mientras los trabajos restricted compartan el proxy. Los espacios lógicos ya quedan separados, pero el runner sigue ejecutando un job a la vez; para aumentar paralelismo, cada job necesita su propia red y política de egress aplicada fuera del contenedor, o un host/pool separado.
 - La interfaz del agente debe mostrar estados reales: queued, running, succeeded, failed, timed_out, cancelled; no mostrar “probado” hasta que un job termine con código 0.
 - La salida se presenta por fragmentos resumidos y artefactos, no volcando logs ilimitados en el prompt. Guardar logs completos acotados y referencias de artefactos en el checkpoint; incluir solo el fragmento relevante en el siguiente turno del modelo.
 - El usuario debe poder ver qué perfil se ejecutó, qué archivos se cambiaron y por qué se rechazó una ejecución. No incluir secretos ni variables de entorno en la UI o los logs.
