@@ -250,6 +250,74 @@ done
 printf '%s' "$debug_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||j.exitCode!==0||!String(j.stdout||"").includes("42")){console.error("FAIL debugger stdin/output:",JSON.stringify(j));process.exit(1)}})'
 echo "PASS runner accepts bounded debugger stdin and returns debugger output"
 
+# Verify stdout is visible from GET /v1/jobs/:id before the process exits.
+stream_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"88888888-8888-4888-8888-888888888888",resetWorkspace:true,
+  command:["node","-e","console.log('stream-start'); setTimeout(()=>console.log('stream-end'),3000)"],
+  network:"none",timeoutMs:10000
+}))')
+stream_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-live-output-01' \
+  -d "$stream_body")
+stream_id=$(printf '%s' "$stream_created" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+stream_partial=
+i=0
+while [ "$i" -lt 15 ]; do
+  stream_partial=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$stream_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  has_start=$(printf '%s' "$stream_partial" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);process.stdout.write(j.status==="running"&&String(j.stdout||"").includes("stream-start")?"yes":"no")})')
+  [ "$has_start" = "yes" ] && break
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$has_start" != "yes" ]; then echo "FAIL runner did not expose live stdout while running: $stream_partial" >&2; exit 1; fi
+stream_final=
+i=0
+while [ "$i" -lt 15 ]; do
+  stream_final=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$stream_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$stream_final" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$stream_final" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||j.exitCode!==0||!String(j.stdout||"").includes("stream-end")){console.error("FAIL final streamed output:",JSON.stringify(j));process.exit(1)}})'
+echo "PASS runner exposes partial stdout while running and final output after exit"
+
+# Verify active cancellation reaches a terminal cancelled state.
+cancel_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"99999999-9999-4999-8999-999999999999",resetWorkspace:true,
+  command:["node","-e","setInterval(()=>console.log('cancel-tick'),1000)"],
+  network:"none",timeoutMs:30000
+}))')
+cancel_created=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-cancel-active-01' \
+  -d "$cancel_body")
+cancel_id=$(printf '%s' "$cancel_created" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+i=0
+while [ "$i" -lt 15 ]; do
+  cancel_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$cancel_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  [ "$cancel_state" = "running" ] && break
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$cancel_state" != "running" ]; then echo "FAIL runner job never reached running before cancellation ($cancel_state)" >&2; exit 1; fi
+cancel_http=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs/"$cancel_id"/cancel -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+if [ "$cancel_http" != 202 ]; then echo "FAIL runner rejected active cancellation ($cancel_http)" >&2; exit 1; fi
+cancel_final=
+i=0
+while [ "$i" -lt 20 ]; do
+  cancel_final=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$cancel_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  state=$(printf '%s' "$cancel_final" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$state" in cancelled|failed|timed_out|succeeded) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$cancel_final" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="cancelled"||j.cancelled!==true){console.error("FAIL active cancellation:",JSON.stringify(j));process.exit(1)}})'
+echo "PASS runner cancels an active process and reports terminal state"
+
 timeout_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
   command:["node","-e","setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
