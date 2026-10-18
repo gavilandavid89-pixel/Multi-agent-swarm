@@ -60,7 +60,6 @@ test('Worker client authenticates, sends idempotency, polls asynchronously, and 
   assert.equal(seen[0].body.network, 'none');
   assert.equal(seen[0].body.workspaceId, '22222222-2222-4222-8222-222222222222');
   assert.equal(seen[0].body.resetWorkspace, true);
-  assert.ok((await import('../apps/worker/services/runnerClient.js?test=' + randomUUID())).runProjectToolchainChecks);
 
   const checks = await runProjectToolchainChecks({
     taskId: '33333333-3333-4333-8333-333333333333',
