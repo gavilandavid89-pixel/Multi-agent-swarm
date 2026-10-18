@@ -53,6 +53,9 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `SWARM_API_ENCRYPTION_KEY`: la misma clave de cifrado de APIs que usa el bridge.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
 - `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `AGENT_RUNNER_BASE_URL`: URL privada de `apps/runner-api`; si queda vacía, la ejecución remota se omite y se mantienen los chequeos deterministas.
+- `AGENT_RUNNER_SHARED_SECRET`: secreto aleatorio independiente de `WORKER_SHARED_SECRET`; debe coincidir con `RUNNER_SHARED_SECRET` del host del runner.
+- `AGENT_RUNNER_REQUIRED`: `false` por defecto; al ponerlo en `true`, el Swarm no puede aprobar una tarea si el runner no está disponible o falla.
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 1.000.000; ajustable entre 4.000 y 1.000.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
