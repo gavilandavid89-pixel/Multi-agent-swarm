@@ -25,7 +25,7 @@ async function request(path, options = {}, timeoutMs = 15000) {
  * Trusted Worker -> private Runner API protocol. Commands are argv arrays, never
  * host-shell strings; network and resource policy are enforced by the runner host.
  */
-export async function runAgentCommand({ taskId, files, command, network = 'none', timeoutMs = 60000, idempotencyKey } = {}) {
+export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = true, files, command, network = 'none', timeoutMs = 60000, idempotencyKey } = {}) {
   if (!configuredBase) return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.' : 'Runner remoto no configurado; se mantiene la validación determinista local.');
   if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
   let baseUrl;
@@ -35,6 +35,8 @@ export async function runAgentCommand({ taskId, files, command, network = 'none'
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
   }
   const key = String(idempotencyKey || (String(taskId || randomUUID()) + ':exec:' + randomUUID())).slice(0, 128);
+  const selectedWorkspaceId = String(workspaceId || taskId || randomUUID());
+  const safeWorkspaceId = /^[0-9a-f-]{36}$/i.test(selectedWorkspaceId) ? selectedWorkspaceId : randomUUID();
   let created;
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -46,7 +48,7 @@ export async function runAgentCommand({ taskId, files, command, network = 'none'
           'x-swarm-runner-secret': configuredSecret,
           'x-swarm-idempotency-key': key
         },
-        body: JSON.stringify({ files, command, network, timeoutMs })
+        body: JSON.stringify({ files, command, network, timeoutMs, workspaceId: safeWorkspaceId, resetWorkspace })
       }, 65000);
       break;
     } catch (error) {
@@ -129,6 +131,8 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   if (!entries.length) return { available: false, checked: false, ok: true, skipped: true, message: 'No hay archivos extraídos para ejecutar en el runner.' };
   const result = await runAgentCommand({
     taskId,
+    workspaceId: /^[0-9a-f-]{36}$/i.test(String(taskId || '')) ? String(taskId) : undefined,
+    resetWorkspace: true,
     files: entries,
     command: ['bash', '-lc', CHECK_SCRIPT],
     network: 'none',
