@@ -117,6 +117,20 @@ unauthorized=$(curl -sS -o "${workspace}-unauthorized.json" -w '%{http_code}' -X
 if [ "$unauthorized" != 401 ]; then echo "FAIL runner API accepted unauthenticated request ($unauthorized)" >&2; exit 1; fi
 echo "PASS runner API rejects unauthenticated requests"
 
+restricted_stdin_body=$(node -e 'process.stdout.write(JSON.stringify({files:[],command:["python3","-m","pdb"],network:"restricted",timeoutMs:5000,stdin:"q\\n"}))')
+restricted_stdin_status=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -d "$restricted_stdin_body")
+if [ "$restricted_stdin_status" != 400 ]; then echo "FAIL runner accepted debugger stdin with restricted networking ($restricted_stdin_status)" >&2; exit 1; fi
+oversize_stdin_body=$(node -e 'process.stdout.write(JSON.stringify({files:[],command:["python3","-m","pdb"],network:"none",timeoutMs:5000,stdin:"x".repeat(16385)}))')
+oversize_stdin_status=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -d "$oversize_stdin_body")
+if [ "$oversize_stdin_status" != 413 ]; then echo "FAIL runner accepted oversized debugger stdin ($oversize_stdin_status)" >&2; exit 1; fi
+echo "PASS runner rejects debugger input with network egress and enforces the 16 KiB limit"
+
 capabilities_status=$(curl -sS -o "${workspace}-capabilities.json" -w '%{http_code}' http://127.0.0.1:3200/v1/capabilities -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
 if [ "$capabilities_status" != 200 ]; then echo "FAIL authenticated capability discovery HTTP $capabilities_status" >&2; exit 1; fi
 node -e 'const fs=require("node:fs"); const c=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(c.schemaVersion!==1||c.execution.defaultNetwork!=="none"||!c.toolchains.some(x=>x.id==="typescript")||!c.toolchains.some(x=>x.id==="godot")) process.exit(51)' "${workspace}-capabilities.json"
