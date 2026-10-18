@@ -85,6 +85,33 @@ async function waitForRunnerReady(maxWaitMs = 150000) {
 }
 
 /**
+ * Fetch the runner's machine-readable toolchain catalog for trusted orchestration.
+ * This only discovers installed capabilities; it does not grant model tool access.
+ */
+export async function getAgentRunnerCapabilities() {
+  if (!configuredBase) return { ...unavailable('Runner remoto no configurado; no se puede descubrir el catálogo de capacidades.'), capabilities: null };
+  if (configuredSecret.length < 32) return { available: true, checked: false, ok: false, infraError: true, capabilities: null, message: 'AGENT_RUNNER_SHARED_SECRET debe contener al menos 32 caracteres.' };
+  let baseUrl;
+  try { baseUrl = new URL(configuredBase); }
+  catch { return { available: true, checked: false, ok: false, infraError: true, capabilities: null, message: 'AGENT_RUNNER_BASE_URL no es una URL válida.' }; }
+  if (!['http:', 'https:'].includes(baseUrl.protocol)
+    || baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password
+    || (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname))) {
+    return { available: true, checked: false, ok: false, infraError: true, capabilities: null, message: 'El catálogo solo se consulta por HTTPS o HTTP en un host privado/local, sin rutas ni credenciales en la URL.' };
+  }
+  try {
+    await waitForRunnerReady();
+    const capabilities = await request('/v1/capabilities', {}, 15000);
+    if (capabilities?.schemaVersion !== 1 || !Array.isArray(capabilities.toolchains) || !capabilities.execution) {
+      return { available: true, checked: true, ok: false, infraError: true, capabilities: null, message: 'El runner devolvió un catálogo de capacidades inválido o incompatible.' };
+    }
+    return { available: true, checked: true, ok: true, capabilities };
+  } catch (error) {
+    return { available: true, checked: true, ok: false, infraError: true, capabilities: null, message: 'No se pudo consultar el catálogo del runner: ' + String(error?.message || error).slice(0, 500) };
+  }
+}
+
+/**
  * Trusted Worker -> private Runner API protocol. Commands are argv arrays, never
  * host-shell strings; network and resource policy are enforced by the runner host.
  */
