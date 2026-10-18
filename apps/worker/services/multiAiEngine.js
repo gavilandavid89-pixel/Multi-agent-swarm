@@ -2,7 +2,7 @@ import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, ag
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
 import { checkJavascriptSyntax, extractFiles } from './codeChecks.js';
 import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
-import { deriveAgentWorkspaceId } from './agentWorkspace.js';
+import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
 import { AGENT_TOOL_DEFINITIONS, createAgentToolDispatcher } from './agentToolDispatcher.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
@@ -11,8 +11,8 @@ import { recordAgentCheckpoint } from './agentMemory.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
-async function createDeveloperToolContext(jobId, round, seedDelivery = '') {
-  const workspaceId = deriveAgentWorkspaceId(jobId, 'desarrollador', 'round-' + round);
+async function createAgentToolContext(jobId, round, role = 'desarrollador', seedDelivery = '') {
+  const workspaceId = deriveAgentWorkspaceId(jobId, role, 'round-' + round);
   const initial = await getPayload(jobId);
   const stored = initial?.payload?.agentWorkspaces?.[workspaceId];
   if (!Array.isArray(stored)) {
@@ -81,11 +81,36 @@ async function createDeveloperToolContext(jobId, round, seedDelivery = '') {
       }));
     }
   };
-  const dispatcher = createAgentToolDispatcher({ role: 'desarrollador', workspace, runner, jobId, round, maxCalls: 40 });
+  const dispatcher = createAgentToolDispatcher({ role, workspace, runner, jobId, round, maxCalls: 40 });
   return {
     workspace, workspaceId, tools: AGENT_TOOL_DEFINITIONS,
     onToolCall: ({ name, arguments: args }) => dispatcher.invoke({ name, arguments: args })
   };
+}
+async function integrateAgentWorkspace(jobId, round, baseDelivery, modelDelivery, toolContext) {
+  const baseFiles = extractFiles(baseDelivery);
+  const workspaceFiles = await toolContext.workspace.list();
+  const modelFiles = extractFiles(modelDelivery);
+  if (!workspaceFiles.length && !modelFiles.length) return modelDelivery;
+  const merged = mergeAgentWorkspaceChanges({
+    baseFiles,
+    agentChanges: [
+      { agentId: 'desarrollador', files: workspaceFiles },
+      { agentId: 'desarrollador-texto', files: modelFiles }
+    ]
+  });
+  if (!merged.ok) {
+    const error = new Error('Conflicto de integración entre los cambios del workspace y la entrega textual; no se integró ningún archivo.');
+    error.code = 'AGENT_WORKSPACE_CONFLICT';
+    error.conflicts = merged.conflicts;
+    throw error;
+  }
+  const integrationWorkspaceId = deriveAgentWorkspaceId(jobId, 'coordinador', 'integration-round-' + round);
+  const record = await getPayload(jobId);
+  const integrations = record?.payload?.integrationWorkspaces || {};
+  await updateJob(jobId, { payload: { integrationWorkspaces: { ...integrations, [integrationWorkspaceId]: merged.files } } });
+  const rendered = workspaceFilesAsDelivery(merged.files);
+  return rendered || modelDelivery;
 }
 function workspaceFilesAsDelivery(files) {
   return (Array.isArray(files) ? files : []).map(file => {
@@ -256,7 +281,7 @@ async function runJob(jobId) {
     if (!delivery) {
       await startAgent(jobId, 'Desarrollo', 35, 'Desarrollador', 'Con el plan acordado, voy a construir los archivos procurando que las piezas encajen entre sí; después pasarán una revisión independiente.');
       await assertTaskTokenBudget(jobId);
-      const toolContext = await createDeveloperToolContext(jobId, 1, partialDelivery || delivery);
+      const toolContext = await createAgentToolContext(jobId, 1, 'desarrollador', partialDelivery || delivery);
       if (partialDelivery) {
         delivery = partialDelivery;
         const continuation = await agenteDesarrollador(objective, strategy, 'CONTINUÁ LA ENTREGA TRUNCADA. El contenido previo quedó cortado por el límite de salida. Terminá el archivo incompleto y entregá completos los archivos afectados, sin repetir el contenido anterior como explicación.', onRetry('Desarrollador', 'Desarrollo'), partialDelivery, coherence, canContinue, savePartial, toolContext);
@@ -264,8 +289,7 @@ async function runJob(jobId) {
       } else {
         delivery = await agenteDesarrollador(objective, strategy, '', onRetry('Desarrollador', 'Desarrollo'), '', coherence, canContinue, savePartial, toolContext);
       }
-      const workspaceDelivery = workspaceFilesAsDelivery(await toolContext.workspace.list());
-      if (workspaceDelivery) delivery = mergeDelivery(delivery, workspaceDelivery);
+      delivery = await integrateAgentWorkspace(jobId, 1, partialDelivery || '', delivery, toolContext);
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
     }
@@ -281,12 +305,14 @@ async function runJob(jobId) {
         if (!coherenceReview) {
           await startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Voy a revisar las conexiones entre archivos y buscar incompatibilidades concretas antes de que el proyecto llegue a la validación final.');
           await assertTaskTokenBudget(jobId);
-          coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry('Coordinador de coherencia', `Auditoría de coherencia ${round}`));
+          const auditorTools = await createAgentToolContext(jobId, round, 'auditor', delivery);
+          coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry('Coordinador de coherencia', `Auditoría de coherencia ${round}`), auditorTools);
           await checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, coherenceReviewRound: round, activeValidationRound: round, delivery, validation: null, syntax: null });
         }
         await startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
         await assertTaskTokenBudget(jobId);
-        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`));
+        const validatorTools = await createAgentToolContext(jobId, round, 'validador', delivery);
+        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools);
         if (coherenceReview.verdict !== 'APPROVED') {
           validation = {
             ...validation,
@@ -366,11 +392,10 @@ async function runJob(jobId) {
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       await assertTaskTokenBudget(jobId);
       const repairContext = selectRepairContext(delivery, findings.join('\n'));
-      const toolContext = await createDeveloperToolContext(jobId, round + 1, repairContext);
+      const toolContext = await createAgentToolContext(jobId, round + 1, 'desarrollador', repairContext);
       const correctedOutput = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
-      const workspaceDelivery = workspaceFilesAsDelivery(await toolContext.workspace.list());
-      const correctedDelivery = workspaceDelivery ? mergeDelivery(correctedOutput, workspaceDelivery) : correctedOutput;
-      const mergedDelivery = mergeDelivery(delivery, correctedDelivery);
+      const correctedDelivery = await integrateAgentWorkspace(jobId, round + 1, delivery, correctedOutput, toolContext);
+      const mergedDelivery = correctedDelivery;
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
@@ -383,6 +408,18 @@ async function runJob(jobId) {
     await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
+    if (error?.code === 'AGENT_WORKSPACE_CONFLICT' && current) {
+      const transcript = appendEntries(current.payload.transcript, [{
+        at: new Date().toISOString(), agent: 'Coordinador de integración', type: 'error',
+        content: 'La integración se detuvo porque dos propuestas difieren en el mismo archivo. No se aplicó una integración parcial. Conflictos: ' + JSON.stringify(error.conflicts || []).slice(0, 4000)
+      }]);
+      await updateJob(jobId, {
+        status: 'needs_review', stage: 'Conflicto de integración · revisión humana', progress: 99,
+        error: String(error.message || 'Conflicto de workspace.'),
+        payload: { ...current.payload, transcript, activeStage: null, lastCheckpoint: 'workspace-merge-conflict', workspaceConflicts: error.conflicts || [], result: { status: 'needs_review', delivery: current.payload.delivery || '', workspaceConflicts: error.conflicts || [] } }
+      });
+      return { blocked: true, reason: 'agent-workspace-conflict' };
+    }
     if (error?.code === 'TASK_TOKEN_BUDGET' && current) {
       const patch = buildBudgetPausePatch(current, error);
       console.warn('[worker][token_budget_paused]', JSON.stringify({ jobId, usedTokens: error.usedTokens ?? null, tokenLimit: error.tokenLimit ?? null, estimatedInputTokens: error.estimatedInputTokens ?? null, checkpoint: patch.payload.lastCheckpoint, progress: patch.progress }));

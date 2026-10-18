@@ -35,6 +35,9 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(checks.includes('export function extractFiles(delivery)'));
   assert.ok(engine.includes('runProjectToolchainChecks') && engine.includes('runAgentCommand') && engine.includes("from './runnerClient.js'"));
   assert.ok(engine.includes('runProjectToolchainChecks({ taskId: jobId, round, files: await readFiles() })'));
+  assert.ok(engine.includes('mergeAgentWorkspaceChanges'));
+  assert.ok(engine.includes("lastCheckpoint: 'workspace-merge-conflict'"));
+  assert.ok(engine.includes("createAgentToolContext(jobId, round, 'validador', delivery)"));
   assert.ok(engine.includes('ok: Boolean(syntax.ok && runnerExecution.ok)'));
   assert.ok(engine.includes("runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE'"));
   assert.ok(engine.includes("item.phase === 'tests'"));

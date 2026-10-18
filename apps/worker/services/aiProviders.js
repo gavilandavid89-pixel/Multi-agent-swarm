@@ -439,7 +439,7 @@ export async function agenteCoordinador(objetivo, estrategia, propuesta, critica
     ]
   });
 }
-export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry) {
+export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry, toolContext = null) {
   const source = String(entrega ?? '');
   const maxChars = 8500;
   const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
@@ -462,7 +462,7 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
       model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
-      responseFormat: { type: 'json_object' }, onRetry,
+      responseFormat: toolContext ? null : { type: 'json_object' }, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, maxToolRounds: 4,
       messages: [
         sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Usá internamente tres alter egos y combiná sus hallazgos sin repetirlos: (1) Detective de contratos: nombres de funciones/clases, importaciones/exportaciones, rutas, formatos, configuración y dependencias; (2) Abogado del diablo: supuestos falsos, casos límite, errores lógicos, seguridad y comportamiento ante interrupciones; (3) Guardián de entrega: archivos completos, objetivo/criterios de aceptación y ausencia de contradicciones. Cada hallazgo debe incluir ruta concreta, evidencia textual verificable, impacto y corrección mínima; separá bloqueos reales de mejoras opcionales. Usá el mapa para comprobar contratos con otros lotes. El mensaje incluye el INVENTARIO COMPLETO de archivos: uno fuera de este lote puede existir en otro. PROHIBIDO afirmar que falta un archivo si figura en el inventario. No inventes incompatibilidades, no supongas pruebas ejecutadas y no marques como error algo no verificable. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nMAPA DE COHERENCIA:\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\nINVENTARIO COMPLETO DE ARCHIVOS DE LA ENTREGA (pueden estar distribuidos en otros lotes):\n' + manifestText + '\nARCHIVOS COMPLETOS DEL LOTE:\n' + batches[i] }
@@ -581,7 +581,7 @@ export function parseValidationResponse(rawValue) {
     raw: raw.slice(0, 12000)
   };
 }
-export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
+export async function agenteValidador(objetivo, estrategia, entrega, onRetry, toolContext = null) {
   const source = String(entrega ?? '');
   const maxChars = 8500;
   const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
@@ -606,7 +606,7 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
       model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
-      responseFormat: { type: 'json_object' }, onRetry,
+      responseFormat: toolContext ? null : { type: 'json_object' }, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, maxToolRounds: 4,
       messages: [
         sys('Validador independiente', 'Tu voz es sobria, imparcial y basada en evidencia: respondé al resultado del Desarrollador, distinguí fallos confirmados de sospechas y explicá el impacto sin dramatizar. Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE un objeto JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. No uses Markdown, bloques de código ni texto antes/después del objeto. No reemplaces corchetes por entidades HTML (&#91; o &#93;). Escapá las comillas dobles dentro de las cadenas y no uses comas finales. Limitá findings a 10 elementos y summary a 600 caracteres. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nESTRATEGIA:\n' + boundContext(estrategia, 1000, 'estrategia') + '\nARCHIVOS:\n' + batches[i] }
