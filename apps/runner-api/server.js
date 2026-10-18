@@ -141,7 +141,7 @@ function dockerArgs(job) {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 10001;
   const gid = typeof process.getgid === 'function' ? process.getgid() : 10001;
   const args = [
-    'run', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
+    'run', '-d', '--init', '--cidfile', path.join(STATE, job.id + '.cid'),
     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
     '--pids-limit', '128', '--memory', '1g', '--cpus', '2',
     '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
@@ -159,9 +159,9 @@ function dockerArgs(job) {
       '--env', 'ALL_PROXY=http://172.30.0.2:3128',
       '--env', 'NO_PROXY=localhost,127.0.0.1,::1');
   } else args.push('--network', 'none');
-  // Input is read-only; project execution happens on a size-limited tmpfs.
-  // A fixed wrapper copies input into tmpfs and then execs the supplied argv without a host shell.
-  args.push(IMAGE, 'bash', '-c', 'cp -a /input/. /workspace/ && exec "$@"', 'swarm-runner', ...job.command);
+  // Keep the container alive while docker cp snapshots its size-limited tmpfs workspace.
+  // The project command is passed separately to docker exec as argv, never through a host shell.
+  args.push(IMAGE, 'bash', '-c', 'cp -a /input/. /workspace/ && touch /tmp/swarm-runner-ready && exec tail -f /dev/null');
   return args;
 }
 function appendOutput(job, key, chunk) {
@@ -239,59 +239,76 @@ async function collectFiles(workspace) {
 async function runJob(job) {
   active++;
   job.status = 'running'; job.startedAt = new Date().toISOString();
-  const started = Date.now(); let timedOut = false; let cancelled = false; let timer; let currentChild = null;
+  const started = Date.now();
+  let timedOut = false; let cancelled = false; let timer; let currentChild = null; let workspaceCopied = false;
   let stopPromise = Promise.resolve();
-  const cancel = () => {
-    cancelled = true;
-    stopPromise = (async () => {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      await killJobContainer(job);
-      try { currentChild?.kill('SIGTERM'); } catch {}
-    })();
+  const snapshotBeforeStop = async () => {
+    if (workspaceCopied || !(await readContainerId(job))) return;
+    try { await copyWorkspaceFromContainer(job); workspaceCopied = true; } catch {}
   };
-  running.set(job.id, { cancel });
-  timer = setTimeout(() => {
-    timedOut = true;
+  const stop = () => {
     stopPromise = (async () => {
       await new Promise(resolve => setTimeout(resolve, 300));
+      await snapshotBeforeStop();
       await killJobContainer(job);
       try { currentChild?.kill('SIGTERM'); } catch {}
       setTimeout(() => { try { currentChild?.kill('SIGKILL'); } catch {} }, 3000).unref();
     })();
-  }, job.timeoutMs);
+  };
+  const cancel = () => { cancelled = true; stop(); };
+  running.set(job.id, { cancel });
+  // The in-container GNU timeout handles normal expiry. This outer timer is a
+  // safety net for a wedged Docker exec/daemon and snapshots files before kill.
+  timer = setTimeout(() => {
+    if (cancelled || timedOut) return;
+    timedOut = true;
+    stop();
+  }, job.timeoutMs + 5000);
   try {
     await save(job);
     if (job.network === 'restricted') await ensureRestrictedNetwork();
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de iniciar el contenedor.');
     await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
+    const launched = await dockerCommand(dockerArgs(job), 15000);
+    if (launched.code !== 0) throw new Error('No se pudo iniciar el contenedor: ' + String(launched.stderr || launched.stdout || 'docker run falló').slice(0, 800));
+    const cid = await readContainerId(job);
+    if (!cid) throw new Error('Docker no devolvió un identificador de contenedor.');
+    let ready = false;
+    for (let i = 0; i < 50 && !timedOut && !cancelled; i++) {
+      const probe = await dockerCommand(['exec', cid, 'test', '-f', '/tmp/swarm-runner-ready'], 1000);
+      if (probe.code === 0) { ready = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!ready) throw new Error('El workspace del contenedor no quedó listo dentro del límite.');
+    if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de ejecutar el comando.');
+    const timeoutSeconds = Math.max(1, Math.ceil(job.timeoutMs / 1000));
     const result = await new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; resolve(value); };
-      currentChild = spawn(DOCKER, dockerArgs(job), { stdio: ['ignore', 'pipe', 'pipe'] });
+      currentChild = spawn(DOCKER, ['exec', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
       currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
       currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
       currentChild.on('error', error => finish({ code: null, error: error.message }));
       currentChild.on('close', code => finish({ code, error: null }));
     });
-    if (timedOut || cancelled) await stopPromise;
     job.exitCode = result.code;
-    job.timedOut = timedOut;
-    job.cancelled = cancelled;
-    job.error = result.error || null;
-    // docker run intentionally does not use --rm: bounded tmpfs output must be copied
-    // back before the stopped container is removed.
-    if (await readContainerId(job)) {
-      try { await copyWorkspaceFromContainer(job); }
-      catch (error) { job.error = String(error?.message || error).slice(0, 1200); }
-      await removeJobContainer(job);
-    }
-    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : result.code === 0 && !job.error ? 'succeeded' : 'failed';
+    if (result.error) job.error = result.error;
+    if (result.code === 124) timedOut = true;
   } catch (error) {
-    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : 'failed';
     job.error = String(error?.message || error).slice(0, 1200);
-    await removeJobContainer(job);
   } finally {
     clearTimeout(timer);
+    if (timedOut || cancelled) await stopPromise;
+    if (await readContainerId(job)) {
+      if (!workspaceCopied) {
+        try { await copyWorkspaceFromContainer(job); workspaceCopied = true; }
+        catch (error) { job.error = String(error?.message || error).slice(0, 1200); }
+      }
+      await removeJobContainer(job);
+    }
+    job.timedOut = timedOut;
+    job.cancelled = cancelled;
+    job.status = cancelled ? 'cancelled' : timedOut ? 'timed_out' : job.error ? 'failed' : job.exitCode === 0 ? 'succeeded' : 'failed';
     running.delete(job.id);
     job.durationMs = Date.now() - started;
     job.finishedAt = new Date().toISOString();
