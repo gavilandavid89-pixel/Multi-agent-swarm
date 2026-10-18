@@ -124,8 +124,8 @@ if [ "$secret_status" != 400 ]; then echo "FAIL runner API accepted a credential
 echo "PASS runner API rejects credential-like paths before job creation"
 
 job_body=$(node -e 'process.stdout.write(JSON.stringify({
-  files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"}],
-  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); fs.writeFileSync(\"/workspace/credential-output.txt\",\"-----BEGIN OPENSSH PRIVATE KEY-----\\\\nnot-a-real-key\\\\n-----END OPENSSH PRIVATE KEY-----\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
+  files:[{path:"main.js",content:"console.log(\"input-file-ok\")\n"},{path:"deleted.txt",content:"remove-me"}],
+  command:["node","-e","const fs=require(\"node:fs\"); if(process.env.RUNNER_SHARED_SECRET||process.env.RUNNER_API_SENTINEL) process.exit(41); if(process.cwd()!==\"/workspace\") {console.error(\"unexpected cwd=\"+process.cwd()); process.exit(43)} fs.writeFileSync(\"/workspace/main.js\",\"main-modified\"); fs.unlinkSync(\"/workspace/deleted.txt\"); fs.writeFileSync(\"/workspace/generated.txt\",\"artifact-ok\"); fs.writeFileSync(\"/workspace/credential-output.txt\",\"-----BEGIN OPENSSH PRIVATE KEY-----\\\\nnot-a-real-key\\\\n-----END OPENSSH PRIVATE KEY-----\"); console.log(\"runner-api-ok cwd=\"+process.cwd())"],
   workspaceId:"11111111-1111-4111-8111-111111111111",resetWorkspace:true,
   network:"none",timeoutMs:15000
 }))')
@@ -155,7 +155,7 @@ let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
   }
 })'
 artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
-printf '%s' "$artifacts" | SWARM_JOB_JSON="$job_json" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL missing generated artifact",JSON.stringify({files:f,job:JSON.parse(process.env.SWARM_JOB_JSON||"{}")}));process.exit(1)}if(f.some(x=>x.path==="credential-output.txt")){console.error("FAIL credential-like output was returned",JSON.stringify(f));process.exit(1)}})'
+printf '%s' "$artifacts" | SWARM_JOB_JSON="$job_json" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")||!f.some(x=>x.path==="main.js"&&x.content==="main-modified")||f.some(x=>x.path==="deleted.txt")){console.error("FAIL missing generated artifact",JSON.stringify({files:f,job:JSON.parse(process.env.SWARM_JOB_JSON||"{}")}));process.exit(1)}if(f.some(x=>x.path==="credential-output.txt")){console.error("FAIL credential-like output was returned",JSON.stringify(f));process.exit(1)}})'
 repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
