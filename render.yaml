@@ -50,3 +50,10 @@ services:
         sync: false
       - key: DATABASE_PATH
         value: ./data/swarm.sqlite
+      # Optional private execution host. Leave unset until the dedicated runner host is provisioned.
+      - key: AGENT_RUNNER_BASE_URL
+        sync: false
+      - key: AGENT_RUNNER_SHARED_SECRET
+        sync: false
+      - key: AGENT_RUNNER_REQUIRED
+        value: "false"
