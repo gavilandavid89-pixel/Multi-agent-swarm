@@ -59,6 +59,7 @@ node -e '
     if (!ids.has(id)) { console.error("Missing toolchain profile:", id); process.exit(42); }
   }
   if (manifest.execution.defaultNetwork !== "none" || manifest.execution.concurrency !== 1) process.exit(43);
+  if (manifest.workspaceIsolation?.status !== "worker-primitives-implemented; model-tool-dispatch-pending" || manifest.workspaceIsolation.concurrency.globalRunner !== 1 || !manifest.workspaceIsolation.merge.includes("fail closed")) process.exit(48);
   if (manifest.agentToolContract.rolePolicyStatus !== "proposed-not-enforced" || !manifest.agentToolContract.rolePolicy.Desarrollador || !manifest.agentToolContract.rolePolicy.Validador) process.exit(45);
   if (manifest.agentToolContract.notYetImplemented.length === 0) process.exit(44);
   if (!manifest.output || !manifest.output.streams.includes("stdout") || !manifest.output.streams.includes("stderr") || manifest.output.maxRetainedCharsPerStream !== 65536) process.exit(46);
