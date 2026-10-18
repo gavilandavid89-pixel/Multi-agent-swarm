@@ -160,7 +160,8 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 
 La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js, Python, Java, Go, PHP, Ruby, C/C++ y Rust, además de Chromium/Xvfb.
 
-- Diseño, capacidades, límites, red restringida y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Diseño, capacidades, límites, integración y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- API autenticada de ejecución: [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 
 ### Modos de red del runner experimental
@@ -168,7 +169,8 @@ La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI
 - Predeterminado: `SWARM_RUNNER_NETWORK=none`; la ejecución no tiene red.
 - Opcional para dependencias: primero iniciá el proxy con `docker compose -f docker-compose.runner-egress.yml up --build -d`, y después usá `SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm ci --ignore-scripts`. La salida se limita a los hosts de `apps/runner/egress-proxy/allowed-domains.txt`; destinos no listados se deniegan. Preferí `--ignore-scripts` durante la descarga de dependencias; no expongas secretos y repetí las pruebas funcionales después, con la red apagada. Apagá el proxy con `docker compose -f docker-compose.runner-egress.yml down`.
 - No agregues dominios sin revisar su necesidad. No habilites la red restringida para ejecutar tareas arbitrarias que tengan secretos. El modo restringido falla cerrado si la red no existe o no está marcada como interna.
-- El runner y el proxy son experimentales; la validación CI debe demostrar que los hosts permitidos funcionan y los no permitidos fallan antes de integrar. La red Docker y el proxy no sustituyen una política de DNS/egress del host para código hostil multiusuario.
+- La API acepta trabajos asíncronos con idempotencia, autenticación servicio a servicio, límites de salida, timeout, cancelación y recuperación de artefactos. El Worker ya tiene un cliente optativo: después de las comprobaciones deterministas, ejecuta comprobaciones de toolchain en el runner y usa los fallos en el ciclo correctivo.
+- El Worker no pasa claves del proveedor ni variables del host al contenedor. La ejecución remota se omite por defecto si no se configura `AGENT_RUNNER_BASE_URL`; con `AGENT_RUNNER_REQUIRED=true`, un runner ausente o fallido impide aprobar automáticamente.
+- **No desplegar la API de runner en el Render Free del Worker** suponiendo que habrá un daemon Docker disponible. La API necesita un host de ejecución dedicado con Docker (preferentemente rootless), red privada y firewall; el servicio no está desplegado. La integración en el Worker permanece desactivada por defecto.
 
-- Frontera de seguridad y arquitectura objetivo del runner de producción: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
-- El runner experimental no está desplegado ni conectado al worker. Revisar y ejecutar pruebas de CI antes de integrar; no ejecutar código generado en el proceso del worker ni habilitar red libre para corregir dependencias ausentes.
+- Frontera de seguridad y arquitectura: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
