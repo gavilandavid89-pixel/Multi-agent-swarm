@@ -22,6 +22,8 @@ const MAX_PENDING_JOBS = 25;
 const MAX_RETAINED_JOBS = 20;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
+const MAX_WORKSPACE_BYTES = 256 * 1024 * 1024;
+const MAX_WORKSPACE_ENTRIES = 5000;
 const MAX_TOTAL_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_FILES = 200;
 const MAX_OUTPUT_CHARS = 64 * 1024;
@@ -218,87 +220,100 @@ function safeWorkspaceCopyPath(input) {
     || input.includes('\\') || /[\x00-\x1f\x7f]/.test(input)) return false;
   return input.split('/').every(part => part && part !== '.' && part !== '..');
 }
-async function ensureWorkspaceDirectory(root, relative) {
-  if (!relative) return;
-  let current = root;
-  for (const part of relative.split('/')) {
-    current = path.join(current, part);
-    let stat = null;
-    try { stat = await fsp.lstat(current); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (stat && (stat.isSymbolicLink() || !stat.isDirectory())) {
-      await fsp.rm(current, { recursive: true, force: true });
-      stat = null;
+async function validateWorkspaceSnapshot(root) {
+  let bytes = 0;
+  let entries = 0;
+  async function walk(directory, relative = '', depth = 0) {
+    if (depth > 32) throw new Error('La salida del runner supera la profundidad máxima permitida.');
+    for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+      const name = relative ? relative + '/' + entry.name : entry.name;
+      if (!safeWorkspaceCopyPath(name) || entry.isSymbolicLink()) throw new Error('La salida del runner contiene una ruta o enlace no permitido.');
+      entries += 1;
+      if (entries > MAX_WORKSPACE_ENTRIES) throw new Error('La salida del runner supera el límite de archivos y directorios.');
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await walk(target, name, depth + 1);
+      else if (entry.isFile()) {
+        bytes += (await fsp.stat(target)).size;
+        if (bytes > MAX_WORKSPACE_BYTES) throw new Error('La salida del runner supera 256 MiB.');
+      } else throw new Error('La salida del runner contiene un tipo de archivo no permitido.');
     }
-    if (!stat) await fsp.mkdir(current, { recursive: false, mode: 0o755 });
   }
-}
-async function pruneWorkspaceToManifest(root, files, directories, relative = '') {
-  let entries;
-  try { entries = await fsp.readdir(path.join(root, relative), { withFileTypes: true }); } catch { return; }
-  for (const entry of entries) {
-    const name = relative ? relative + '/' + entry.name : entry.name;
-    const target = path.join(root, ...name.split('/'));
-    const expectedFile = files.has(name);
-    const expectedDirectory = directories.has(name);
-    if (entry.isSymbolicLink() || (!expectedFile && !expectedDirectory)
-      || (expectedFile && !entry.isFile()) || (expectedDirectory && !entry.isDirectory())) {
-      await fsp.rm(target, { recursive: true, force: true });
-      continue;
-    }
-    if (entry.isDirectory()) await pruneWorkspaceToManifest(root, files, directories, name);
-  }
+  await walk(root);
+  return { bytes, entries };
 }
 async function copyWorkspaceFromContainer(job) {
   const cid = await readContainerId(job);
   if (!cid) return;
-  const copied = await dockerCommand(['cp', cid + ':/workspace/.', job.workspace + path.sep], 15000);
-  if (copied.code !== 0) throw new Error('No se pudieron recuperar los archivos de salida del contenedor: ' + copied.stderr.slice(0, 600));
 
-  // Hash the live tmpfs manifest so new, modified, and deleted files survive
-  // between sequential toolchain jobs even if a directory-level docker cp omits changes.
-  const manifestScript = "const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');function walk(dir,rel='',depth=0){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const absolute=path.join(dir,entry.name);const name=rel?rel+'/'+entry.name:entry.name;if(entry.isDirectory()){process.stdout.write('D\\0'+name+'\\0-\\0');if(depth<32)walk(absolute,name,depth+1);}else if(entry.isFile()){const hash=crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');process.stdout.write('F\\0'+name+'\\0'+hash+'\\0');}}}walk('/workspace');process.stdout.write('END\\0-\\0-\\0');";
-  const inventory = await dockerCommand(['exec', cid, 'node', '-e', manifestScript], 30000, 8 * 1024 * 1024);
-  if (inventory.code !== 0 || !inventory.stdout.endsWith('END\0-\0-\0')) {
-    throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + String(inventory.stderr || 'inventario truncado').slice(0, 500));
-  }
-  const fields = inventory.stdout.split('\0');
-  const files = new Set();
-  const directories = new Set();
-  for (let i = 0; i + 2 < fields.length; i += 3) {
-    const type = fields[i];
-    const relative = fields[i + 1];
-    const hash = fields[i + 2];
-    if (!safeWorkspaceCopyPath(relative)) continue;
-    if (type === 'D') {
-      directories.add(relative);
-      await ensureWorkspaceDirectory(job.workspace, relative);
-      continue;
-    }
-    if (type !== 'F' || !/^[a-f0-9]{64}$/.test(hash)) continue;
-    files.add(relative);
-    const parentRelative = relative.split('/').slice(0, -1).join('/');
-    if (parentRelative) await ensureWorkspaceDirectory(job.workspace, parentRelative);
-    const target = path.resolve(job.workspace, ...relative.split('/'));
-    if (!target.startsWith(job.workspace + path.sep)) continue;
-    let localHash = null;
+  // The command runs as UID 65532, separate from the container's idle PID 1 (UID 10001).
+  // Kill any task-spawned background processes before taking a consistent snapshot.
+  const killed = await dockerCommand(['exec', '--user', '65532:65532', cid, 'pkill', '-KILL', '-u', '65532'], 5000);
+  if (![0, 1].includes(killed.code)) throw new Error('No se pudieron detener procesos secundarios antes de exportar el workspace.');
+
+  const exportScript = "const fs=require('node:fs');const path=require('node:path');const {spawn}=require('node:child_process');const root='/workspace';const paths=[];let total=0;function safe(p){return p.length<=1024&&!p.startsWith('/')&&!p.includes('\\\\\\\\')&&!/[\\\\x00-\\\\x1f\\\\x7f]/.test(p)&&p.split('/').every(x=>x&&x!=='.'&&x!=='..')}function walk(dir,rel='',depth=0){if(depth>32)throw Error('workspace depth limit');for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(e.isSymbolicLink())continue;const n=rel?rel+'/'+e.name:e.name;if(!safe(n))continue;const a=path.join(dir,e.name);if(e.isDirectory()){paths.push(n);if(paths.length>5000)throw Error('workspace entry limit');walk(a,n,depth+1)}else if(e.isFile()){total+=fs.statSync(a).size;if(total>268435456)throw Error('workspace size limit');paths.push(n);if(paths.length>5000)throw Error('workspace entry limit')}}}try{walk(root);const t=spawn('tar',['--create','--file','-','--directory',root,'--no-recursion','--null','--files-from','-'],{stdio:['pipe','inherit','inherit']});t.on('error',e=>{console.error(e.message);process.exit(2)});t.on('close',c=>process.exit(c||0));t.stdin.end(paths.map(p=>p+'\\\\0').join(''))}catch(e){console.error('workspace export failed: '+e.message);process.exit(2)}";
+  const snapshot = path.join(WORKSPACES, job.id + '.snapshot');
+  await fsp.rm(snapshot, { recursive: true, force: true });
+  await fsp.mkdir(snapshot, { recursive: false, mode: 0o755 });
+  try {
+    await new Promise((resolve, reject) => {
+      const exporter = spawn(DOCKER, ['exec', '--user', '65532:65532', cid, 'node', '-e', exportScript], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const extractor = spawn('tar', ['--extract', '--file', '-', '--directory', snapshot, '--no-same-owner', '--no-same-permissions', '--no-overwrite-dir'], { stdio: ['pipe', 'ignore', 'pipe'] });
+      let archiveBytes = 0;
+      let exporterCode = null;
+      let extractorCode = null;
+      let exporterError = '';
+      let extractorError = '';
+      let settled = false;
+      const timer = setTimeout(() => fail(new Error('La exportación del workspace superó el tiempo máximo.')), 60000);
+      timer.unref();
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { exporter.kill('SIGKILL'); } catch {}
+        try { extractor.kill('SIGKILL'); } catch {}
+        reject(error);
+      };
+      const finish = () => {
+        if (settled || exporterCode === null || extractorCode === null) return;
+        if (exporterCode !== 0 || extractorCode !== 0) {
+          fail(new Error('Falló la transferencia del workspace. Exportador=' + exporterCode + ' (' + exporterError.slice(0, 300) + '), extractor=' + extractorCode + ' (' + extractorError.slice(0, 300) + ').'));
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      exporter.stderr.on('data', chunk => { if (exporterError.length < 2000) exporterError += chunk.toString('utf8'); });
+      extractor.stderr.on('data', chunk => { if (extractorError.length < 2000) extractorError += chunk.toString('utf8'); });
+      exporter.stdout.on('data', chunk => {
+        archiveBytes += chunk.length;
+        if (archiveBytes > MAX_WORKSPACE_BYTES + 64 * 1024 * 1024) {
+          fail(new Error('El archivo de exportación supera el límite de tamaño.'));
+        }
+      });
+      exporter.on('error', fail);
+      extractor.on('error', fail);
+      extractor.stdin.on('error', error => { if (error.code !== 'EPIPE') fail(error); });
+      exporter.stdout.pipe(extractor.stdin);
+      exporter.on('close', code => { exporterCode = code; finish(); });
+      extractor.on('close', code => { extractorCode = code; finish(); });
+    });
+    await validateWorkspaceSnapshot(snapshot);
+    const previous = path.join(WORKSPACES, job.id + '.previous');
+    await fsp.rm(previous, { recursive: true, force: true });
+    await fsp.rename(job.workspace, previous);
     try {
-      const stat = await fsp.lstat(target);
-      if (stat.isFile() && !stat.isSymbolicLink()) {
-        localHash = createHash('sha256').update(await fsp.readFile(target)).digest('hex');
-      } else {
-        await fsp.rm(target, { recursive: true, force: true });
-      }
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (localHash === hash) continue;
-    const temporary = path.join(path.dirname(target), '.swarm-copy-' + job.id + '-' + path.basename(target).slice(0, 48));
-    await fsp.rm(temporary, { recursive: true, force: true });
-    const fileCopy = await dockerCommand(['cp', cid + ':/workspace/' + relative, temporary], 15000);
-    if (fileCopy.code !== 0) throw new Error('No se pudo recuperar el archivo de salida ' + relative.slice(0, 160) + ': ' + fileCopy.stderr.slice(0, 400));
-    const copiedHash = createHash('sha256').update(await fsp.readFile(temporary)).digest('hex');
-    if (copiedHash !== hash) throw new Error('El archivo recuperado no coincide con el contenedor: ' + relative.slice(0, 160));
-    await fsp.rename(temporary, target);
+      await fsp.rename(snapshot, job.workspace);
+      await fsp.rm(previous, { recursive: true, force: true });
+    } catch (error) {
+      try { await fsp.rename(previous, job.workspace); } catch {}
+      throw error;
+    }
+  } catch (error) {
+    await fsp.rm(snapshot, { recursive: true, force: true });
+    throw error;
   }
-  await pruneWorkspaceToManifest(job.workspace, files, directories);
 }
 async function collectFiles(workspace) {
   const files = []; let total = 0;
@@ -379,7 +394,7 @@ async function runJob(job) {
     const result = await new Promise(resolve => {
       let settled = false;
       const finish = value => { if (settled) return; settled = true; resolve(value); };
-      currentChild = spawn(DOCKER, ['exec', '--workdir', '/workspace', '--user', '10001:10001', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
+      currentChild = spawn(DOCKER, ['exec', '--workdir', '/workspace', '--user', '65532:65532', cid, 'timeout', '--signal=TERM', '--kill-after=3s', timeoutSeconds + 's', ...job.command], { stdio: ['ignore', 'pipe', 'pipe'] });
       currentChild.stdout.on('data', chunk => appendOutput(job, 'stdout', chunk));
       currentChild.stderr.on('data', chunk => appendOutput(job, 'stderr', chunk));
       currentChild.on('error', error => finish({ code: null, error: error.message }));
