@@ -5,7 +5,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const sourceRoot = process.cwd();
-const excluded = new Set(['.git', 'node_modules', '.venv', 'venv', 'target', 'vendor', '.cache', '__pycache__', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle']);
+const excluded = new Set(['.git', '.godot', 'node_modules', '.venv', 'venv', 'target', 'vendor', '.cache', '__pycache__', '.swarm-go-modcache', '.swarm-cargo-home', '.swarm-m2', '.swarm-gradle', '.swarm-bundle', '.bundle']);
 const maxFiles = 500;
 const maxBytes = 20 * 1024 * 1024;
 let copiedFiles = 0;
