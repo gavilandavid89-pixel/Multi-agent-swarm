@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -227,7 +227,7 @@ async function collectFiles(workspace) {
         const stat = await fsp.stat(target);
         if (stat.size > MAX_FILE_BYTES || total + stat.size > MAX_TOTAL_FILE_BYTES) continue;
         const content = await fsp.readFile(target, 'utf8');
-        if (content.includes('\u0000')) continue;
+        if (content.includes('\u0000') || containsCredential(content)) continue;
         files.push({ path: name, content }); total += stat.size;
       }
     }
@@ -376,14 +376,19 @@ async function handle(req, res) {
     const body = validateRequest(await readJson(req));
     const key = String(req.headers['x-swarm-idempotency-key'] || '');
     if (key && !/^[A-Za-z0-9._:-]{8,128}$/.test(key)) return json(res, 400, { error: 'Clave de idempotencia inválida.' });
-    if (key && idempotency.has(key)) return json(res, 200, publicJob(jobs.get(idempotency.get(key))));
+    const requestHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+    if (key && idempotency.has(key)) {
+      const existing = jobs.get(idempotency.get(key));
+      if (!existing || existing.requestHash !== requestHash) return json(res, 409, { error: 'La clave de idempotencia ya se usó con una solicitud diferente.' });
+      return json(res, 200, publicJob(existing));
+    }
     if (closing) return json(res, 503, { error: 'El runner se está apagando.' });
     if (queue.length + active >= MAX_PENDING_JOBS) return json(res, 429, { error: 'La cola del runner está llena; reintentá con la misma clave de idempotencia.' });
     await pruneOldJobs();
     const id = randomUUID(); const now = new Date().toISOString();
     const workspaceId = body.workspaceId || id;
     if (workspaceBusy.has(workspaceId)) return json(res, 409, { error: 'Ya hay una ejecución en cola o activa para este workspace.' });
-    const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, artifactSnapshot: [] };
+    const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, requestHash, artifactSnapshot: [] };
     workspaceBusy.set(workspaceId, id);
     jobs.set(id, job);
     if (key) idempotency.set(key, id);
