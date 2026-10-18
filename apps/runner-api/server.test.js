@@ -15,7 +15,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot', 'finalizing', 'recopilando artefactos', 'finalizing', 'recopilando artefactos',
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
-    'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY', 'createHash', 'requestHash', 'clave de idempotencia ya se usó',
+    'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY', 'createHash', 'requestHash', 'clave de idempotencia ya se usó', 'const hasStdin', 'stdin supera el límite de 16 KiB.', 'stdin interactivo solo se permite con network none.', 'currentChild.stdin.end(stdin || \'\')', 'pendingInput', 'job.hasStdin', 'La entrada interactiva del depurador no se conserva tras reiniciar el runner',
     'swarm-agent-egress', 'ensureRestrictedNetwork', 'chmod(ROOT, 0o700)', 'chmod(WORKSPACES, 0o700)', 'chmod(STATE, 0o700)', "basename === '.env'", "basename.startsWith('.env.')", "'credentials.json'"
   ]) assert.ok(source.includes(required), 'missing runner control: ' + required);
   assert.equal(source.includes('--privileged'), false);
