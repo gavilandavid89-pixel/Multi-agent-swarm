@@ -256,7 +256,7 @@ async function copyWorkspaceFromContainer(job) {
 
   // Hash the live tmpfs manifest so new, modified, and deleted files survive
   // between sequential toolchain jobs even if a directory-level docker cp omits changes.
-  const manifestScript = "const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');function walk(dir,rel='',depth=0){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const absolute=path.join(dir,entry.name);const name=rel?rel+'/'+entry.name:entry.name;if(entry.isDirectory()){process.stdout.write('D\\0'+name+'\\0\\0');if(depth<32)walk(absolute,name,depth+1);}else if(entry.isFile()){const hash=crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');process.stdout.write('F\\0'+name+'\\0'+hash+'\\0');}}}walk('/workspace');";
+  const manifestScript = "const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');function walk(dir,rel='',depth=0){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(entry.isSymbolicLink())continue;const absolute=path.join(dir,entry.name);const name=rel?rel+'/'+entry.name:entry.name;if(entry.isDirectory()){process.stdout.write('D\\0'+name+'\\0\\0');if(depth<32)walk(absolute,name,depth+1);}else if(entry.isFile()){const hash=crypto.createHash('sha256').update(fs.readFileSync(absolute)).digest('hex');process.stdout.write('F\\0'+name+'\\0'+hash+'\\0');}}}walk('/workspace');process.stdout.write('END\\0\\0\\0');";
   const inventory = await dockerCommand(['exec', cid, 'node', '-e', manifestScript], 30000, 8 * 1024 * 1024);
   if (inventory.code !== 0 || !inventory.stdout.endsWith('\0')) {
     throw new Error('No se pudo verificar el inventario de salida del contenedor: ' + String(inventory.stderr || 'inventario truncado').slice(0, 500));
@@ -290,7 +290,7 @@ async function copyWorkspaceFromContainer(job) {
       }
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
     if (localHash === hash) continue;
-    const temporary = target + '.swarm-copy-' + job.id;
+    const temporary = path.join(path.dirname(target), '.swarm-copy-' + job.id + '-' + path.basename(target).slice(0, 48));
     await fsp.rm(temporary, { recursive: true, force: true });
     const fileCopy = await dockerCommand(['cp', cid + ':/workspace/' + relative, temporary], 15000);
     if (fileCopy.code !== 0) throw new Error('No se pudo recuperar el archivo de salida ' + relative.slice(0, 160) + ': ' + fileCopy.stderr.slice(0, 400));
