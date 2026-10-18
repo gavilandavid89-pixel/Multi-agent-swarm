@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Validate isolated agent sandbox scripts
-        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh && bash -n apps/runner/godot-smoke.sh && node --check apps/runner/browser-smoke.mjs
+        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh && sh -n apps/runner/capabilities-smoke.sh && bash -n apps/runner/godot-smoke.sh && node --check apps/runner/browser-smoke.mjs
       - name: Validate egress proxy Compose configuration
         run: docker compose -f docker-compose.runner-egress.yml config -q
       - name: Build and exercise isolated agent runner and restricted egress proxy
