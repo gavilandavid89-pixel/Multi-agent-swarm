@@ -74,5 +74,7 @@ test('capability catalog accurately marks sandbox defaults and future-only model
   assert.ok(capabilities.toolchains.some(item => item.id === 'godot'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'data-files'));
   assert.ok(capabilities.agentToolContract.notYetImplemented.includes('dispatcher de tool-calls LLM'));
+  assert.equal(capabilities.agentToolContract.rolePolicyStatus, 'proposed-not-enforced');
+  assert.ok(capabilities.agentToolContract.rolePolicy.Desarrollador.allow.includes('workspace.write'));
   assert.ok(capabilities.notIncluded.some(item => item.includes('credenciales')));
 });
