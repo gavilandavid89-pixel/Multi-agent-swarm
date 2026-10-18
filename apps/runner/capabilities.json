@@ -272,43 +272,45 @@
       "runner.prepareDependencies",
       "runner.jobStatus",
       "runner.cancel",
-      "runner.artifacts.list",
-      "runner.artifacts.read"
+      "runner.artifact.read"
     ],
     "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo.",
     "rolePolicyStatus": "enforced-by-worker-dispatcher",
     "rolePolicy": {
       "Arquitecto": {
         "allow": [
-          "catalog.read",
           "workspace.list",
-          "workspace.read",
-          "runner.check"
-        ],
-        "deny": [
-          "runner.prepareDependencies",
-          "runner.execute",
-          "host.configure",
-          "network.configure"
-        ]
-      },
-      "Coordinador de coherencia": {
-        "allow": [
-          "catalog.read",
-          "workspace.list",
-          "workspace.read",
-          "runner.check"
+          "workspace.read"
         ],
         "deny": [
           "workspace.write",
+          "runner.check",
+          "runner.execute",
           "runner.prepareDependencies",
+          "runner.cancel",
           "host.configure",
-          "network.configure"
+          "network.configure",
+          "secret.read"
+        ]
+      },
+      "Coordinador": {
+        "allow": [
+          "workspace.list",
+          "workspace.read"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.check",
+          "runner.execute",
+          "runner.prepareDependencies",
+          "runner.cancel",
+          "host.configure",
+          "network.configure",
+          "secret.read"
         ]
       },
       "Desarrollador": {
         "allow": [
-          "catalog.read",
           "workspace.list",
           "workspace.read",
           "workspace.write",
@@ -316,11 +318,10 @@
           "runner.execute",
           "runner.jobStatus",
           "runner.cancel",
-          "runner.artifacts.list",
-          "runner.artifacts.read"
+          "runner.artifact.read",
+          "runner.prepareDependencies"
         ],
         "deny": [
-          "runner.prepareDependencies",
           "host.configure",
           "network.configure",
           "secret.read"
@@ -328,66 +329,52 @@
       },
       "Escéptico": {
         "allow": [
-          "catalog.read",
           "workspace.list",
-          "workspace.read",
-          "runner.check",
-          "runner.jobStatus",
-          "runner.artifacts.list",
-          "runner.artifacts.read"
+          "workspace.read"
         ],
         "deny": [
           "workspace.write",
+          "runner.check",
+          "runner.execute",
           "runner.prepareDependencies",
+          "runner.cancel",
           "host.configure",
-          "network.configure"
+          "network.configure",
+          "secret.read"
+        ]
+      },
+      "Auditor": {
+        "allow": [
+          "workspace.list",
+          "workspace.read"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.check",
+          "runner.execute",
+          "runner.prepareDependencies",
+          "runner.cancel",
+          "host.configure",
+          "network.configure",
+          "secret.read"
         ]
       },
       "Validador": {
         "allow": [
-          "catalog.read",
           "workspace.list",
           "workspace.read",
           "runner.check",
           "runner.jobStatus",
-          "runner.artifacts.list",
-          "runner.artifacts.read"
-        ],
-        "deny": [
-          "workspace.write",
-          "runner.prepareDependencies",
-          "host.configure",
-          "network.configure"
-        ]
-      },
-      "Árbitro": {
-        "allow": [
-          "catalog.read",
-          "runner.jobStatus",
-          "runner.artifacts.list",
-          "runner.artifacts.read"
+          "runner.artifact.read"
         ],
         "deny": [
           "workspace.write",
           "runner.execute",
           "runner.prepareDependencies",
+          "runner.cancel",
           "host.configure",
-          "network.configure"
-        ]
-      },
-      "Operador": {
-        "allow": [
-          "catalog.read",
-          "runner.jobStatus"
-        ],
-        "deny": [
-          "agent-controlled-host-configuration"
-        ],
-        "requiresHumanApproval": [
-          "allowlist changes",
-          "image changes",
-          "resource-limit changes",
-          "host/network configuration"
+          "network.configure",
+          "secret.read"
         ]
       }
     }
