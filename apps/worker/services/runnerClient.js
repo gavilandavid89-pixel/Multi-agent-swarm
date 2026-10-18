@@ -102,7 +102,10 @@ export async function getAgentRunnerCapabilities() {
   try {
     await waitForRunnerReady();
     const capabilities = await request('/v1/capabilities', {}, 15000);
-    if (capabilities?.schemaVersion !== 1 || !Array.isArray(capabilities.toolchains) || !capabilities.execution) {
+    if (capabilities?.schemaVersion !== 1 || !Array.isArray(capabilities.toolchains) || !capabilities.execution
+      || !Array.isArray(capabilities.output?.streams) || !capabilities.output.streams.includes('stdout') || !capabilities.output.streams.includes('stderr')
+      || !Array.isArray(capabilities.debugging?.debuggers) || !capabilities.debugging.debuggers.some(item => item?.id === 'python-pdb')
+      || capabilities.debugging.stdin?.maxBytes !== 16384) {
       return { available: true, checked: true, ok: false, infraError: true, capabilities: null, message: 'El runner devolvió un catálogo de capacidades inválido o incompatible.' };
     }
     return { available: true, checked: true, ok: true, capabilities };
