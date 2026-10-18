@@ -4,11 +4,26 @@
 
 El servicio `apps/desktop-viewer` ya ejecuta Chromium dentro de Xvfb y publica el escritorio mediante noVNC detrás de autenticación de administrador. Su herramienta interna permite navegar, inspeccionar DOM, hacer clic, introducir texto, pulsar teclas, desplazarse, volver atrás y capturar pantalla. **Todavía no es un IDE con editor de archivos, terminal, extensiones, depurador ni ejecución aislada por tarea.** No se debe describir como VS Code ni ejecutar código arbitrario dentro del contenedor compartido del visor.
 
-## Prototipo de imagen IDE
+## Decisión: reutilizar code-server
 
-`apps/agent-ide/Dockerfile` crea una imagen basada en Node 22 con code-server, Git, Python y herramientas de compilación. `start-agent-ide.sh` exige una variable `PASSWORD` de al menos 24 caracteres y arranca el editor en `/workspace`, con extensiones y datos de usuario temporales.
+No vamos a construir un editor desde cero ni a reemplazar el visor de escritorio actual. Reutilizamos `codercom/code-server:4.100.3`, que ya proporciona el IDE web tipo VS Code, y conservamos `apps/desktop-viewer` para tareas visuales del navegador. `apps/agent-ide/Dockerfile` agrega Node 22, Git, Python y herramientas básicas de compilación; `start-agent-ide.sh` requiere una contraseña larga y configura datos de usuario/extensiones temporales.
 
-**Esto es una imagen preparada, no un servicio desplegado ni integrado todavía.** No agregarla a `render.yaml` ni exponer el puerto 8080 públicamente hasta implementar y probar un gateway de autenticación, tickets de sesión de corta duración y políticas de workspace. La contraseña de code-server por sí sola no sustituye el aislamiento por tarea ni una política de red de salida. El workspace dentro del contenedor es temporal; no guardar allí checkpoints como única copia.
+**Estado real: imagen preparada, no servicio desplegado ni integrado.** Esto evita rehacer el editor, pero todavía no equivale a un entorno seguro y completo de ejecución para agentes. No agregarla a `render.yaml` ni exponer el puerto 8080 públicamente hasta implementar y probar un gateway de autenticación, tickets de sesión de corta duración y políticas de workspace. La contraseña de code-server por sí sola no sustituye el aislamiento por tarea ni una política de red de salida. El workspace dentro del contenedor es temporal; no guardar allí checkpoints como única copia.
+
+### Qué reutilizamos y qué construimos
+
+- **Reutilizamos:** interfaz del editor, pestañas, explorador, búsqueda, terminal, extensiones compatibles y experiencia de edición que trae code-server.
+- **Construimos para el Swarm:** creación de workspaces por `taskId`, checkout de la revisión solicitada, ejecución controlada de pruebas, almacenamiento de artefactos/checkpoints, registro de errores, API de estado/cancelación y coordinación entre agentes.
+- **No compartimos:** una única carpeta de trabajo o terminal entre agentes concurrentes. El IDE humano y el runner de agentes deben tener permisos y credenciales separados.
+
+### Camino de integración recomendado
+
+1. Construir y probar la imagen `apps/agent-ide` en CI, sin publicarla a producción.
+2. Crear un servicio privado de IDE para uso humano/pruebas, con acceso detrás de autenticación; no enviar la contraseña de code-server a agentes ni al navegador público.
+3. Implementar un runner separado por ejecución con workspace temporal, límites de CPU/memoria/procesos/tiempo/salida y lista permitida de operaciones.
+4. Integrar un adaptador interno del Swarm que envíe operaciones declarativas (`check`, `test`, `build`, `browser-test`) y consulte resultados por `runId`; no aceptar comandos shell arbitrarios desde HTTP.
+5. Persistir los resultados y los checkpoints fuera del contenedor; enviar fallos al inbox `diagnostic_reports`.
+6. Solo después de superar las pruebas de aislamiento y autenticación, decidir si el IDE se despliega en Render u otro host. Un servicio gratuito que duerme puede ser útil para pruebas manuales, pero no garantiza ejecución persistente ni recursos para múltiples workspaces.
 
 ## Arquitectura objetivo
 
