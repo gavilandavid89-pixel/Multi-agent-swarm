@@ -172,6 +172,18 @@ La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI
 - API autenticada de ejecución: [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
 - Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
 
+### Cómo se conecta con los agentes
+
+El modelo no recibe la clave de Runner API ni acceso directo a Docker. El camino de ejecución está mediado por el Worker:
+
+1. El Worker extrae y filtra los archivos de la entrega; rechaza rutas conocidas de credenciales y patrones de secretos.
+2. Envía un trabajo autenticado a `apps/runner-api` con un ID de tarea, un workspace aislado, un comando argv y límites definidos por el servidor.
+3. La API crea un contenedor nuevo para cada paso, limita recursos y tiempo, y devuelve un ID de trabajo. El Worker consulta el estado de forma asíncrona; puede reintentar sin duplicar trabajos mediante idempotencia.
+4. El Worker recibe salida acotada y artefactos filtrados. Los fallos de sintaxis/tests se convierten en evidencia para el ciclo de corrección; la nueva entrega se vuelve a ejecutar en modo sin red.
+5. La preparación de dependencias, cuando es necesaria, es un paso separado con egress restringido; nunca comparte secretos y no se usa como fase de pruebas.
+
+**Interfaz de herramientas para agentes:** el runner ya proporciona los bloques seguros de ejecución, estado, cancelación y lectura de artefactos; el validador del Worker los usa para comprobaciones automáticas. El modelo todavía no tiene una herramienta de shell libre ni invoca directamente la API. La próxima capa debe exponer acciones nombradas (`inspect_project`, `run_test_profile`, `get_job_status`, `read_artifacts`, `cancel_job`) que el Worker valide contra la tarea activa. El modelo no debe elegir imagen Docker, volúmenes, variables de entorno, secretos, política de red ni límites. Así los agentes pueden usar capacidades del entorno sin convertir el runner en una vía de acceso al host.
+
 ### Modos de red del runner experimental
 
 - Predeterminado: `SWARM_RUNNER_NETWORK=none`; la ejecución no tiene red.
