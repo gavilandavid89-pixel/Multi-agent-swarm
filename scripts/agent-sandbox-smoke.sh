@@ -42,6 +42,10 @@ sh scripts/run-agent-sandbox.sh "$workspace" timeout --signal=TERM --kill-after=
 grep -q 'browser-ok' "$workspace/dom.out"
 echo "PASS Chromium rendered HTML with a bounded headless run"
 
+browser_result=$(sh scripts/run-agent-sandbox.sh "$workspace" node /opt/swarm-runner/browser-smoke.mjs)
+printf '%s\n' "$browser_result" | grep -q 'SWARM_BROWSER_CHECKED=1'
+echo "PASS isolated Chromium/Xvfb browser smoke script detects JavaScript runtime errors"
+
 # Exercise the authenticated Worker-facing API against the actual Docker daemon.
 RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
 RUNNER_API_SENTINEL=must-not-leak \
