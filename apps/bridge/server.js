@@ -435,6 +435,7 @@ app.get('/api/events', async (req, res) => {
           send('task.status', {
             jobId: job.id,
             title: String(job.title || '').slice(0, 240),
+            stage: String(job.stage || '').slice(0, 240),
             previousStatus,
             status: job.status,
             wasActive: ['queued', 'running'].includes(previousStatus),
@@ -467,7 +468,8 @@ app.get('/api/events', async (req, res) => {
     else eventStreamClients.delete(userId);
     if (!res.writableEnded) res.end();
   };
-  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
   interval = setInterval(() => { void poll(); }, 10000);
   interval.unref?.();
   void poll();
