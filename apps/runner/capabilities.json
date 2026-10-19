@@ -263,17 +263,7 @@
   "agentToolContract": {
     "current": "El Worker integra tool-calls de los proveedores con un dispatcher de herramientas, workspaces aislados por agente, permisos por rol y ejecución mediante el runner autenticado.",
     "notYetImplemented": [],
-    "plannedTools": [
-      "workspace.list",
-      "workspace.read",
-      "workspace.write",
-      "runner.check",
-      "runner.execute",
-      "runner.prepareDependencies",
-      "runner.jobStatus",
-      "runner.cancel",
-      "runner.artifact.read"
-    ],
+    "plannedTools": [],
     "safety": "El Worker debe ser el único cliente autenticado. Nunca enviar secretos, variables del host, sockets Docker, mounts o flags de seguridad elegidos por el modelo.",
     "rolePolicyStatus": "enforced-by-worker-dispatcher",
     "rolePolicy": {
@@ -377,7 +367,18 @@
           "secret.read"
         ]
       }
-    }
+    },
+    "availableTools": [
+      "workspace.list",
+      "workspace.read",
+      "workspace.write",
+      "runner.check",
+      "runner.execute",
+      "runner.prepareDependencies",
+      "runner.jobStatus",
+      "runner.cancel",
+      "runner.artifact.read"
+    ]
   },
   "notIncluded": [
     "Docker socket o ejecución de contenedores hermanos desde el sandbox",
