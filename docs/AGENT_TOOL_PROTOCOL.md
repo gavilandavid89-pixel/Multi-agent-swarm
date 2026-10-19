@@ -26,7 +26,7 @@ El dispatcher expone operaciones pequeñas con JSON Schema estricto y permisos p
 | workspace.read | path | Lee un archivo de proyecto; límites de tamaño y redacción de secretos |
 | workspace.write | path, content | Escribe en el workspace, rechaza rutas absolutas, traversal y archivos de credenciales |
 | runner.check | sin argumentos | Ejecuta las comprobaciones de proyecto configuradas por el Worker; permitido a Desarrollador y Validador |
-| runner.execute | command (argv), timeoutMs | Solo Desarrollador; binarios allowlisted, sin shell y con red `none` fijada por el Worker; el modelo no puede habilitar egress |
+| runner.execute | command (argv), timeoutMs, `stdin` opcional solo para `python3 -m pdb` (máx. 16 KiB) | Solo Desarrollador; binarios allowlisted, sin shell y con red `none` fijada por el Worker; el modelo no puede habilitar egress |
 | runner.prepareDependencies | manifest | Solo Desarrollador; manifiestos allowlisted y red restricted mediante proxy con allowlist, sin secretos |
 | runner.jobStatus | jobId | Desarrollador y Validador; solo IDs devueltos por una herramienta en esa misma sesión de dispatcher |
 | runner.cancel | jobId | Solo Desarrollador; solo IDs devueltos por una herramienta en esa misma sesión |
@@ -40,7 +40,7 @@ La Runner API captura `stdout` y `stderr` mientras el proceso está activo, reti
 
 El dispatcher bloquea la lectura de archivos de más de 256 KiB y rechaza lecturas que coincidan con patrones conocidos de credenciales. Antes de devolver resultados de herramientas, redacta patrones conocidos de claves/tokens y campos con nombres sensibles (por ejemplo, `apiKey`, `access_token`, `password` o `client_secret`), y luego aplica el límite de salida. Esta defensa es por patrones y nombres de campos: no es un detector universal de secretos. No se deben incluir credenciales reales en los workspaces ni en sus logs.
 
-El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, con comandos enviados por `stdin` limitado a 16 KiB y solo cuando `network:none`. No abre puertos de depuración ni da acceso al host. La entrada no se persiste; si el runner reinicia antes de ejecutar un trabajo encolado que la requiere, el trabajo falla con un motivo explícito y debe reenviarse. El smoke test de CI verifica PDB, stdout, stderr y código de salida.
+El modo de depuración verificado es Python PDB: `python3 -m pdb <script.py>`, con comandos enviados por `stdin` limitado a 16 KiB y solo cuando `network:none`. La herramienta `runner_execute` expone ese `stdin` únicamente si el argv comienza exactamente con `python3 -m pdb`; otros comandos no pueden recibir entrada arbitraria. No abre puertos de depuración ni da acceso al host. La entrada no se persiste; si el runner reinicia antes de ejecutar un trabajo encolado que la requiere, el trabajo falla con un motivo explícito y debe reenviarse. El smoke test de CI verifica PDB, stdout, stderr y código de salida.
 
 **Límites actuales:** el depurador interactivo persistente y los adaptadores de sesión para Node Inspector/Java JDB aún no están implementados. El tool-calling sí está conectado para los proveedores compatibles; las herramientas disponibles dependen del rol y el dispatcher aplica una lista permitida, valida argumentos y limita las llamadas. No existe una herramienta `runner.debug` ni control persistente de depuradores.
 
