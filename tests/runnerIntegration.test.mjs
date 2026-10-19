@@ -74,3 +74,19 @@ test('journal checkpoint identity includes workspace hash when updating a starte
 test('runner restart smoke reads the container id from the persisted jobs directory', () => {
   assert.ok(sandboxSmoke.includes('restart_cid_file="${workspace}-runner-state/jobs/${restart_id}.cid"'));
 });
+
+
+test('production Render blueprint keeps remote runner integration disabled until the isolated-host gate passes', async () => {
+  const renderBlueprint = await readFile(new URL('../render.yaml', import.meta.url), 'utf8');
+  const runnerReadme = await readFile(new URL('../apps/runner-api/README.md', import.meta.url), 'utf8');
+  const recoveryRunbook = await readFile(new URL('../docs/RUNNER_RECOVERY_RUNBOOK.md', import.meta.url), 'utf8');
+  for (const key of ['AGENT_RUNNER_BASE_URL', 'AGENT_RUNNER_SHARED_SECRET', 'AGENT_RUNNER_REQUIRED']) {
+    assert.equal(renderBlueprint.includes(key), false, 'Render blueprint must not configure ' + key);
+  }
+  assert.ok(client.includes("const required = process.env.AGENT_RUNNER_REQUIRED === 'true'"));
+  assert.ok(client.includes("return unavailable(required ? 'AGENT_RUNNER_REQUIRED está activo, pero falta AGENT_RUNNER_BASE_URL.'"));
+  assert.match(runnerReadme, /Do not add this service to Render or enable Worker integration until a separate runner host has passed the smoke tests/i);
+  assert.match(recoveryRunbook, /Real VM shutdown\/boot \(the missing physical test\)/);
+  assert.match(recoveryRunbook, /Separate Worker restart verification/);
+  assert.match(recoveryRunbook, /two real VM reboot tests pass/i);
+});
