@@ -387,7 +387,6 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
          requestMessages = conversationState.requestMessages;
          /* Each result is durably checkpointed by recoverPendingAgentToolCalls before the next provider round. */
          continue;
-         continue;
        }
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
