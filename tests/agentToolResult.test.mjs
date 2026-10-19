@@ -8,7 +8,7 @@ test('tool result serialization preserves ordinary JSON results', () => {
 });
 
 test('oversized escaped output is summarized without cutting JSON', () => {
-  const result = { ok: true, result: { stdout: '\\\\n'.repeat(12000) } };
+  const result = { ok: true, result: { jobId: 'job-42', status: 'running', stdout: '\\\\n'.repeat(12000) } };
   const serialized = serializeAgentToolResult(result);
   assert.ok(serialized.length <= 16000);
   const parsed = JSON.parse(serialized);
