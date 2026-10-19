@@ -46,7 +46,7 @@ function redactSensitiveOutput(value, depth = 0) {
   if (Array.isArray(value)) return value.map(item => redactSensitiveOutput(item, depth + 1));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-      const normalizedKey = key.toLowerCase().replace(/[\\s-]/g, '_');
+      const normalizedKey = key.toLowerCase().replace(/[\s-]/g, '_');
       if (/^(?:password|passwd|secret|client_secret|access_token|refresh_token|api_key|apikey|authorization|private_key|credentials)$/.test(normalizedKey)) {
         return [key, '[REDACTED]'];
       }
