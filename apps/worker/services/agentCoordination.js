@@ -14,7 +14,7 @@ const ROUTES = Object.freeze({
   other: ['coordinador']
 });
 const normalizeRole = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-const SENSITIVE_TEXT = /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----|\\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\\b|https?:\\/\\/[^/\\s:@]+:[^/\\s@]+@/gi;
+const SENSITIVE_TEXT = /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----|\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\b|https?:\/\/[^/\s:@]+:[^/\s@]+@/gi;
 const boundedText = (value, max) => typeof value === 'string'
   ? value.trim().replace(SENSITIVE_TEXT, '[REDACTED_CREDENTIAL]').slice(0, max)
   : '';
