@@ -6,6 +6,7 @@ const client = await readFile(new URL('../apps/worker/services/runnerClient.js',
 const engine = await readFile(new URL('../apps/worker/services/multiAiEngine.js', import.meta.url), 'utf8');
 const checks = await readFile(new URL('../apps/worker/services/codeChecks.js', import.meta.url), 'utf8');
 const server = await readFile(new URL('../apps/worker/server.js', import.meta.url), 'utf8');
+const sandboxSmoke = await readFile(new URL('../scripts/agent-sandbox-smoke.sh', import.meta.url), 'utf8');
 
 test('Worker runner integration is optional by default and authenticates remote requests', () => {
   assert.ok(client.includes("process.env.AGENT_RUNNER_BASE_URL"));
@@ -68,4 +69,8 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
 test('journal checkpoint identity includes workspace hash when updating a started invocation', () => {
   const pendingIndexBlock = engine.slice(engine.indexOf('const pendingIndex ='), engine.indexOf('const identityIndex ='));
   assert.ok(pendingIndexBlock.includes('item?.workspaceHash === invocation.workspaceHash'));
+});
+
+test('runner restart smoke reads the container id from the persisted jobs directory', () => {
+  assert.ok(sandboxSmoke.includes('restart_cid_file="${workspace}-runner-state/jobs/${restart_id}.cid"'));
 });
