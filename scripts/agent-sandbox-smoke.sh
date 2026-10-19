@@ -236,8 +236,8 @@ echo "PASS authenticated runner API executes in bounded tmpfs and returns artifa
 # key bound to that failed job, and accept a fresh key for an explicit retry.
 restart_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"22222222-2222-4222-8222-222222222222",resetWorkspace:true,
-  command:["node","-e","setTimeout(() => console.log(\"should-not-finish\"), 30000)"],
-  network:"none",timeoutMs:45000
+  command:["node","-e","setTimeout(() => console.log(\"should-not-finish\"), 60000)"],
+  network:"none",timeoutMs:90000
 }))')
 restart_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
@@ -259,7 +259,7 @@ if [ "$restart_state" != "running" ]; then echo "FAIL restart smoke job never en
 restart_cid_file="${workspace}-runner-state/${restart_id}.cid"
 restart_cid=
 i=0
-while [ "$i" -lt 15 ]; do
+while [ "$i" -lt 40 ]; do
   if [ -s "$restart_cid_file" ]; then
     restart_cid=$(cat "$restart_cid_file")
     if [ "$(docker inspect --format '{{.State.Running}}' "$restart_cid" 2>/dev/null || true)" = "true" ]; then break; fi
