@@ -366,7 +366,7 @@ echo "PASS Runner API restart recovery and explicit idempotent retry"
 # the API must remain healthy, and a later job (the pdb smoke below) must still run.
 container_crash_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"66666666-6666-4666-8666-666666666666",resetWorkspace:true,
-  command:["node","-e","setTimeout(() => console.log(\\\"should-not-finish\\\"), 60000)"],
+  command:["node","-e","setTimeout(() => console.log(String.fromCharCode(110,111,112,101)), 60000)"],
   network:"none",timeoutMs:90000
 }))')
 container_crash_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
@@ -386,7 +386,7 @@ while [ "$i" -lt 20 ]; do
   i=$((i + 1))
 done
 if [ "$container_crash_state" != "running" ]; then echo "FAIL container-crash job never entered running state ($container_crash_state)" >&2; exit 1; fi
-container_crash_cid_file="\${workspace}-runner-state/jobs/\${container_crash_id}.cid"
+container_crash_cid_file="${workspace}-runner-state/jobs/${container_crash_id}.cid"
 container_crash_cid=
 i=0
 while [ "$i" -lt 40 ]; do
