@@ -175,6 +175,28 @@ test('task owners classify status and checkpoint metadata never overrides it', a
 });
 
 
+
+test('task dependencies must exist and cannot create cycles', async () => {
+  const { upsertAgentTask } = await import('../apps/worker/services/agentCoordination.js');
+  const base = upsertAgentTask({}, {
+    taskId: 'task-prerequisite', title: 'Define API contract', summary: 'Agree on the request and response shape.',
+    assignedRole: 'arquitecto', status: 'pending'
+  }, 'coordinador', '2026-10-19T12:00:00.000Z');
+  const dependent = upsertAgentTask({ agentTasks: base.tasks }, {
+    taskId: 'task-implementation', title: 'Implement API', summary: 'Build against the agreed contract.',
+    assignedRole: 'desarrollador', status: 'pending', dependsOn: ['task-prerequisite']
+  }, 'coordinador', '2026-10-19T12:01:00.000Z');
+  assert.deepEqual(dependent.task.dependsOn, ['task-prerequisite']);
+  assert.throws(() => upsertAgentTask({ agentTasks: dependent.tasks }, {
+    taskId: 'task-implementation', title: 'Implement API', summary: 'Unknown prerequisite.',
+    assignedRole: 'desarrollador', dependsOn: ['task-missing']
+  }, 'desarrollador'), /tarea existente/);
+  assert.throws(() => upsertAgentTask({ agentTasks: dependent.tasks }, {
+    taskId: 'task-prerequisite', title: 'Define API contract', summary: 'Would create a cycle.',
+    assignedRole: 'arquitecto', dependsOn: ['task-implementation']
+  }, 'arquitecto'), /crearía un ciclo/);
+});
+
 test('automatic stage task IDs normalize whitespace in agent and stage labels', async () => {
   const { agentStageTaskId } = await import('../apps/worker/services/agentCoordination.js');
   assert.equal(
