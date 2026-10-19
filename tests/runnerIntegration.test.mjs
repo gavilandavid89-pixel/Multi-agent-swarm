@@ -51,4 +51,10 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(engine.includes('pruebas de proyecto no confirmadas'));
   assert.ok(engine.includes('syntax?.runnerExecution?.infraError'));
   assert.ok(engine.includes("lastCheckpoint: 'runner-infra-error'"));
+  assert.ok(engine.includes("payload.resumeMode === 'runner-only'"));
+  assert.ok(engine.includes("lastCheckpoint: runnerExecution.infraError ? 'runner-infra-error' : 'runner-recheck'"));
+  const server = await readFile(new URL('../apps/worker/server.js', import.meta.url), 'utf8');
+  assert.ok(server.includes('getRetryRecoveryMode(record.payload)'));
+  assert.ok(server.includes("resumeMode: 'runner-only'"));
+  assert.ok(server.includes('Reintento acotado: se conserva la entrega y la validación de IA ya guardadas'));
 });
