@@ -377,6 +377,102 @@ app.get('/api/jobs', async (req, res) => {
     res.json({ jobs: jobs.slice(offset, offset + limit), total: jobs.length, limit, offset, hasMore: offset + limit < jobs.length, status: requestedStatus });
   } catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
+
+// Authenticated server-to-browser event stream. PostgreSQL ownership remains authoritative;
+// the stream only reports status changes and never exposes another user's job IDs.
+const eventStreamClients = new Map();
+app.get('/api/events', async (req, res) => {
+  const userId = String(req.user?.id || '');
+  const currentClients = eventStreamClients.get(userId) || 0;
+  if (currentClients >= 2) return res.status(429).json({ error: 'Ya hay demasiadas conexiones de eventos para esta cuenta.' });
+  eventStreamClients.set(userId, currentClients + 1);
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders?.();
+  res.write('retry: 3000\n\n');
+  let closed = false;
+  let polling = false;
+  let lastHeartbeat = Date.now();
+  const knownStatuses = new Map();
+  const send = (event, payload) => {
+    if (closed || res.destroyed || res.writableEnded) return false;
+    try { res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`); return true; }
+    catch { return false; }
+  };
+  const poll = async () => {
+    if (closed || polling) return;
+    polling = true;
+    try {
+      // Re-check session validity so revoked/disabled accounts don't retain a stream.
+      const sessionUser = await findSession(req.sessionToken);
+      if (!sessionUser || String(sessionUser.id) !== userId) {
+        send('session.expired', { reason: 'session_expired' });
+        cleanup();
+        return;
+      }
+      const owned = await pool.query(
+        'SELECT job_id FROM user_job_ownership WHERE user_id=$1 ORDER BY created_at DESC LIMIT 25',
+        [userId]
+      );
+      const ids = new Set(owned.rows.map(row => String(row.job_id)));
+      for (const [jobId, status] of knownStatuses) if (['queued', 'running'].includes(status)) ids.add(jobId);
+      const jobs = (await mapWithConcurrency([...ids], 5, async jobId => {
+        try { return await workerRequest(`/internal/jobs/${encodeURIComponent(jobId)}`); }
+        catch (error) {
+          if (error.status === 404) knownStatuses.delete(jobId);
+          return null;
+        }
+      })).filter(job => job && job.id);
+      for (const job of jobs) {
+        const previousStatus = knownStatuses.get(job.id);
+        if (previousStatus === job.status) continue;
+        knownStatuses.set(job.id, job.status);
+        if (previousStatus !== undefined) {
+          send('task.status', {
+            jobId: job.id,
+            title: String(job.title || '').slice(0, 240),
+            previousStatus,
+            status: job.status,
+            wasActive: ['queued', 'running'].includes(previousStatus),
+            terminal: ['completed', 'failed', 'needs_review'].includes(job.status)
+          });
+        }
+      }
+      // Bound per-connection memory while retaining active tasks for follow-up polling.
+      while (knownStatuses.size > 150) {
+        const removable = [...knownStatuses].find(([, status]) => !['queued', 'running'].includes(status));
+        if (!removable) break;
+        knownStatuses.delete(removable[0]);
+      }
+      if (Date.now() - lastHeartbeat >= 15000) {
+        send('heartbeat', { at: new Date().toISOString() });
+        lastHeartbeat = Date.now();
+      }
+    } catch (error) {
+      console.warn('[bridge][event_stream_poll_failed]', JSON.stringify({ userId, reason: error?.code || error?.status || 'poll_failed' }));
+      send('stream.warning', { retrying: true });
+    } finally { polling = false; }
+  };
+  let interval;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(interval);
+    const remaining = Math.max(0, (eventStreamClients.get(userId) || 1) - 1);
+    if (remaining) eventStreamClients.set(userId, remaining);
+    else eventStreamClients.delete(userId);
+    if (!res.writableEnded) res.end();
+  };
+  req.on('close', cleanup);
+  interval = setInterval(() => { void poll(); }, 10000);
+  interval.unref?.();
+  void poll();
+});
+
 app.post('/api/jobs', limitJobCreation, async (req, res) => {
   const objective = typeof req.body?.objective === 'string' ? req.body.objective.trim() : '';
   if (!objective) return res.status(400).json({ error: 'Escribí un objetivo para el comité.' });
