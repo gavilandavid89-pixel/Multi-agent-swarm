@@ -948,6 +948,7 @@ $('change-password-form').addEventListener('submit', async event => {
     if (!result.token) throw new Error('El servidor no devolvió una sesión renovada.');
     state.accessKey = result.token;
     sessionStorage.setItem('swarm-session-token', result.token);
+    startTaskEventStream();
     $('change-password-form').reset();
     status.textContent = 'Contraseña actualizada. Las demás sesiones fueron cerradas y esta sesión sigue activa.';
   } catch (error) {
