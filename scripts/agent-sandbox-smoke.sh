@@ -274,7 +274,7 @@ if [ -z "$restart_cid" ] || [ "$(docker inspect --format '{{.State.Running}}' "$
 # and executed exactly once by the new process.
 queued_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
-  command:["node","-e","console.log(\\"runner-queued-recovery-ok\\")"],
+  command:["node","-e","console.log(731045)"],
   network:"none",timeoutMs:15000
 }))')
 queued_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
