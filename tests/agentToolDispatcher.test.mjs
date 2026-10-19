@@ -268,6 +268,7 @@ test('a started invocation with a changed workspace gets a new idempotency key',
   const secondKey = f.executed[1].idempotencyKey;
   assert.notEqual(firstKey, secondKey);
   assert.equal(journal.length, 2);
-  assert.ok(journal.every(item => item.status === 'started' || item.status === 'completed'));
-  assert.equal(journal.find(item => item.workspaceHash !== journal[0].workspaceHash)?.status, 'completed');
+  assert.equal(journal[0].status, 'started', 'the ambiguous prior workspace remains journaled, not overwritten');
+  assert.equal(journal[1].status, 'completed', 'the changed workspace gets its own completed invocation');
+  assert.notEqual(journal[0].workspaceHash, journal[1].workspaceHash);
 });
