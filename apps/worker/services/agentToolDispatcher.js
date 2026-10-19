@@ -4,6 +4,8 @@ const PERMISSIONS = {
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
 
+  arbitro: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+
   arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
   esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
@@ -53,7 +55,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
     taskId: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 160 },
     summary: { type: 'string', maxLength: 2000 }, status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
     priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, nextStep: { type: 'string', maxLength: 1000 },
-    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'] },
+    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador'] },
     dependsOn: { type: 'array', items: { type: 'string', maxLength: 64 }, maxItems: 20 }, evidence: { type: 'string', maxLength: 2000 }
   }, ['title', 'summary']),
   tool('agent_tasks_list', 'Consulta el tablero compartido de tareas, opcionalmente filtrado por responsable o estado.', {
