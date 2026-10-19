@@ -1,17 +1,19 @@
 import { createHash } from 'node:crypto';
 
 const PERMISSIONS = {
+  coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
 
-  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
-  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
-  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
-  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report'],
+  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
-  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report']
+  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list']
 };
 const BLOCKED_DIRS = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.docker', 'node_modules', '.venv', 'venv']);
 const BLOCKED_FILES = new Set(['.npmrc', '.netrc', '.pypirc', '.git-credentials', 'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519', 'terraform.tfstate', 'terraform.tfvars', 'kubeconfig']);
@@ -21,6 +23,8 @@ const TOOL_TO_PERMISSION = {
   workspace_list: 'workspace_list', workspace_read: 'workspace_read', workspace_write: 'workspace_write',
   runner_execute: 'runner_execute', runner_check: 'runner_check', runner_job_status: 'runner_job_status',
   agent_findings_list: 'agent_findings_list', agent_finding_report: 'agent_finding_report',
+  agent_feed_publish: 'agent_feed_publish', agent_feed_list: 'agent_feed_list',
+  agent_task_upsert: 'agent_task_upsert', agent_tasks_list: 'agent_tasks_list',
   runner_cancel: 'runner_cancel', runner_artifact: 'runner_artifact', runner_dependency: 'runner_dependency'
 };
 const tool = (name, description, properties = {}, required = []) => ({
@@ -38,6 +42,26 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   tool('runner_artifact', 'Consulta un artefacto de una ejecución.', { jobId: { type: 'string' }, artifactId: { type: 'string' } }, ['jobId', 'artifactId']),
   tool('runner_dependency', 'Prepara dependencias mediante red restringida.', { manifest: { type: 'string', enum: ['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'] } }, ['manifest']),
   tool('agent_findings_list', 'Consulta hallazgos abiertos relevantes para tu rol, informados por otros agentes.', {}, []),
+  tool('agent_feed_publish', 'Publica un avance, decisión, pregunta, bloqueo, resultado o traspaso visible para los demás agentes.', {
+    type: { type: 'string', enum: ['progress', 'decision', 'question', 'blocker', 'result', 'handoff'] },
+    title: { type: 'string', maxLength: 160 }, body: { type: 'string', maxLength: 2000 },
+    taskId: { type: 'string', maxLength: 64 }
+  }, ['type', 'title', 'body']),
+  tool('agent_feed_list', 'Consulta publicaciones recientes de la red interna de agentes.', {
+    taskId: { type: 'string', maxLength: 64 }, limit: { type: 'integer', minimum: 1, maximum: 100 }
+  }),
+  tool('agent_task_upsert', 'Crea una tarea compartida o actualiza una tarea asignada a tu rol; el coordinador puede reasignar y actualizar cualquier tarea.', {
+    taskId: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 160 },
+    summary: { type: 'string', maxLength: 2000 }, status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
+    priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, nextStep: { type: 'string', maxLength: 1000 },
+    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'] },
+    dependsOn: { type: 'array', items: { type: 'string', maxLength: 64 }, maxItems: 20 }, evidence: { type: 'string', maxLength: 2000 }
+  }, ['title', 'summary']),
+  tool('agent_tasks_list', 'Consulta el tablero compartido de tareas, opcionalmente filtrado por responsable o estado.', {
+    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'] },
+    status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
+    limit: { type: 'integer', minimum: 1, maximum: 100 }
+  }),
   tool('agent_finding_report', 'Registra un bug, riesgo, fallo de prueba o mejora que debe revisar otro agente. No realices cambios fuera de tu rol: informa evidencia y ruta.', {
     category: { type: 'string', enum: ['bug', 'security', 'test', 'architecture', 'performance', 'quality', 'product', 'other'] },
     severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
