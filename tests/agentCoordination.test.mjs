@@ -173,3 +173,16 @@ test('task owners classify status and checkpoint metadata never overrides it', a
   assert.equal(doneByOwner.task.status, 'done');
   assert.equal(doneByOwner.task.history.length, 3);
 });
+
+
+test('automatic stage task IDs normalize whitespace in agent and stage labels', async () => {
+  const { agentStageTaskId } = await import('../apps/worker/services/agentCoordination.js');
+  assert.equal(
+    agentStageTaskId('arquitecto', 'Arquitecto   Principal', 'Diseño   del sistema'),
+    agentStageTaskId('arquitecto', 'Arquitecto Principal', 'Diseño del sistema')
+  );
+  assert.equal(
+    agentStageTaskId('arquitecto', 'Arquitecto Principal', 'Diseño del sistema'),
+    agentStageTaskId('arquitecto', '  Arquitecto Principal  ', '  Diseño del sistema  ')
+  );
+});
