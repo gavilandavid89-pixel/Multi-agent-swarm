@@ -12,8 +12,10 @@ test('oversized escaped output is summarized without cutting JSON', () => {
   const serialized = serializeAgentToolResult(result);
   assert.ok(serialized.length <= 16000);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.ok, false);
+  assert.equal(parsed.ok, true);
   assert.equal(parsed.truncated, true);
+  assert.equal(parsed.jobId, 'job-42');
+  assert.equal(parsed.status, 'running');
   assert.ok(parsed.serializedChars > 16000);
   assert.ok(parsed.preview.length > 0);
 });
