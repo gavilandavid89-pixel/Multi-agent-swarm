@@ -657,8 +657,8 @@ echo "PASS root filesystem read-only"
 # The API process and its state directory stay in place for this first pass.
 daemon_restart_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
-  command:["node","-e","setTimeout(()=>{},180000)"],
-  network:"none",timeoutMs:210000
+  command:["node","-e","setTimeout(()=>{},90000)"],
+  network:"none",timeoutMs:120000
 }))')
 daemon_restart_create=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
