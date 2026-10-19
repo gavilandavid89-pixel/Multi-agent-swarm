@@ -248,8 +248,8 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = await updateTask(args, normalizedRole); break;
       case 'agent_tasks_list':
         if (Object.keys(args).some(k => !['assignedRole', 'status', 'limit'].includes(k))) throw error('Argumentos extra no permitidos para agent_tasks_list.');
-        if (args.assignedRole !== undefined && typeof args.assignedRole !== 'string') throw error('assignedRole inválido.');
-        if (args.status !== undefined && typeof args.status !== 'string') throw error('status inválido.');
+        if (args.assignedRole !== undefined && !['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'].includes(args.assignedRole)) throw error('assignedRole inválido.');
+        if (args.status !== undefined && !['pending', 'in_progress', 'blocked', 'in_review', 'done'].includes(args.status)) throw error('status inválido.');
         if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) throw error('limit inválido.');
         if (typeof listTasks !== 'function') throw error('El tablero de tareas no está disponible.');
         result = await listTasks({ role: args.assignedRole, status: args.status, limit: args.limit }); break;
