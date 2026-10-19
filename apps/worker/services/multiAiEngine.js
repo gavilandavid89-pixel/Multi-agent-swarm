@@ -317,7 +317,7 @@ async function startAgent(jobId, stage, progress, agent, content) {
   const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
   return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
 }
-async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, taskStatus = 'done') {
+async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, checkpointSignal = 'result') {
   const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
   const at = new Date().toISOString();
   const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
@@ -333,7 +333,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
   const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
   const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
-  const isInfrastructureBlock = taskStatus === 'blocked';
+  const isInfrastructureBlock = checkpointSignal === 'blocked';
   const feed = appendAgentFeedEvent(taskPayload, {
     agent, stage, type: isInfrastructureBlock ? 'blocker' : 'result',
     title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage,
