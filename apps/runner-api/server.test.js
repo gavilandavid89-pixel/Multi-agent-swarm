@@ -78,6 +78,12 @@ test('capability catalog accurately describes implemented dispatcher and sandbox
   assert.ok(capabilities.toolchains.some(item => item.id === 'godot'));
   assert.ok(capabilities.toolchains.some(item => item.id === 'data-files'));
   assert.deepEqual(capabilities.agentToolContract.notYetImplemented, []);
+  assert.deepEqual(capabilities.agentToolContract.plannedTools, []);
+  assert.deepEqual(capabilities.agentToolContract.availableTools, [
+    'workspace.list', 'workspace.read', 'workspace.write', 'runner.check',
+    'runner.execute', 'runner.prepareDependencies', 'runner.jobStatus',
+    'runner.cancel', 'runner.artifact.read'
+  ]);
   assert.equal(capabilities.agentToolContract.rolePolicyStatus, 'enforced-by-worker-dispatcher');
   assert.ok(capabilities.agentToolContract.rolePolicy.Desarrollador.allow.includes('workspace.write'));
   assert.ok(capabilities.notIncluded.some(item => item.includes('credenciales')));
