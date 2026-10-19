@@ -261,18 +261,18 @@ wait "$api_pid" 2>/dev/null || true
 api_pid=
 RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
 RUNNER_API_SENTINEL=must-not-leak \
-RUNNER_STATE_DIR="\${workspace}-runner-state" \
-PORT=3200 node apps/runner-api/server.js >> "\${workspace}-runner-api.log" 2>&1 &
+RUNNER_STATE_DIR="${workspace}-runner-state" \
+PORT=3200 node apps/runner-api/server.js >> "${workspace}-runner-api.log" 2>&1 &
 api_pid=$!
 ready=0
 i=0
 while [ "$i" -lt 100 ]; do
   if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
-  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "\${workspace}-runner-api.log" >&2; exit 1; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "${workspace}-runner-api.log" >&2; exit 1; fi
   sleep 1
   i=$((i + 1))
 done
-if [ "$ready" -ne 1 ]; then cat "\${workspace}-runner-api.log" >&2; echo "FAIL runner API did not recover after process restart" >&2; exit 1; fi
+if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API did not recover after process restart" >&2; exit 1; fi
 recovered_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
 printf '%s' "$recovered_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="failed"||!String(j.error||"").includes("servicio se reinició")){console.error("FAIL restart recovery state",JSON.stringify(j));process.exit(1)}})'
 same_restart_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
