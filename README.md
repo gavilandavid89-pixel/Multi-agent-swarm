@@ -209,3 +209,76 @@ El modelo no recibe la clave de Runner API ni acceso directo a Docker. El camino
 | `SWARM_RUNNER_IMAGE` | Host dedicado | Imagen de ejecución preconstruida; valor predeterminado `swarm-agent-runner:local`. No permitir que el agente elija imágenes. |
 
 **Integración por etapas:** la CI de la rama construye y prueba el runner, el proxy y la API real contra Docker. Eso no significa que haya un host dedicado provisionado. Para activarlo, primero construí la imagen y ejecutá `sh scripts/agent-sandbox-smoke.sh` en el host aislado; configurá el secreto y el firewall; probá el Worker con `AGENT_RUNNER_REQUIRED=false`; solo después de verificar resultados reales se debe considerar `true`. El archivo `render.yaml` se mantiene idéntico a `main`: no se cambia el blueprint ni se habilita la ejecución remota de producción como parte de esta rama.
+
+## Estado técnico del sandbox de agentes (revisión 18-10-2026)
+
+Esta sección registra las garantías que se verificaron en la rama experimental, cómo repetir las comprobaciones y qué queda pendiente. **El estado de CI corresponde a un commit concreto**; un cambio posterior requiere volver a comprobar sus propios checks.
+
+### Estado de la rama y CI
+
+- Rama de trabajo: `feature/agent-execution-sandbox`.
+- Pull request: [#103 — Agent execution sandbox](https://github.com/gavilandavid89-pixel/Multi-agent-swarm/pull/103). Se mantiene como **draft** para revisión; no se fusiona ni se despliega automáticamente.
+- Commit comprobado: `e9951624728c890fbbd0d15b1aadbd53fa90d20f`.
+- [Ejecución de GitHub Actions para ese commit](https://github.com/gavilandavid89-pixel/Multi-agent-swarm/actions/runs/39180896313): los jobs `syntax-and-tests` y `agent-sandbox` terminaron con conclusión `success`. Incluyeron sintaxis y tests unitarios, auditoría de dependencias, verificación de delegación HTML al runner, construcción de la imagen Worker, validación de scripts y configuración del proxy, y construcción/prueba del runner aislado con el proxy de egress restringido.
+- Los commits posteriores deben validar su propio SHA; el resultado anterior no demuestra que un cambio futuro también pase CI.
+
+### Flujo de ejecución y límites de confianza
+
+El flujo de herramientas se mantiene mediado por el Worker; el modelo no recibe credenciales del runner ni puede elegir imágenes, volúmenes, variables del host o políticas de red.
+
+1. El dispatcher comprueba que la herramienta esté disponible para el rol y valida sus argumentos antes de actuar. El desarrollador puede editar su workspace y pedir ejecuciones; el validador tiene capacidades de lectura/comprobación y los roles de auditoría no reciben permisos de escritura.
+2. Los archivos se filtran antes de enviarse al runner. Se rechazan rutas conocidas de credenciales y contenidos que coinciden con detectores de secretos. Estos filtros son defensa en profundidad, no garantía de detección perfecta: **nunca incluyas secretos en una entrega**.
+3. Las ejecuciones ordinarias usan `network: "none"`. El modelo no puede cambiar ese valor a través de `runner_execute`. La preparación de dependencias es una operación separada y limitada a manifests conocidos, con egress restringido por el proxy y una allowlist revisada.
+4. El runner crea un contenedor nuevo por ejecución, con límites de CPU/memoria/tiempo, workspace controlado y salida/artefactos acotados. La API autentica las solicitudes servicio a servicio y limita la concurrencia porque el aislamiento de red por trabajo aún requiere una frontera dedicada.
+5. El Worker consulta el estado de los trabajos de forma asíncrona. Las claves de idempotencia se reutilizan en reintentos de transporte para evitar crear duplicados cuando la respuesta HTTP se pierde. Una clave repetida con una solicitud distinta debe rechazarse en vez de reutilizar silenciosamente un trabajo incompatible.
+
+### Depuración por lotes con stdin restringido
+
+El runner admite una entrada estándar acotada solo para una invocación de depurador Python PDB. No equivale a una terminal interactiva persistente:
+
+- `stdin` debe ser texto y no puede superar **16 KiB**.
+- El comando debe comenzar exactamente con `python3 -m pdb`; no se permite pasar stdin a comandos ordinarios como `node -e`.
+- La política de red continúa siendo `none`; stdin no habilita egress ni cambia el comando autorizado.
+- Worker/cliente y Runner API validan la condición, de modo que la API rechaza también una solicitud inválida si un caller intenta saltarse la validación del Worker.
+- La entrada es por lote. No hay todavía una sesión PDB persistente con intercambios sucesivos entre modelo y proceso, ni adaptadores equivalentes para Node Inspector, Java JDB u otros depuradores.
+
+### Salidas grandes, redacción y artefactos
+
+- Las salidas de herramientas se acotan sin producir JSON truncado inválido: la respuesta conserva los campos esenciales e informa de truncamiento y tamaño serializado cuando corresponde.
+- La redacción cubre nombres sensibles comunes tanto en `camelCase` como en estructuras anidadas. Es una medida preventiva y no debe tratarse como sustituto de no enviar credenciales.
+- Los artefactos de ejecución se recuperan solo tras completar satisfactoriamente el trabajo y vuelven a pasar por los límites de cantidad, ruta y tamaño antes de integrarse al workspace del agente.
+- Las comprobaciones deterministas y las pruebas ejecutadas en el runner aportan evidencia, pero no prueban por sí solas que una entrega sea segura, completa o correcta en todos los entornos.
+
+### Comprobaciones reproducibles
+
+Desde la raíz del repositorio, con Node.js 22.x y las dependencias instaladas:
+
+```sh
+npm run check
+```
+
+En un host de prueba aislado con Docker disponible, imagen del runner construida y variables de la API configuradas:
+
+```sh
+docker compose -f docker-compose.runner-egress.yml config
+sh scripts/agent-sandbox-smoke.sh
+```
+
+El smoke test requiere que la Runner API esté disponible en `127.0.0.1:3200` y que el secreto de prueba coincida con la configuración del runner. Comprueba el flujo básico y una solicitud negativa: stdin no debe aceptarse para un comando normal. No ejecutes este smoke contra un host de producción ni publiques la API en Internet. La prueba de integración del runner debe realizarse en un host dedicado; CI puede construir y ejercitar el contenedor en su entorno efímero, pero eso no significa que exista un host de ejecución de producción provisionado.
+
+### Recuperación, reinicios y límites pendientes
+
+Hay que distinguir dos tipos de recuperación:
+
+- **Checkpoint del flujo de agentes:** el Worker guarda fases completadas, entrega parcial, estado de validación y datos de continuación en el payload persistido de la tarea. Los bloqueos de tarea impiden ejecutar simultáneamente el mismo trabajo desde dos procesos. Esto permite reanudar desde etapas ya guardadas cuando el flujo vuelve a entrar por el punto de control correspondiente.
+- **Trabajo remoto del runner:** la API del runner persiste el estado del job, el workspace, la clave de idempotencia y los artefactos en su directorio de estado. Al reiniciar, los trabajos que quedaron en cola y no dependen de stdin pueden volver a encolarse; una ejecución que estaba activa se detiene y se marca fallida, ya que no se puede asumir que el proceso dentro del contenedor siguió vivo.
+
+**Pendiente conocido:** todavía no existe una transacción de extremo a extremo que enlace un tool-call del proveedor de IA en vuelo con el `jobId` remoto y el checkpoint del Worker. Si el Worker se reinicia después de que el runner acepte un trabajo, pero antes de que el resultado de la herramienta quede persistido en el contexto del agente, no se garantiza que el modelo reciba ese resultado automáticamente al reanudarse. La idempotencia reduce duplicados de transporte, pero no resuelve por sí sola la recuperación del turno de conversación del proveedor. Para cerrar esa brecha se necesita persistir una identidad estable de invocación, los argumentos validados, el `jobId`, el estado del tool-call y su resultado, y reconciliar los estados pendientes al arrancar; además hacen falta pruebas de reinicio en cada ventana entre envío, aceptación, finalización y checkpoint. No se debe describir esa recuperación como implementada hasta que esas pruebas pasen.
+
+### Activación y seguridad operativa
+
+- La integración remota sigue optativa. Dejá `AGENT_RUNNER_REQUIRED=false` hasta haber validado un host dedicado, red privada, firewall, imagen y smoke tests reales.
+- No despliegues la Runner API en un servicio que no garantice un daemon Docker disponible, ni publiques su puerto. No compartas `RUNNER_SHARED_SECRET` con el modelo o con el código ejecutado.
+- Esta rama no cambia `render.yaml`, no activa el runner en producción y no modifica Render, Neon ni `comite-database`. No se ha realizado migración ni borrado de datos.
+- El runner usa contenedores Docker como una capa de aislamiento; no equivale a una VM o microVM dedicada frente a código hostil multiusuario. Para cargas de alto riesgo, usa un host efímero dedicado y una frontera de virtualización más fuerte.
+
