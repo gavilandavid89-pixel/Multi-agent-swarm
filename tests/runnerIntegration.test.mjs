@@ -57,8 +57,7 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(engine.includes('retryFailedStep, retryAttempt'));
   assert.ok(client.includes('retryFailedStep = null, retryAttempt = 0'));
   assert.ok(client.includes("retry-' + String(Math.trunc(Number(retryAttempt)))"));
-  const workerServer = await readFile(new URL('../apps/worker/server.js', import.meta.url), 'utf8');
-  assert.ok(workerServer.includes('runnerRetryCount: Math.max(0, Number(record.payload.runnerRetryCount) || 0) + 1'));
+  assert.ok(server.includes('runnerRetryCount: Math.max(0, Number(record.payload.runnerRetryCount) || 0) + 1'));
   assert.ok(server.includes('getRetryRecoveryMode(record.payload)'));
   assert.ok(server.includes("resumeMode: 'runner-only'"));
   assert.ok(server.includes('Reintento acotado: se conserva la entrega y la validación de IA ya guardadas'));
