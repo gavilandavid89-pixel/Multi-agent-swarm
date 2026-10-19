@@ -50,3 +50,40 @@ test('agent tool schemas expose findings only through strict bounded arguments',
   } })).result, { title: 'Broken empty state', role: 'desarrollador' });
   assert.equal((await dispatcher.invoke({ name: 'agent_findings_list', arguments: {} })).result[0].id, 'f1');
 });
+
+
+test('shared agent feed stores progress posts and filters by task with bounded results', async () => {
+  const { listAgentPosts, recordAgentPost } = await import('../apps/worker/services/agentCoordination.js');
+  const first = recordAgentPost({}, {
+    type: 'progress', title: 'Parser fixed', body: 'Null input is handled.', taskId: 'task-1'
+  }, 'desarrollador', '2026-10-18T12:00:00.000Z');
+  const second = recordAgentPost({ agentFeed: first.posts }, {
+    type: 'blocker', title: 'Security review needed', body: 'Please inspect token handling.', taskId: 'task-2'
+  }, 'auditor', '2026-10-18T12:01:00.000Z');
+  assert.equal(second.posts.length, 2);
+  assert.equal(listAgentPosts({ agentFeed: second.posts }, { taskId: 'task-1' })[0].role, 'desarrollador');
+  assert.equal(listAgentPosts({ agentFeed: second.posts }, { limit: 1 }).length, 1);
+  assert.throws(() => recordAgentPost({}, { type: 'system_override', title: 'x', body: 'y' }, 'auditor'), /Tipo de publicación/);
+});
+
+test('shared task board tracks ownership, status history, and next steps', async () => {
+  const { listAgentTasks, upsertAgentTask } = await import('../apps/worker/services/agentCoordination.js');
+  const first = upsertAgentTask({}, {
+    title: 'Review token redaction', summary: 'Inspect logs for accidental secret exposure.',
+    status: 'pending', priority: 'high', assignedRole: 'auditor', nextStep: 'Inspect dispatcher output.'
+  }, 'coordinador', '2026-10-18T12:00:00.000Z');
+  assert.equal(first.created, true);
+  assert.equal(first.task.status, 'pending');
+  const updated = upsertAgentTask({ agentTasks: first.tasks }, {
+    taskId: first.task.taskId, title: first.task.title, summary: first.task.summary,
+    status: 'in_progress', nextStep: 'Review output redaction.'
+  }, 'auditor', '2026-10-18T12:01:00.000Z');
+  assert.equal(updated.created, false);
+  assert.equal(updated.task.priority, 'high');
+  assert.equal(updated.task.assignedRole, 'auditor');
+  assert.equal(updated.task.history.length, 2);
+  assert.equal(listAgentTasks({ agentTasks: updated.tasks }, { role: 'auditor', status: 'in_progress' }).length, 1);
+  assert.throws(() => upsertAgentTask({ agentTasks: updated.tasks }, {
+    taskId: first.task.taskId, title: first.task.title, summary: 'unauthorized update', status: 'done'
+  }, 'desarrollador'), /Solo el responsable/);
+});
