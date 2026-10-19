@@ -134,6 +134,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
       const workspaceHash = digest(canonical((Array.isArray(files) ? files : []).map(file => ({ path: file.path, content: file.content })).sort((a, b) => String(a.path).localeCompare(String(b.path)))));
       invocation = await getInvocation({ name, argsHash, workspaceHash, role: normalizedRole, round });
       if (invocation?.status === 'completed' && invocation.workspaceHash === workspaceHash && Object.hasOwn(invocation, 'result')) {
+        rememberRunnerJobs(invocation.result);
         return { ok: true, result: bounded(redactSensitiveOutput(invocation.result)), replayed: true };
       }
       if (!invocation || invocation.status !== 'started') {
