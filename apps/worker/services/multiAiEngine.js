@@ -361,6 +361,12 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
     }
   }
   transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
+  const savedConversations = current.payload.agentConversations && typeof current.payload.agentConversations === 'object'
+    ? current.payload.agentConversations : {};
+  // A stage checkpoint is durable proof that its provider conversation no longer needs replay.
+  // Keep active snapshots for interrupted stages; remove completed snapshots to bound payload growth.
+  const retainedConversations = Object.fromEntries(Object.entries(savedConversations)
+    .filter(([, snapshot]) => snapshot?.status !== 'completed'));
   const checkpointPayload = { ...current.payload, ...extra };
   const activeAgentTaskId = current.payload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
   const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
@@ -372,7 +378,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
     title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage,
     body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at
   });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory }, ...publicPatch });
+  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, agentConversations: retainedConversations, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory }, ...publicPatch });
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
