@@ -276,6 +276,8 @@ Hay que distinguir tres capas de recuperación:
 
 **Límites importantes:** un checkpoint evita repetir etapas que ya terminaron y fueron persistidas, pero no puede garantizar cero tokens repetidos si el proveedor de IA se interrumpe después de generar una respuesta y antes de que el Worker la guarde. Tampoco equivale a guardar y restaurar el estado interno de razonamiento del modelo: la recuperación utiliza las decisiones, los mensajes, archivos y resultados persistidos como contexto. El paso que quedó en vuelo puede necesitar ejecutarse de nuevo.
 
+La selección de este camino de recuperación está cubierta por `tests/retryRecovery.test.mjs`; la integración del Worker verifica que el modo acotado se conecte con la ruta de reintento y el motor de validación.
+
 **Pendiente conocido:** todavía no existe una transacción de extremo a extremo que enlace un tool-call del proveedor de IA en vuelo con el `jobId` remoto, la identidad de invocación y el checkpoint del Worker. Si el Worker se reinicia después de que el runner acepte un trabajo, pero antes de que el resultado de la herramienta quede persistido en el contexto del agente, no se garantiza que el modelo reciba ese resultado automáticamente al reanudarse. La idempotencia reduce duplicados de transporte, pero no resuelve por sí sola la recuperación del turno de conversación del proveedor. Para cerrar esa brecha se necesita persistir una identidad estable de invocación, los argumentos validados, el `jobId`, el estado del tool-call y su resultado, y reconciliar los estados pendientes al arrancar; además hacen falta pruebas de reinicio en cada ventana entre envío, aceptación, finalización y checkpoint.
 
 ### Activación y seguridad operativa
