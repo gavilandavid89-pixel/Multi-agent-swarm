@@ -287,3 +287,17 @@ La selección de este camino de recuperación está cubierta por `tests/retryRec
 - Esta rama no cambia `render.yaml`, no activa el runner en producción y no modifica Render, Neon ni `comite-database`. No se ha realizado migración ni borrado de datos.
 - El runner usa contenedores Docker como una capa de aislamiento; no equivale a una VM o microVM dedicada frente a código hostil multiusuario. Para cargas de alto riesgo, usa un host efímero dedicado y una frontera de virtualización más fuerte.
 
+
+
+## Coordinación de hallazgos entre agentes
+
+Los agentes pueden informar problemas o mejoras que descubren mientras trabajan aunque la solución pertenezca a otro rol. El dispatcher ofrece dos herramientas acotadas:
+
+- `agent_finding_report`: registra categoría, severidad, título, resumen, evidencia opcional y ruta afectada.
+- `agent_findings_list`: consulta hallazgos abiertos dirigidos al rol actual o informados por ese mismo agente.
+
+El Worker persiste los hallazgos en el payload cifrado de la tarea y añade notificaciones al transcript. El enrutamiento inicial es determinista: los riesgos de seguridad van al auditor y coordinador; los bugs al desarrollador, validador y coordinador; las pruebas al validador, desarrollador y coordinador; y los temas de arquitectura al arquitecto y coordinador. Los hallazgos repetidos se deduplican por categoría, título y resumen para evitar bucles de notificaciones, manteniendo un contador de apariciones.
+
+Esto comunica y deja trazabilidad; **no cambia los permisos del agente ni autoriza a un agente a editar fuera de su rol**. El agente receptor debe consultar la bandeja y decidir dentro de sus permisos. La bandeja tiene un límite de 100 hallazgos por tarea y el texto/campos tienen límites de tamaño.
+
+Pruebas de regresión: `tests/agentCoordination.test.mjs`.
