@@ -87,7 +87,7 @@ try {
   await fs.writeFile(entry, document, { mode: 0o600 });
   const profile = path.join(temporaryRoot, '.chromium-profile');
   const result = await runBrowser([
-    '--headless=new', '--no-sandbox', '--disable-background-networking',
+    '--no-sandbox', '--disable-background-networking',
     '--disable-sync', '--disable-extensions', '--disable-component-update',
     '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
     '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
