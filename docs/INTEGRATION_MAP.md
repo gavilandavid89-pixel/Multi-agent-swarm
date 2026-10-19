@@ -15,6 +15,17 @@ Este documento registra los puntos de acoplamiento entre el runner y los PR ante
 
 El recuento refleja intersecciones de rutas modificadas, no una conclusión automática de que el código sea incompatible. Los PRs citados permanecen abiertos; por eso, cada integración futura debe comprobar el estado real de sus ramas antes de aplicar cambios.
 
+### Dependencias reales entre ramas
+
+- #98 (`feature/live-committee-debate`) parte de `main`.
+- #99 (`feature/live-agent-desktop-viewer`) está basado en el head de #98.
+- #100 (`feature/browser-environment-toolkit`) está basado en el head de #99.
+- #102 (`feature/diagnostic-inbox-and-agent-ide`) está basado en el head de #100.
+- #103 (`feature/agent-execution-sandbox`) parte de `main` y **no incluye automáticamente** los cambios de esa cadena.
+- #92 usa una base más antigua e independiente; sus cambios de runner deben compararse con las implementaciones posteriores, no asumirse compatibles por compartir nombres.
+
+Por tanto, #98 → #99 → #100 → #102 es una cadena de PRs apilados. No conviene integrar #99/#100/#102 contra `main` ignorando sus bases, ni fusionar #103 encima de una copia vieja de `multiAiEngine.js`, `server.js` o CI. Antes de una integración final hay que actualizar/reconciliar las bases y repetir CI; esta rama solo registra el mapa y no rebasea ni fusiona esos PRs.
+
 ## Contratos que deben permanecer alineados
 
 1. **Worker → Runner API:** el Worker es el único cliente autenticado. El catálogo, la creación de jobs, el polling, la cancelación y los artefactos deben usar los mismos endpoints y contrato de idempotencia.
