@@ -8,7 +8,7 @@ import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
-import { recordAgentFinding, listAgentFindings } from './agentCoordination.js';
+import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -117,6 +117,44 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
         status: update.finding.status, notifiedRoles: update.finding.targetRoles,
         message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
       };
+    },
+    publishPost: async (post, sourceRole) => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al publicar en el feed.');
+      const update = recordAgentPost(record.payload, post, sourceRole);
+      const transcript = appendEntries(record.payload.transcript, [{
+        at: update.post.createdAt, agent: sourceRole, type: 'agent_feed',
+        content: '[' + update.post.type + '] ' + update.post.title + ': ' + update.post.body
+      }]);
+      await updateJob(jobId, { payload: { agentFeed: update.posts, transcript } });
+      return { postId: update.post.id, createdAt: update.post.createdAt, visibleTo: 'all_agents' };
+    },
+    listPosts: async options => {
+      const record = await getPayload(jobId);
+      return listAgentPosts(record?.payload, options);
+    },
+    updateTask: async (task, sourceRole) => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al actualizar el tablero.');
+      const update = upsertAgentTask(record.payload, task, sourceRole);
+      const postType = update.task.status === 'blocked' ? 'blocker'
+        : update.task.status === 'done' ? 'result'
+        : update.task.status === 'in_review' ? 'handoff' : 'progress';
+      const feed = recordAgentPost({ ...record.payload, agentFeed: record.payload.agentFeed || [] }, {
+        type: postType, title: 'Tarea: ' + update.task.title,
+        body: 'Estado: ' + update.task.status + '. Responsable: ' + update.task.assignedRole + '. Próximo paso: ' + (update.task.nextStep || 'No especificado') + '. ' + update.task.summary,
+        taskId: update.task.taskId
+      }, sourceRole);
+      const transcript = appendEntries(record.payload.transcript, [{
+        at: update.task.updatedAt, agent: sourceRole, type: 'agent_task',
+        content: 'Tarea "' + update.task.title + '" → ' + update.task.status + ' (responsable: ' + update.task.assignedRole + ')'
+      }]);
+      await updateJob(jobId, { payload: { agentTasks: update.tasks, agentFeed: feed.posts, transcript } });
+      return { task: update.task, created: update.created, feedPostId: feed.post.id };
+    },
+    listTasks: async options => {
+      const record = await getPayload(jobId);
+      return listAgentTasks(record?.payload, options);
     }
   });
   return {
