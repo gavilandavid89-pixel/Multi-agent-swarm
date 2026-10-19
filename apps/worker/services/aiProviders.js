@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { serializeAgentToolResult } from './agentToolResult.js';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
@@ -37,6 +37,68 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
+async function restoreAgentConversation(messages, conversationStore) {
+  const baseHash = createHash('sha256').update(JSON.stringify(messages)).digest('hex');
+  const saved = typeof conversationStore?.loadConversation === 'function'
+    ? await conversationStore.loadConversation(baseHash) : null;
+  if (saved?.baseHash === baseHash && saved.status === 'completed' && typeof saved.result === 'string') {
+    return { baseHash, completed: true, result: saved.result, requestMessages: saved.messages || messages,
+      toolRounds: Number(saved.toolRounds) || 0, accumulatedContent: saved.accumulatedContent || '',
+      continuationCount: Number(saved.continuationCount) || 0 };
+  }
+  const requestMessages = saved?.baseHash === baseHash && Array.isArray(saved.messages) ? saved.messages : messages;
+  return {
+    baseHash, completed: false, requestMessages,
+    toolRounds: requestMessages.filter(item => item?.role === 'assistant' && Array.isArray(item.tool_calls)).length,
+    accumulatedContent: saved?.baseHash === baseHash && typeof saved.accumulatedContent === 'string' ? saved.accumulatedContent : '',
+    continuationCount: Number(saved?.continuationCount) || 0
+  };
+}
+async function saveAgentConversation(conversationStore, state, status = 'active', result = undefined) {
+  if (typeof conversationStore?.saveConversation !== 'function') return;
+  await conversationStore.saveConversation({
+    baseHash: state.baseHash, messages: state.requestMessages, toolRounds: state.toolRounds,
+    accumulatedContent: state.accumulatedContent, continuationCount: state.continuationCount,
+    status, ...(typeof result === 'string' ? { result } : {})
+  });
+}
+async function recoverPendingAgentToolCalls(state, { tools, onToolCall, model, providerName, conversationStore }) {
+  let assistantIndex = -1;
+  for (let i = state.requestMessages.length - 1; i >= 0; i--) {
+    if (state.requestMessages[i]?.role === 'assistant' && Array.isArray(state.requestMessages[i].tool_calls)) {
+      assistantIndex = i;
+      break;
+    }
+  }
+  if (assistantIndex < 0) return;
+  const calls = state.requestMessages[assistantIndex].tool_calls.slice(0, 8);
+  const completedIds = new Set(state.requestMessages.slice(assistantIndex + 1)
+    .filter(item => item?.role === 'tool').map(item => String(item.tool_call_id || '')));
+  if (calls.some(call => !completedIds.has(String(call?.id || '')))
+      && (!Array.isArray(tools) || !tools.length || typeof onToolCall !== 'function')) {
+    const error = new Error('Hay llamadas de herramientas pendientes en el checkpoint, pero no hay un dispatcher autorizado para recuperarlas.');
+    error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
+    throw error;
+  }
+  for (const call of calls) {
+    const id = String(call?.id || '');
+    if (completedIds.has(id)) continue;
+    const name = String(call?.function?.name || '');
+    let args;
+    try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch { args = null; }
+    let result;
+    try {
+      if (!name || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos de herramienta inválidos.');
+      result = await onToolCall({ id, name, arguments: args, model, provider: providerName, recovered: true });
+    } catch (toolError) {
+      result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
+    }
+    state.requestMessages.push({ role: 'tool', tool_call_id: id, name, content: serializeAgentToolResult(result) });
+    completedIds.add(id);
+    await saveAgentConversation(conversationStore, state);
+  }
+}
+
 export function estimateInputTokens(messages) {
   const characters = (Array.isArray(messages) ? messages : []).reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
   // Conservative estimate for Spanish and source code; provider-reported usage remains authoritative.
@@ -227,7 +289,7 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
   };
 }
 
-async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false, tools, onToolCall, maxToolRounds = 8 }) {
+async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false, tools, onToolCall, maxToolRounds = 8, conversationStore = null }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -243,7 +305,22 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
   const apiKey = suppliedApiKey;
   if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0; let continuationCount = 0; let toolRounds = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0;
+  const conversationState = await restoreAgentConversation(messages, conversationStore);
+  if (conversationState.completed) return conversationState.result;
+  let continuationCount = conversationState.continuationCount;
+  let toolRounds = conversationState.toolRounds;
+  let accumulatedContent = conversationState.accumulatedContent;
+  let requestMessages = conversationState.requestMessages;
+  const saveConversation = (status = 'active', result) => {
+    conversationState.requestMessages = requestMessages;
+    conversationState.toolRounds = toolRounds;
+    conversationState.accumulatedContent = accumulatedContent;
+    conversationState.continuationCount = continuationCount;
+    return saveAgentConversation(conversationStore, conversationState, status, result);
+  };
+  await recoverPendingAgentToolCalls(conversationState, { tools, onToolCall, model, providerName, conversationStore });
+  requestMessages = conversationState.requestMessages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
@@ -304,21 +381,12 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
          await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
          const calls = message.tool_calls.slice(0, 8);
          requestMessages = [...requestMessages, { role: 'assistant', content: typeof content === 'string' ? content : '', tool_calls: calls }];
-         for (const call of calls) {
-           const name = String(call?.function?.name || '');
-           let args;
-           try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch { args = null; }
-           let result;
-           try {
-             if (!name || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos de herramienta inválidos.');
-             result = await onToolCall({ id: String(call.id || ''), name, arguments: args, model, provider: providerName });
-           } catch (toolError) {
-             result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
-           }
-           const serialized = serializeAgentToolResult(result);
-           requestMessages.push({ role: 'tool', tool_call_id: String(call.id || ''), name, content: serialized });
-         }
          toolRounds++;
+         await saveConversation();
+         await recoverPendingAgentToolCalls(conversationState, { tools, onToolCall, model, providerName, conversationStore });
+         requestMessages = conversationState.requestMessages;
+         /* Each result is durably checkpointed by recoverPendingAgentToolCalls before the next provider round. */
+         continue;
          continue;
        }
       const usage = data?.usage || {};
@@ -340,10 +408,12 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
+        await saveConversation();
         console.info('[worker][provider_continuation]', JSON.stringify({ provider: providerName, model, continuation: continuationCount, maxContinuations }));
         continue;
       }
       if (truncated && continueOnLength) { const error = new Error(`La respuesta de ${model} sigue truncada tras ${continuationCount} continuaciones; no se considera una entrega completa. Reducí el tamaño por módulo o aumentá MAX_CONTINUATION_CALLS.`); error.code = 'OUTPUT_TRUNCATED'; throw error; }
+      await saveConversation('completed', accumulatedContent);
       return accumulatedContent;
     }
     const body = await response.text().catch(() => '');
