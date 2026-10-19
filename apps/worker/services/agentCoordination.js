@@ -160,6 +160,9 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   const current = Array.isArray(payload?.agentTasks) ? payload.agentTasks : [];
   const existing = task.taskId ? current.find(item => item?.taskId === task.taskId) : null;
   const role = normalizeRole(sourceRole);
+  if (!existing && role !== 'coordinador' && task.assignedRole !== role) {
+    throw new Error('Solo el coordinador puede asignar una tarea nueva a otro rol.');
+  }
   if (existing && existing.assignedRole !== role) {
     if (role !== 'coordinador') {
       throw new Error('Solo el responsable asignado puede clasificar o actualizar esta tarea.');
