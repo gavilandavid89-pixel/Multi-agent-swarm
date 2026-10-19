@@ -57,6 +57,7 @@ function stopTaskEventStream() {
   state.eventStreamController = null;
 }
 function startTaskEventStream() {
+  stopTaskEventStream();
   const generation = ++state.eventStreamGeneration;
   const pause = ms => new Promise(resolve => window.setTimeout(resolve, ms));
   void (async () => {
