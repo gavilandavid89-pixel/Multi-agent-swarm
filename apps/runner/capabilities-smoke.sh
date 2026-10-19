@@ -3,18 +3,19 @@ set -eu
 
 # This runs inside the isolated runner image. It is a build-time inventory,
 # not a command executed in the Worker or on the runner host.
-required='node npm npx tsc tsx prettier eslint python3 pytest black flake8 mypy java javac jdb mvn go php composer ruby bundle gcc g++ make rustc cargo chromium xvfb-run godot jq sqlite3 rg fdfind tree shellcheck shfmt'
-missing=''
-for command_name in $required; do
+# Validate every command declared by the machine-readable catalog, not a
+# hand-maintained subset that can silently drift from capabilities.json.
+node -e '
+  const fs = require("node:fs");
+  const manifest = JSON.parse(fs.readFileSync("/opt/swarm-runner/capabilities.json", "utf8"));
+  for (const command of [...new Set(manifest.toolchains.flatMap(item => item.commands))].sort()) console.log(command);
+' | while IFS= read -r command_name; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
-    printf 'MISSING_TOOL=%s\n' "$command_name" >&2
-    missing="$missing $command_name"
+    printf 'MISSING_TOOL=%s\\n' "$command_name" >&2
+    printf 'Runner image is missing a command declared in capabilities.json: %s\\n' "$command_name" >&2
+    exit 1
   fi
 done
-if [ -n "$missing" ]; then
-  printf 'Runner image is missing required tools:%s\n' "$missing" >&2
-  exit 1
-fi
 
 node --version
 npm --version
