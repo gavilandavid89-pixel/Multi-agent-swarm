@@ -160,8 +160,19 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   const current = Array.isArray(payload?.agentTasks) ? payload.agentTasks : [];
   const existing = task.taskId ? current.find(item => item?.taskId === task.taskId) : null;
   const role = normalizeRole(sourceRole);
-  if (existing && existing.assignedRole !== role && role !== 'coordinador') {
-    throw new Error('Solo el responsable asignado o el coordinador puede actualizar esta tarea.');
+  if (existing && existing.assignedRole !== role) {
+    if (role !== 'coordinador') {
+      throw new Error('Solo el responsable asignado puede clasificar o actualizar esta tarea.');
+    }
+    if (input.assignedRole === undefined || normalizeRole(input.assignedRole) === existing.assignedRole) {
+      throw new Error('El coordinador solo puede actualizar una tarea existente para reasignarla; el estado pertenece al responsable.');
+    }
+    if (['status', 'priority', 'nextStep', 'evidence', 'dependsOn'].some(key => input[key] !== undefined)) {
+      throw new Error('Al reasignar, el coordinador no puede modificar el estado ni la clasificación del responsable.');
+    }
+  }
+  if (existing && existing.assignedRole === role && input.assignedRole !== undefined && normalizeRole(input.assignedRole) !== existing.assignedRole) {
+    throw new Error('Solo el coordinador puede reasignar una tarea.');
   }
   if (existing) {
     if (input.status === undefined) task.status = existing.status;
