@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 const PERMISSIONS = {
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
 
@@ -44,6 +46,13 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   }, ['category', 'severity', 'title', 'summary'])
 ]);
 function error(message, code = 'AGENT_TOOL_INVALID_ARGUMENT') { const e = new Error(message); e.code = code; return e; }
+function canonical(value) {
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}';
+  return JSON.stringify(value);
+}
+function digest(value) { return createHash('sha256').update(value).digest('hex'); }
+const JOURNALED_TOOLS = new Set(['runner_execute', 'runner_check', 'runner_dependency']);
 function safePath(path) {
   if (typeof path !== 'string' || !path || path.length > 240 || path.includes('\\') || path.includes('\0') || /[\x00-\x1f\x7f]/.test(path) || path.startsWith('/') || /^[a-z]:/i.test(path)) throw error('Ruta inválida.');
   const parts = path.split('/');
@@ -94,7 +103,7 @@ function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
   for (const child of children) collectRunnerJobIds(child, ids, depth + 1);
   return ids;
 }
-export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings } = {}) {
+export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings, getInvocation, saveInvocation } = {}) {
   const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
@@ -117,6 +126,26 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
     if (calls > Math.min(100, Math.max(1, Number(maxCalls) || 40))) throw error('Límite de llamadas excedido.', 'AGENT_TOOL_CALL_LIMIT');
     if (!TOOL_TO_PERMISSION[name] || !allowed.includes(TOOL_TO_PERMISSION[name])) throw error('Permiso denegado para ' + String(name), 'AGENT_TOOL_ROLE_DENIED');
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw error('Argumentos deben ser un objeto.');
+    const journaled = JOURNALED_TOOLS.has(name) && typeof getInvocation === 'function' && typeof saveInvocation === 'function';
+    let invocation = null;
+    if (journaled) {
+      const argsHash = digest(canonical(args));
+      const files = await workspace.list();
+      const workspaceHash = digest(canonical((Array.isArray(files) ? files : []).map(file => ({ path: file.path, content: file.content })).sort((a, b) => String(a.path).localeCompare(String(b.path)))));
+      invocation = await getInvocation({ name, argsHash, workspaceHash, role: normalizedRole, round });
+      if (invocation?.status === 'completed' && invocation.workspaceHash === workspaceHash && Object.hasOwn(invocation, 'result')) {
+        return { ok: true, result: bounded(redactSensitiveOutput(invocation.result)), replayed: true };
+      }
+      if (!invocation || invocation.status !== 'started') {
+        invocation = {
+          name, argsHash, workspaceHash, role: normalizedRole, round, status: 'started',
+          idempotencyKey: 'swarm-tool-' + digest([jobId, normalizedRole, round, name, argsHash, workspaceHash].join(':')).slice(0, 48),
+          startedAt: new Date().toISOString()
+        };
+      }
+      // Persist before any remote side effect. If this write fails, do not send the job.
+      await saveInvocation(invocation);
+    }
     let result;
     switch (name) {
       case 'workspace_list': {
@@ -160,7 +189,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
           if (typeof args.stdin !== 'string' || Buffer.byteLength(args.stdin, 'utf8') > 16 * 1024) throw error('stdin debe ser texto de hasta 16 KiB.');
           if (args.command[0] !== 'python3' || args.command[1] !== '-m' || args.command[2] !== 'pdb' || args.command.length < 4) throw error('stdin solo se permite para sesiones por lotes de Python PDB.');
         }
-        result = rememberRunnerJobs(await runner.execute({ jobId, round, workspace, command: args.command, network: 'none', timeoutMs: args.timeoutMs || 60000, stdin: args.stdin })); break;
+        result = rememberRunnerJobs(await runner.execute({ jobId, round, workspace, command: args.command, network: 'none', timeoutMs: args.timeoutMs || 60000, stdin: args.stdin, idempotencyKey: invocation?.idempotencyKey })); break;
       }
       case 'runner_check':
         if (Object.keys(args).length) throw error('runner_check no acepta argumentos.');
@@ -190,10 +219,14 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
       case 'runner_dependency':
         if (Object.keys(args).some(k => k !== 'manifest')) throw error('Argumentos extra no permitidos para runner_dependency.');
         if (!['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'].includes(args.manifest)) throw error('Manifest no permitido.');
-        result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest })); break;
+        result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest, idempotencyKey: invocation?.idempotencyKey })); break;
       default: throw error('Herramienta desconocida.');
     }
-    return { ok: true, result: bounded(redactSensitiveOutput(result)) };
+    const safeResult = bounded(redactSensitiveOutput(result));
+    if (invocation && journaled) {
+      await saveInvocation({ ...invocation, status: 'completed', result: safeResult, completedAt: new Date().toISOString() });
+    }
+    return { ok: true, result: safeResult };
   }
   return Object.freeze({ role: normalizedRole, permissions: [...allowed], invoke, get callCount() { return calls; } });
 }
