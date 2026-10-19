@@ -123,7 +123,7 @@ restricted_stdin_status=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' 
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
   -d "$restricted_stdin_body")
 if [ "$restricted_stdin_status" != 400 ]; then echo "FAIL runner accepted debugger stdin with restricted networking ($restricted_stdin_status)" >&2; exit 1; fi
-non_debugger_stdin_body=$(node -e 'process.stdout.write(JSON.stringify({files:[],command:["node","-e","process.stdout.write(\\"should-not-run\\")"],network:"none",timeoutMs:5000,stdin:"q\\n"}))')
+non_debugger_stdin_body=$(node -e 'process.stdout.write(JSON.stringify({files:[],command:["node","-e","process.stdout.write(String.fromCharCode(111,107))"],network:"none",timeoutMs:5000,stdin:"q\n"}))')
 non_debugger_stdin_status=$(curl --max-time 10 -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
