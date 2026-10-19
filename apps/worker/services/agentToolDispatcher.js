@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 const PERMISSIONS = {
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
-  coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
 
   arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
 
@@ -127,7 +126,7 @@ function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
   for (const child of children) collectRunnerJobIds(child, ids, depth + 1);
   return ids;
 }
-export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings, getInvocation, saveInvocation } = {}) {
+export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings, publishPost, listPosts, updateTask, listTasks, getInvocation, saveInvocation } = {}) {
   const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
@@ -232,6 +231,28 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (Object.keys(args).some(k => !['jobId', 'artifactId'].includes(k)) || typeof args.jobId !== 'string' || typeof args.artifactId !== 'string') throw error('Identificadores de artefacto inválidos.');
         requireOwnedRunnerJob(args.jobId);
         result = await runner.artifact({ jobId: args.jobId, artifactId: args.artifactId }); break;
+      case 'agent_feed_publish': {
+        if (Object.keys(args).some(k => !['type', 'title', 'body', 'taskId'].includes(k))) throw error('Campos extra no permitidos en la publicación.');
+        if (typeof publishPost !== 'function') throw error('El feed de agentes no está disponible.');
+        result = await publishPost(args, normalizedRole); break;
+      }
+      case 'agent_feed_list':
+        if (Object.keys(args).some(k => !['taskId', 'limit'].includes(k))) throw error('Argumentos extra no permitidos para agent_feed_list.');
+        if (args.taskId !== undefined && (typeof args.taskId !== 'string' || args.taskId.length > 64)) throw error('taskId inválido.');
+        if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) throw error('limit inválido.');
+        if (typeof listPosts !== 'function') throw error('El feed de agentes no está disponible.');
+        result = await listPosts({ taskId: args.taskId, limit: args.limit }); break;
+      case 'agent_task_upsert':
+        if (Object.keys(args).some(k => !['taskId', 'title', 'summary', 'status', 'priority', 'nextStep', 'assignedRole', 'dependsOn', 'evidence'].includes(k))) throw error('Campos extra no permitidos en la tarea.');
+        if (typeof updateTask !== 'function') throw error('El tablero de tareas no está disponible.');
+        result = await updateTask(args, normalizedRole); break;
+      case 'agent_tasks_list':
+        if (Object.keys(args).some(k => !['assignedRole', 'status', 'limit'].includes(k))) throw error('Argumentos extra no permitidos para agent_tasks_list.');
+        if (args.assignedRole !== undefined && typeof args.assignedRole !== 'string') throw error('assignedRole inválido.');
+        if (args.status !== undefined && typeof args.status !== 'string') throw error('status inválido.');
+        if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) throw error('limit inválido.');
+        if (typeof listTasks !== 'function') throw error('El tablero de tareas no está disponible.');
+        result = await listTasks({ role: args.assignedRole, status: args.status, limit: args.limit }); break;
       case 'agent_findings_list':
         if (Object.keys(args).length) throw error('agent_findings_list no acepta argumentos.');
         if (typeof listFindings !== 'function') throw error('La bandeja de hallazgos no está disponible.');
