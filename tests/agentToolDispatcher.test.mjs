@@ -313,3 +313,31 @@ test('terminal runner infrastructure failures rotate the key while keeping the i
   assert.notEqual(f.executed[1].idempotencyKey, firstKey);
   assert.equal(journal[0].status, 'completed');
 });
+
+
+test('model only receives tool definitions permitted for its own role', async () => {
+  const { getAgentToolDefinitions } = await import('../apps/worker/services/agentToolDispatcher.js');
+  const names = role => getAgentToolDefinitions(role).map(item => item.function.name);
+  const coordination = [
+    'agent_findings_list', 'agent_finding_report', 'agent_feed_publish',
+    'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'
+  ];
+  for (const role of ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador']) {
+    const available = names(role);
+    for (const name of coordination) assert.ok(available.includes(name), role + ' missing ' + name);
+  }
+  for (const role of ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor']) {
+    const available = names(role);
+    for (const name of ['workspace_write', 'runner_execute', 'runner_check', 'runner_dependency', 'runner_cancel']) {
+      assert.equal(available.includes(name), false, role + ' must not receive ' + name);
+    }
+  }
+  const developer = names('desarrollador');
+  for (const name of ['workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency']) {
+    assert.ok(developer.includes(name), 'desarrollador missing ' + name);
+  }
+  const validator = names('validador');
+  for (const name of ['runner_check', 'runner_job_status', 'runner_artifact']) assert.ok(validator.includes(name));
+  for (const name of ['workspace_write', 'runner_execute', 'runner_dependency', 'runner_cancel']) assert.equal(validator.includes(name), false);
+  assert.throws(() => getAgentToolDefinitions('unknown-role'), { code: 'AGENT_TOOL_ROLE_DENIED' });
+});
