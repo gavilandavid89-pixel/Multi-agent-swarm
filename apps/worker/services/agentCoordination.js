@@ -164,6 +164,7 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   if (current.some(item => item?.taskId === id) && !existing) throw new Error('El identificador de tarea ya existe.');
   const stored = {
     ...(existing || {}), ...task, taskId: id,
+    createdBy: existing?.createdBy || role,
     createdAt: existing?.createdAt || at, updatedAt: at,
     history: [...(Array.isArray(existing?.history) ? existing.history : []), {
       at, by: role, fromStatus: existing?.status || null, toStatus: task.status,
