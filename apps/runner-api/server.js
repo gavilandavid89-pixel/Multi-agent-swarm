@@ -94,6 +94,7 @@ function validateRequest(body) {
   if (typeof stdin !== 'string') throw Object.assign(new Error('stdin debe ser texto.'), { status: 400 });
   if (Buffer.byteLength(stdin, 'utf8') > 16 * 1024) throw Object.assign(new Error('stdin supera el límite de 16 KiB.'), { status: 413 });
   if (hasStdin && network !== 'none') throw Object.assign(new Error('stdin interactivo solo se permite con network none.'), { status: 400 });
+  if (hasStdin && !(command[0] === 'python3' && command[1] === '-m' && command[2] === 'pdb' && command.length >= 4)) throw Object.assign(new Error('stdin solo se permite para sesiones por lotes de Python PDB.'), { status: 400 });
   const workspaceId = body.workspaceId === undefined ? null : String(body.workspaceId);
   if (workspaceId !== null && !/^[0-9a-f-]{36}$/i.test(workspaceId)) throw Object.assign(new Error('workspaceId debe ser un UUID.'), { status: 400 });
   const resetWorkspace = body.resetWorkspace !== false;
