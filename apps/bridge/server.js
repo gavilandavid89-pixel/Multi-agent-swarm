@@ -466,7 +466,7 @@ app.get('/api/events', async (req, res) => {
     const remaining = Math.max(0, (eventStreamClients.get(userId) || 1) - 1);
     if (remaining) eventStreamClients.set(userId, remaining);
     else eventStreamClients.delete(userId);
-    if (!res.writableEnded) res.end();
+    if (!res.destroyed && !res.writableEnded) res.end();
   };
   res.on('close', cleanup);
   res.on('error', cleanup);
