@@ -295,8 +295,10 @@ async function runJob(jobId) {
     // A runner-infrastructure retry reuses the persisted AI validation and delivery.
     // Stable runner idempotency keys let the runner return an existing result when available.
     if (payload.resumeMode === 'runner-only' && resumeState.validationSaved) {
+      const retryFailedStep = syntax?.runnerExecution?.runtimeChecks?.find(item => item && item.ok === false) || null;
+      const retryAttempt = Math.max(1, Number(payload.runnerRetryCount) || 1);
       const runnerExecution = await runProjectToolchainChecks({
-        taskId: jobId, round, files: extractFiles(delivery)
+        taskId: jobId, round, files: extractFiles(delivery), retryFailedStep, retryAttempt
       });
       const baseSyntax = syntax || await checkJavascriptSyntax(delivery);
       const hasRuntimeTests = Array.isArray(runnerExecution.runtimeChecks)
