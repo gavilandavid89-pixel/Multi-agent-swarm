@@ -297,7 +297,7 @@ function updateAutomaticAgentTask(payload, { agent, stage, content, jobId, statu
     title: String(agent) + ': ' + String(stage),
     summary: String(content ?? '').slice(0, 2000) || 'Etapa de trabajo del agente.',
     status, priority: 'normal', assignedRole: role,
-    nextStep: status === 'in_progress' ? 'Completar esta etapa y guardar su checkpoint.' : 'Checkpoint guardado; revisar la siguiente tarea.',
+    nextStep: status === 'in_progress' ? 'Completar esta etapa y guardar su checkpoint.' : status === 'blocked' ? 'Resolver el bloqueo y reanudar esta etapa.' : 'Checkpoint guardado; revisar la siguiente tarea.', 
     evidence: 'jobId=' + jobId
   }, role, at);
 }
@@ -311,7 +311,7 @@ async function startAgent(jobId, stage, progress, agent, content) {
   const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
   return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
 }
-async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
+async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, taskStatus = 'done') {
   const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
   const at = new Date().toISOString();
   const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
@@ -324,7 +324,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
   const checkpointPayload = { ...current.payload, ...extra };
   const activeAgentTaskId = current.payload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
-  const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, status: 'done', at, taskId: activeAgentTaskId });
+  const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, status: taskStatus, at, taskId: activeAgentTaskId });
   const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
   const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
   const feed = appendAgentFeedEvent(taskPayload, {
@@ -506,7 +506,7 @@ async function runJob(jobId) {
           { at: new Date().toISOString(), agent: 'Validador', type: 'message', content: JSON.stringify(validation).slice(0, 20000) },
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
         );
-        await updateJob(jobId, { status: 'running', stage: `Validación ${round}/${MAX_ROUNDS}`, progress: progress + 5, attempt: round, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` } });
+        await checkpoint(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 5, 'Validador', JSON.stringify(validation).slice(0, 16000), { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` }, { attempt: round }, runnerExecution.infraError ? 'blocked' : 'done');
         payload = (await getPayload(jobId))?.payload || {};
         resumeState = getValidationResumeState(payload, round);
       }
