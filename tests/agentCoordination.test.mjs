@@ -87,3 +87,32 @@ test('shared task board tracks ownership, status history, and next steps', async
     taskId: first.task.taskId, title: first.task.title, summary: 'unauthorized update', status: 'done'
   }, 'desarrollador'), /Solo el responsable/);
 });
+
+
+test('dispatcher exposes shared network tools with strict schemas and role-scoped task updates', async () => {
+  const { AGENT_TOOL_DEFINITIONS, createAgentToolDispatcher } = await import('../apps/worker/services/agentToolDispatcher.js');
+  for (const name of ['agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list']) {
+    const definition = AGENT_TOOL_DEFINITIONS.find(item => item.function.name === name);
+    assert.ok(definition, name + ' schema missing');
+    assert.equal(definition.function.parameters.additionalProperties, false);
+  }
+  const dispatcher = createAgentToolDispatcher({
+    role: 'auditor',
+    workspace: { list: async () => [], read: async () => null, write: async () => ({}) },
+    runner: {}, jobId: 'task-network',
+    publishPost: async (post, role) => ({ post, role }),
+    listPosts: async filters => [{ type: 'progress', filters }],
+    updateTask: async (task, role) => ({ task, role }),
+    listTasks: async filters => [{ status: 'blocked', filters }]
+  });
+  const post = await dispatcher.invoke({ name: 'agent_feed_publish', arguments: {
+    type: 'blocker', title: 'Needs review', body: 'Please inspect the dependency manifest.'
+  } });
+  assert.equal(post.result.role, 'auditor');
+  assert.equal((await dispatcher.invoke({ name: 'agent_feed_list', arguments: { limit: 10 } })).result[0].filters.limit, 10);
+  assert.equal((await dispatcher.invoke({ name: 'agent_task_upsert', arguments: {
+    title: 'Review dependency risk', summary: 'Check dependency provenance.', status: 'pending'
+  } })).result.role, 'auditor');
+  assert.equal((await dispatcher.invoke({ name: 'agent_tasks_list', arguments: { status: 'blocked' } })).result[0].filters.status, 'blocked');
+  await assert.rejects(dispatcher.invoke({ name: 'agent_tasks_list', arguments: { status: 'banana' } }), /status inválido/);
+});
