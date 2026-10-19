@@ -5,6 +5,7 @@ import { initStore, createJob, createContinuationJob, getJob, getPayload, histor
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
+import { getRetryRecoveryMode } from './services/retryRecovery.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
 import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider, closeUserProvidersStore } from './services/userProviders.js';
 
@@ -151,11 +152,32 @@ app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
+  const recoveryMode = getRetryRecoveryMode(record.payload);
   const transcript = [...(Array.isArray(record.payload.transcript) ? record.payload.transcript : []), {
     at: new Date().toISOString(), agent: 'sistema', type: 'retry',
-    content: 'Reintento solicitado: se conserva la entrega y el checkpoint, se reinicia la auditoría pendiente y el presupuesto queda ampliado a 1.000.000 tokens. La recuperación del proveedor se gestiona automáticamente.'
+    content: recoveryMode === 'runner-only'
+      ? 'Reintento acotado: se conserva la entrega y la validación de IA ya guardadas; solo se repiten las comprobaciones del runner que fallaron por infraestructura.'
+      : 'Reintento solicitado: se conserva la entrega y el checkpoint; se reinicia la validación pendiente y el presupuesto queda ampliado a 1.000.000 tokens. La recuperación del proveedor se gestiona automáticamente.'
   }].slice(-150);
-  const job = await updateJob(req.params.id, { status: 'queued', stage: 'En cola para reintento · presupuesto de 1.000.000', progress: Math.min(record.publicJob.progress, 90), attempt: 0, error: null, payload: { tokenBudget: 1000000, transcript, validation: null, syntax: null, validationRound: 0, result: null, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: null, retryAt: null, providerBlock: null, providerFailureStreak: 0, lastCheckpoint: 'retry-requested' } });
+  const retryPayload = recoveryMode === 'runner-only'
+    ? {
+        ...record.payload, transcript, tokenBudget: 1000000, result: null,
+        retryAt: null, providerBlock: null, providerFailureStreak: 0,
+        activeStage: null, resumeMode: 'runner-only'
+      }
+    : {
+        tokenBudget: 1000000, transcript, validation: null, syntax: null, validationRound: 0,
+        result: null, coherenceReview: null, coherenceReviewRound: null,
+        activeValidationRound: null, retryAt: null, providerBlock: null,
+        providerFailureStreak: 0, lastCheckpoint: 'retry-requested'
+      };
+  const job = await updateJob(req.params.id, {
+    status: 'queued',
+    stage: recoveryMode === 'runner-only' ? 'Reintentando pruebas aisladas · checkpoint conservado' : 'En cola para reintento · presupuesto de 1.000.000',
+    progress: Math.min(record.publicJob.progress, 95), attempt: recoveryMode === 'runner-only' ? record.publicJob.attempt : 0,
+    error: null, payload: retryPayload
+  });
+  console.info('[worker][job_retry]', JSON.stringify({ jobId: req.params.id, recoveryMode, checkpoint: record.payload.lastCheckpoint || null }));
   enqueue(req.params.id); res.status(202).json(job); } catch (error) { next(error); }
 });
 app.get('/internal/jobs/:id/files', async (req, res, next) => { try {
