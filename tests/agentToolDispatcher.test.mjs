@@ -40,6 +40,20 @@ test('developer can read/write files and execute allowlisted binary without shel
   assert.deepEqual(f.executed[0].command, ['node', '--version']);
   assert.equal(f.executed[0].network, 'none');
 });
+test('workspace reads reject credential-bearing and oversized files', async () => {
+  const f = fixture();
+  f.files.set('src/secret.js', 'const key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";');
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'workspace_read', arguments: { path: 'src/secret.js' } }),
+    /posibles credenciales/
+  );
+  f.files.set('src/huge.txt', 'x'.repeat(256 * 1024 + 1));
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'workspace_read', arguments: { path: 'src/huge.txt' } }),
+    /256 KiB/
+  );
+});
+
 test('oversized runner output is returned as a valid bounded result', async () => {
   const f = fixture();
   const response = await f.dispatcher.invoke({
