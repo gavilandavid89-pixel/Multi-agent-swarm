@@ -225,7 +225,10 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
     }
     const safeResult = bounded(redactSensitiveOutput(result));
     if (invocation && journaled) {
-      await saveInvocation({ ...invocation, status: 'completed', result: safeResult, completedAt: new Date().toISOString() });
+      const retryableInfrastructureFailure = Boolean(result && typeof result === 'object' && result.infraError === true);
+      await saveInvocation(retryableInfrastructureFailure
+        ? { ...invocation, status: 'started', lastErrorAt: new Date().toISOString() }
+        : { ...invocation, status: 'completed', result: safeResult, completedAt: new Date().toISOString() });
     }
     return { ok: true, result: safeResult };
   }
