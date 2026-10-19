@@ -341,3 +341,19 @@ test('model only receives tool definitions permitted for its own role', async ()
   for (const name of ['workspace_write', 'runner_execute', 'runner_dependency', 'runner_cancel']) assert.equal(validator.includes(name), false);
   assert.throws(() => getAgentToolDefinitions('unknown-role'), { code: 'AGENT_TOOL_ROLE_DENIED' });
 });
+
+
+test('developer can invoke safe catalogued inspection and lint tools without gaining a shell', async () => {
+  const f = fixture();
+  const safeTools = ['jq', 'file', 'tree', 'rg', 'fdfind', 'black', 'flake8', 'mypy', 'pkg-config'];
+  for (const command of safeTools) {
+    await f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: [command, '--version'] } });
+  }
+  assert.deepEqual(f.executed.map(item => item.command[0]), safeTools);
+  for (const command of ['bash', 'sh', 'pip3']) {
+    await assert.rejects(
+      f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: [command, '--version'] } }),
+      /Binario/
+    );
+  }
+});
