@@ -19,7 +19,7 @@ const PERMISSIONS = {
 const BLOCKED_DIRS = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.docker', 'node_modules', '.venv', 'venv']);
 const BLOCKED_FILES = new Set(['.npmrc', '.netrc', '.pypirc', '.git-credentials', 'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519', 'terraform.tfstate', 'terraform.tfvars', 'kubeconfig']);
 const CREDENTIALS = /-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----|\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{20,})\b|https?:\/\/[^/\s:@]+:[^/\s@]+@/i;
-const BINARIES = new Set(['node', 'npm', 'npx', 'python3', 'pytest', 'php', 'composer', 'ruby', 'bundle', 'go', 'java', 'javac', 'mvn', 'cargo', 'rustc', 'gcc', 'g++', 'make', 'shellcheck', 'shfmt', 'sqlite3', 'godot', 'chromium', 'xvfb-run', 'tsc', 'tsx', 'eslint', 'prettier']);
+const BINARIES = new Set(['node', 'npm', 'npx', 'python3', 'pytest', 'php', 'composer', 'ruby', 'bundle', 'go', 'java', 'javac', 'mvn', 'cargo', 'rustc', 'gcc', 'g++', 'make', 'pkg-config', 'shellcheck', 'shfmt', 'sqlite3', 'jq', 'file', 'tree', 'rg', 'fdfind', 'black', 'flake8', 'mypy', 'godot', 'chromium', 'xvfb-run', 'tsc', 'tsx', 'eslint', 'prettier']);
 const TOOL_TO_PERMISSION = {
   workspace_list: 'workspace_list', workspace_read: 'workspace_read', workspace_write: 'workspace_write',
   runner_execute: 'runner_execute', runner_check: 'runner_check', runner_job_status: 'runner_job_status',
