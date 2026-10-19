@@ -82,9 +82,25 @@ test('capability catalog accurately describes implemented dispatcher and sandbox
   assert.deepEqual(capabilities.agentToolContract.availableTools, [
     'workspace.list', 'workspace.read', 'workspace.write', 'runner.check',
     'runner.execute', 'runner.prepareDependencies', 'runner.jobStatus',
-    'runner.cancel', 'runner.artifact.read'
+    'runner.cancel', 'runner.artifact.read', 'agent.findings.list',
+    'agent.finding.report', 'agent.feed.publish', 'agent.feed.list',
+    'agent.task.upsert', 'agent.tasks.list'
   ]);
   assert.equal(capabilities.agentToolContract.rolePolicyStatus, 'enforced-by-worker-dispatcher');
+  const coordinationTools = [
+    'agent.findings.list', 'agent.finding.report', 'agent.feed.publish',
+    'agent.feed.list', 'agent.task.upsert', 'agent.tasks.list'
+  ];
+  const expectedRoles = ['Arquitecto', 'Coordinador', 'Desarrollador', 'Escéptico', 'Árbitro', 'Auditor', 'Validador'];
+  assert.deepEqual(Object.keys(capabilities.agentToolContract.rolePolicy).sort(), expectedRoles.sort());
+  for (const role of Object.values(capabilities.agentToolContract.rolePolicy)) {
+    for (const tool of coordinationTools) assert.ok(role.allow.includes(tool), 'coordination tool missing from role policy: ' + tool);
+    for (const forbidden of ['host.configure', 'network.configure', 'secret.read']) {
+      assert.ok(role.deny.includes(forbidden), 'unsafe capability missing from deny policy: ' + forbidden);
+    }
+  }
   assert.ok(capabilities.agentToolContract.rolePolicy.Desarrollador.allow.includes('workspace.write'));
+  assert.ok(capabilities.agentToolContract.rolePolicy.Validador.allow.includes('runner.check'));
+  assert.equal(capabilities.agentToolContract.rolePolicy.Validador.allow.includes('runner.execute'), false);
   assert.ok(capabilities.notIncluded.some(item => item.includes('credenciales')));
 });
