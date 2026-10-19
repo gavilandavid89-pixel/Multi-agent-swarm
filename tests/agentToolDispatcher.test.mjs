@@ -336,6 +336,8 @@ test('model only receives tool definitions permitted for its own role', async ()
   for (const name of ['workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency']) {
     assert.ok(developer.includes(name), 'desarrollador missing ' + name);
   }
+  assert.deepEqual(names('Árbitro'), names('arbitro'));
+  assert.deepEqual(names('Escéptico'), names('esceptico'));
   const validator = names('validador');
   for (const name of ['runner_check', 'runner_job_status', 'runner_artifact']) assert.ok(validator.includes(name));
   for (const name of ['workspace_write', 'runner_execute', 'runner_dependency', 'runner_cancel']) assert.equal(validator.includes(name), false);
