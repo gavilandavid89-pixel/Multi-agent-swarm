@@ -201,6 +201,12 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   if (task.dependsOn.some(dependencyId => reachesTask(dependencyId, id))) {
     throw new Error('La dependencia crearía un ciclo entre tareas.');
   }
+  if (['in_progress', 'in_review', 'done'].includes(task.status)) {
+    const incomplete = task.dependsOn.filter(dependencyId => taskById.get(dependencyId)?.status !== 'done');
+    if (incomplete.length) {
+      throw new Error('No se puede avanzar la tarea hasta completar sus dependencias: ' + incomplete.join(', '));
+    }
+  }
   const previousHistory = Array.isArray(existing?.history) ? existing.history : [];
   const statusChanged = !existing || existing.status !== task.status;
   const stored = {
