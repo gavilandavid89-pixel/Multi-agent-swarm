@@ -76,7 +76,7 @@ test('workspace reads reject credential-bearing and oversized files', async () =
 
 test('Python PDB accepts bounded stdin while other commands cannot receive stdin', async () => {
   const f = fixture();
-  const commands = 'p 1 + 1\\nq\\n';
+  const commands = 'p 1 + 1\nq\n';
   await f.dispatcher.invoke({
     name: 'runner_execute',
     arguments: { command: ['python3', '-m', 'pdb', 'src/app.py'], stdin: commands }
@@ -84,7 +84,7 @@ test('Python PDB accepts bounded stdin while other commands cannot receive stdin
   assert.equal(f.executed[0].stdin, commands);
   assert.equal(f.executed[0].network, 'none');
   await assert.rejects(
-    f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'], stdin: 'q\\n' } }),
+    f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'], stdin: 'q\n' } }),
     /solo se permite para sesiones por lotes de Python PDB/
   );
   await assert.rejects(
