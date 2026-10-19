@@ -39,7 +39,6 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       return { path, bytes: Buffer.byteLength(content, 'utf8') };
     }
   };
-  let executionCount = 0;
   const refreshFromArtifacts = async result => {
     if (Array.isArray(result?.artifacts) && result.artifacts.length) {
       const current = await readFiles();
@@ -51,11 +50,9 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
   };
   const runner = {
     execute: async input => {
-      executionCount++;
       return refreshFromArtifacts(await runAgentCommand({
         taskId: jobId, workspaceId, files: await readFiles(), command: input.command,
         network: input.network, timeoutMs: input.timeoutMs, includeArtifacts: true,
-        idempotencyKey: jobId + ':agent-tool:' + workspaceId + ':' + executionCount
       }));
     },
     check: async () => runProjectToolchainChecks({ taskId: jobId, round, files: await readFiles() }),
@@ -73,11 +70,9 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
         'Cargo.lock': ['cargo', 'fetch', '--locked'],
         'pom.xml': ['mvn', '-B', '-DskipTests', 'dependency:go-offline']
       };
-      executionCount++;
       return refreshFromArtifacts(await runAgentCommand({
         taskId: jobId, workspaceId, files: await readFiles(), command: commands[input.manifest],
         network: 'restricted', timeoutMs: 120000, includeArtifacts: true,
-        idempotencyKey: jobId + ':agent-dependencies:' + workspaceId + ':' + executionCount
       }));
     }
   };
