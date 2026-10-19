@@ -362,6 +362,56 @@ done
 printf '%s' "$retry_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-restart-retry-ok")){console.error("FAIL runner retry after restart",JSON.stringify(j));process.exit(1)}})'
 echo "PASS Runner API restart recovery and explicit idempotent retry"
 
+# Kill an execution container while the API stays alive. The job must fail closed,
+# the API must remain healthy, and a later job (the pdb smoke below) must still run.
+container_crash_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"66666666-6666-4666-8666-666666666666",resetWorkspace:true,
+  command:["node","-e","setTimeout(() => console.log(\\\"should-not-finish\\\"), 60000)"],
+  network:"none",timeoutMs:90000
+}))')
+container_crash_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-container-crash-01' \
+  -d "$container_crash_body")
+container_crash_id=$(printf '%s' "$container_crash_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$container_crash_id" ]; then echo "FAIL container-crash smoke did not create a job" >&2; exit 1; fi
+container_crash_state=
+i=0
+while [ "$i" -lt 20 ]; do
+  container_crash_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$container_crash_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  [ "$container_crash_state" = "running" ] && break
+  case "$container_crash_state" in failed|timed_out|cancelled|succeeded) echo "FAIL container-crash job ended before forced container termination ($container_crash_state)" >&2; exit 1 ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$container_crash_state" != "running" ]; then echo "FAIL container-crash job never entered running state ($container_crash_state)" >&2; exit 1; fi
+container_crash_cid_file="\${workspace}-runner-state/jobs/\${container_crash_id}.cid"
+container_crash_cid=
+i=0
+while [ "$i" -lt 40 ]; do
+  if [ -s "$container_crash_cid_file" ]; then
+    container_crash_cid=$(cat "$container_crash_cid_file")
+    if [ "$(docker inspect --format '{{.State.Running}}' "$container_crash_cid" 2>/dev/null || true)" = "true" ]; then break; fi
+  fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ -z "$container_crash_cid" ] || [ "$(docker inspect --format '{{.State.Running}}' "$container_crash_cid" 2>/dev/null || true)" != "true" ]; then echo "FAIL container-crash smoke could not confirm a live execution container" >&2; exit 1; fi
+docker kill "$container_crash_cid" >/dev/null
+container_crash_json=
+i=0
+while [ "$i" -lt 30 ]; do
+  container_crash_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$container_crash_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  container_crash_state=$(printf '%s' "$container_crash_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$container_crash_state" in failed|timed_out|cancelled|succeeded) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$container_crash_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="failed"||j.exitCode===0){console.error("FAIL forced execution-container termination was not reported as failure",JSON.stringify(j));process.exit(1)}})'
+curl -fsS http://127.0.0.1:3200/readyz >/dev/null
+echo "PASS execution-container crash fails closed while Runner API stays healthy"
+
 # Exercise stdin-driven Python pdb through the authenticated runner API.
 debug_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"debug_target.py",content:"print(\"debug target reached\")\n"}],
