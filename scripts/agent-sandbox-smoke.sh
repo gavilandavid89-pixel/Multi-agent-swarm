@@ -231,6 +231,81 @@ printf '%s' "$second_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s
 echo "PASS runner API idempotency and sequential task-scoped workspace reuse"
 echo "PASS authenticated runner API executes in bounded tmpfs and returns artifacts"
 
+# Simulate an abrupt Runner API process loss during an active job. The next
+# process must recover the persisted job as failed, keep its old idempotency
+# key bound to that failed job, and accept a fresh key for an explicit retry.
+restart_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"22222222-2222-4222-8222-222222222222",resetWorkspace:true,
+  command:["node","-e","setTimeout(() => console.log(\"should-not-finish\"), 30000)"],
+  network:"none",timeoutMs:45000
+}))')
+restart_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-restart-active-01' \
+  -d "$restart_body")
+restart_id=$(printf '%s' "$restart_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$restart_id" ]; then echo "FAIL runner restart smoke did not create a job" >&2; exit 1; fi
+restart_state=
+i=0
+while [ "$i" -lt 20 ]; do
+  restart_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  [ "$restart_state" = "running" ] && break
+  case "$restart_state" in failed|timed_out|cancelled|succeeded) echo "FAIL restart smoke job ended before API restart ($restart_state)" >&2; exit 1 ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$restart_state" != "running" ]; then echo "FAIL restart smoke job never entered running state ($restart_state)" >&2; exit 1; fi
+kill -9 "$api_pid" >/dev/null 2>&1 || true
+wait "$api_pid" 2>/dev/null || true
+api_pid=
+RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
+RUNNER_API_SENTINEL=must-not-leak \
+RUNNER_STATE_DIR="\${workspace}-runner-state" \
+PORT=3200 node apps/runner-api/server.js >> "\${workspace}-runner-api.log" 2>&1 &
+api_pid=$!
+ready=0
+i=0
+while [ "$i" -lt 100 ]; do
+  if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "\${workspace}-runner-api.log" >&2; exit 1; fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$ready" -ne 1 ]; then cat "\${workspace}-runner-api.log" >&2; echo "FAIL runner API did not recover after process restart" >&2; exit 1; fi
+recovered_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$recovered_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="failed"||!String(j.error||"").includes("servicio se reinició")){console.error("FAIL restart recovery state",JSON.stringify(j));process.exit(1)}})'
+same_restart_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-restart-active-01' \
+  -d "$restart_body")
+same_restart_id=$(printf '%s' "$same_restart_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ "$same_restart_id" != "$restart_id" ]; then echo "FAIL recovered idempotency key created a duplicate instead of returning the failed job" >&2; exit 1; fi
+retry_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"22222222-2222-4222-8222-222222222222",resetWorkspace:false,
+  command:["node","-e","console.log(\"runner-restart-retry-ok\")"],
+  network:"none",timeoutMs:15000
+}))')
+retry_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-restart-retry-02' \
+  -d "$retry_body")
+retry_id=$(printf '%s' "$retry_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$retry_id" ] || [ "$retry_id" = "$restart_id" ]; then echo "FAIL fresh idempotency key did not create a retry job" >&2; exit 1; fi
+retry_json=
+i=0
+while [ "$i" -lt 30 ]; do
+  retry_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$retry_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  retry_state=$(printf '%s' "$retry_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$retry_state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$retry_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-restart-retry-ok")){console.error("FAIL runner retry after restart",JSON.stringify(j));process.exit(1)}})'
+echo "PASS Runner API restart recovery and explicit idempotent retry"
+
 # Exercise stdin-driven Python pdb through the authenticated runner API.
 debug_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[{path:"debug_target.py",content:"print(\"debug target reached\")\n"}],
