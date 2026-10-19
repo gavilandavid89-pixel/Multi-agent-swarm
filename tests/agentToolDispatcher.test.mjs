@@ -27,6 +27,7 @@ test('tool schemas use strict object arguments', () => {
   assert.ok(AGENT_TOOL_DEFINITIONS.every(t => t.function.parameters.additionalProperties === false));
   const executeTool = AGENT_TOOL_DEFINITIONS.find(t => t.function.name === 'runner_execute');
   assert.equal(Object.hasOwn(executeTool.function.parameters.properties, 'network'), false);
+  assert.equal(executeTool.function.parameters.properties.stdin.maxLength, 16384);
 });
 test('developer can read/write files and execute allowlisted binary without shell', async () => {
   const f = fixture();
@@ -70,6 +71,25 @@ test('workspace reads reject credential-bearing and oversized files', async () =
   await assert.rejects(
     f.dispatcher.invoke({ name: 'workspace_read', arguments: { path: 'src/huge.txt' } }),
     /256 KiB/
+  );
+});
+
+test('Python PDB accepts bounded stdin while other commands cannot receive stdin', async () => {
+  const f = fixture();
+  const commands = 'p 1 + 1\\nq\\n';
+  await f.dispatcher.invoke({
+    name: 'runner_execute',
+    arguments: { command: ['python3', '-m', 'pdb', 'src/app.py'], stdin: commands }
+  });
+  assert.equal(f.executed[0].stdin, commands);
+  assert.equal(f.executed[0].network, 'none');
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'], stdin: 'q\\n' } }),
+    /solo se permite para sesiones por lotes de Python PDB/
+  );
+  await assert.rejects(
+    f.dispatcher.invoke({ name: 'runner_execute', arguments: { command: ['python3', '-m', 'pdb', 'src/app.py'], stdin: 'x'.repeat(16 * 1024 + 1) } }),
+    /16 KiB/
   );
 });
 
