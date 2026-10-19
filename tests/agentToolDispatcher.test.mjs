@@ -12,7 +12,7 @@ function fixture(role = 'desarrollador', maxCalls = 40) {
     write: async (path, content) => { files.set(path, content); return { path, bytes: Buffer.byteLength(content) }; }
   };
   const runner = {
-    execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: args.command.includes('--large-output') ? 'x'.repeat(15000) : 'ok' }; },
+    execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: args.command.includes('--large-output') ? 'x'.repeat(15000) : args.command.includes('--secret-output') ? 'ghp_abcdefghijklmnopqrstuvwxyz1234567890' : 'ok' }; },
     check: async () => ({ ok: true }),
     jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded' }),
     cancel: async ({ jobId }) => ({ jobId, cancelled: true }),
@@ -40,6 +40,21 @@ test('developer can read/write files and execute allowlisted binary without shel
   assert.deepEqual(f.executed[0].command, ['node', '--version']);
   assert.equal(f.executed[0].network, 'none');
 });
+test('tool outputs redact known credentials and sensitive object fields', async () => {
+  const f = fixture();
+  const response = await f.dispatcher.invoke({
+    name: 'runner_execute',
+    arguments: { command: ['node', '--secret-output'] }
+  });
+  assert.equal(response.ok, true);
+  assert.equal(response.result.stdout, '[REDACTED_CREDENTIAL]');
+  const artifact = await f.dispatcher.invoke({
+    name: 'runner_execute',
+    arguments: { command: ['node', '--version'] }
+  });
+  assert.equal(artifact.result.exitCode, 0);
+});
+
 test('workspace reads reject credential-bearing and oversized files', async () => {
   const f = fixture();
   f.files.set('src/secret.js', 'const key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";');
