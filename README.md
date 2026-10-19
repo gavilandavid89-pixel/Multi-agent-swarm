@@ -323,3 +323,9 @@ Pruebas de regresión: `tests/agentCoordination.test.mjs` y `tests/agentToolDisp
 Antes de enviar `runner_execute` o `runner_dependency`, el Worker guarda un registro de invocación en el checkpoint cifrado de la tarea. La clave idempotente se deriva de la tarea, rol, ronda, herramienta, argumentos y estado del workspace; los reintentos de transporte usan la misma clave. Cuando el modelo repite una llamada ya completada con el mismo workspace, se devuelve el resultado persistido sin volver a ejecutar el comando. Si el Worker cae después de enviar el trabajo pero antes de guardar el resultado, el registro `started` conserva la clave para reconciliar la llamada con el Runner API.
 
 El journal conserva como máximo las últimas 100 invocaciones por tarea. La garantía depende de que el Runner API mantenga su contrato de idempotencia; no reconstruye el estado interno de razonamiento del proveedor ni puede recuperar una respuesta de IA que nunca llegó a persistirse. Las pruebas de regresión verifican que una llamada completada se reproduce desde el checkpoint sin un segundo envío.
+
+
+## Mapa de integración entre sistemas
+
+La revisión de solapamientos entre los PR abiertos, los contratos entre Worker/Runner API, el catálogo de capacidades y el visor de navegador está documentada en [docs/INTEGRATION_MAP.md](docs/INTEGRATION_MAP.md). Ese mapa distingue rutas compartidas que requieren reconciliación de sistemas que deben seguir separados; no implica que los PR anteriores ya estén fusionados.
+
