@@ -173,14 +173,16 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   }
   const id = task.taskId || 'task-' + createHash('sha256').update([at, role, task.title].join('\n')).digest('hex').slice(0, 16);
   if (current.some(item => item?.taskId === id) && !existing) throw new Error('El identificador de tarea ya existe.');
+  const previousHistory = Array.isArray(existing?.history) ? existing.history : [];
+  const statusChanged = !existing || existing.status !== task.status;
   const stored = {
     ...(existing || {}), ...task, taskId: id,
     createdBy: existing?.createdBy || role,
     createdAt: existing?.createdAt || at, updatedAt: at,
-    history: [...(Array.isArray(existing?.history) ? existing.history : []), {
+    history: (statusChanged ? [...previousHistory, {
       at, by: role, fromStatus: existing?.status || null, toStatus: task.status,
       note: task.nextStep || task.summary
-    }].slice(-20)
+    }] : previousHistory).slice(-20)
   };
   const tasks = existing ? current.map(item => item?.taskId === id ? stored : item) : [...current, stored];
   return { tasks: tasks.slice(-MAX_AGENT_TASKS), task: stored, created: !existing };
