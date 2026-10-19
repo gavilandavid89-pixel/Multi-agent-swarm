@@ -707,7 +707,7 @@ echo "PASS Docker daemon restart restores API readiness and fails the interrupte
 # Create an active job immediately before the simulated host restart.
 host_restart_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"44444444-4444-4444-8444-444444444444",resetWorkspace:true,
-  command:["node","-e","setTimeout(()=>{},30000)"],
+  command:["node","-e","console.log('host-restart-ready');setTimeout(()=>{},30000)"],
   network:"none",timeoutMs:60000
 }))')
 host_restart_create=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
