@@ -59,7 +59,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
     dependsOn: { type: 'array', items: { type: 'string', maxLength: 64 }, maxItems: 20 }, evidence: { type: 'string', maxLength: 2000 }
   }, ['title', 'summary']),
   tool('agent_tasks_list', 'Consulta el tablero compartido de tareas, opcionalmente filtrado por responsable o estado.', {
-    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'] },
+    assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador'] },
     status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
     limit: { type: 'integer', minimum: 1, maximum: 100 }
   }),
@@ -250,7 +250,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = await updateTask(args, normalizedRole); break;
       case 'agent_tasks_list':
         if (Object.keys(args).some(k => !['assignedRole', 'status', 'limit'].includes(k))) throw error('Argumentos extra no permitidos para agent_tasks_list.');
-        if (args.assignedRole !== undefined && !['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador'].includes(args.assignedRole)) throw error('assignedRole inválido.');
+        if (args.assignedRole !== undefined && !['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador'].includes(args.assignedRole)) throw error('assignedRole inválido.');
         if (args.status !== undefined && !['pending', 'in_progress', 'blocked', 'in_review', 'done'].includes(args.status)) throw error('status inválido.');
         if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) throw error('limit inválido.');
         if (typeof listTasks !== 'function') throw error('El tablero de tareas no está disponible.');
