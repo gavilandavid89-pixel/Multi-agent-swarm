@@ -118,28 +118,46 @@ test('dispatcher exposes shared network tools with strict schemas and role-scope
 });
 
 
-test('automatic stage tasks stay separate and checkpoints close the task opened by that stage', async () => {
+test('task owners classify status and checkpoint metadata never overrides it', async () => {
   const { agentStageTaskId, upsertAgentTask } = await import('../apps/worker/services/agentCoordination.js');
   const firstId = agentStageTaskId('arquitecto', 'Arquitecto', 'Arquitectura');
   const nextId = agentStageTaskId('esceptico', 'Escéptico', 'Auditoría escéptica');
   assert.equal(firstId, agentStageTaskId('arquitecto', 'Arquitecto', 'Arquitectura'));
   assert.notEqual(firstId, nextId);
 
-  const started = upsertAgentTask({}, {
+  // The system creates a visible task, but does not claim that work has started.
+  const created = upsertAgentTask({}, {
     taskId: firstId, title: 'Arquitecto: Arquitectura', summary: 'Definir el plan.',
-    status: 'in_progress', assignedRole: 'arquitecto'
+    status: 'pending', assignedRole: 'arquitecto'
   }, 'arquitecto', '2026-10-18T12:00:00.000Z');
-  const checkpointed = upsertAgentTask({ agentTasks: started.tasks }, {
-    taskId: firstId, title: 'Arquitecto: Auditoría escéptica', summary: 'Plan guardado.',
-    status: 'done', assignedRole: 'arquitecto'
+
+  // The assigned agent chooses its status based on its own work.
+  const ownerUpdate = upsertAgentTask({ agentTasks: created.tasks }, {
+    taskId: firstId, title: 'Arquitecto: Arquitectura', summary: 'Propuesta lista para revisión.',
+    status: 'in_review', assignedRole: 'arquitecto', nextStep: 'Esperar auditoría escéptica.'
   }, 'arquitecto', '2026-10-18T12:01:00.000Z');
-  const nextStage = upsertAgentTask({ agentTasks: checkpointed.tasks }, {
+
+  // A later automatic checkpoint refreshes metadata but omits status: the owner's
+  // classification must survive and must not create a fake status transition.
+  const checkpoint = upsertAgentTask({ agentTasks: ownerUpdate.tasks }, {
+    taskId: firstId, title: 'Arquitecto: Arquitectura', summary: 'Checkpoint persistido.',
+    assignedRole: 'arquitecto'
+  }, 'arquitecto', '2026-10-18T12:02:00.000Z');
+
+  const nextStage = upsertAgentTask({ agentTasks: checkpoint.tasks }, {
     taskId: nextId, title: 'Escéptico: Auditoría escéptica', summary: 'Buscar contradicciones.',
-    status: 'in_progress', assignedRole: 'esceptico'
-  }, 'esceptico', '2026-10-18T12:02:00.000Z');
+    status: 'pending', assignedRole: 'esceptico'
+  }, 'esceptico', '2026-10-18T12:03:00.000Z');
 
   assert.equal(nextStage.tasks.length, 2);
-  assert.equal(nextStage.tasks.find(task => task.taskId === firstId).status, 'done');
-  assert.equal(nextStage.tasks.find(task => task.taskId === nextId).status, 'in_progress');
+  assert.equal(nextStage.tasks.find(task => task.taskId === firstId).status, 'in_review');
   assert.equal(nextStage.tasks.find(task => task.taskId === firstId).history.length, 2);
+  assert.equal(nextStage.tasks.find(task => task.taskId === nextId).status, 'pending');
+
+  const doneByOwner = upsertAgentTask({ agentTasks: nextStage.tasks }, {
+    taskId: firstId, title: 'Arquitecto: Arquitectura', summary: 'Criterios de arquitectura cumplidos.',
+    status: 'done', assignedRole: 'arquitecto'
+  }, 'arquitecto', '2026-10-18T12:04:00.000Z');
+  assert.equal(doneByOwner.task.status, 'done');
+  assert.equal(doneByOwner.task.history.length, 3);
 });
