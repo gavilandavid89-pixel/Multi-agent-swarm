@@ -51,7 +51,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   tool('agent_feed_list', 'Consulta publicaciones recientes de la red interna de agentes.', {
     taskId: { type: 'string', maxLength: 64 }, limit: { type: 'integer', minimum: 1, maximum: 100 }
   }),
-  tool('agent_task_upsert', 'Crea una tarea compartida o clasifica/actualiza el estado de una tarea asignada a tu rol. El agente responsable decide pending, in_progress, blocked, in_review o done; el coordinador puede reasignar tareas, pero no debe sustituir la clasificación del responsable sin una reasignación explícita.', {
+  tool('agent_task_upsert', 'Crea una tarea compartida o clasifica/actualiza el estado de una tarea asignada a tu rol. El agente responsable decide pending, in_progress, blocked, in_review o done; el coordinador solo puede cambiar el responsable y no puede sobrescribir el estado ni la clasificación del agente.', {
     taskId: { type: 'string', maxLength: 64 }, title: { type: 'string', maxLength: 160 },
     summary: { type: 'string', maxLength: 2000 }, status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
     priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, nextStep: { type: 'string', maxLength: 1000 },
