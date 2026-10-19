@@ -324,6 +324,21 @@ while [ "$i" -lt 30 ]; do
 done
 printf '%s' "$queued_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("731045")){console.error("FAIL queued job was not resumed after runner API restart",JSON.stringify(j));process.exit(1)}})'
 echo "PASS queued job survives API restart and runs once while interrupted active job fails closed"
+# Verify completed jobs, their artifacts, and their idempotency records survive
+# the same API restart, not just queued/active job recovery.
+persisted_completed=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$persisted_completed" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-api-ok")){console.error("FAIL completed job did not survive API restart",JSON.stringify(j));process.exit(1)}})'
+persisted_artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$persisted_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL completed job artifacts did not survive API restart",JSON.stringify(f));process.exit(1)}})'
+persisted_repeat=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-api-job-0001' \
+  -d "$job_body")
+persisted_repeat_id=$(printf '%s' "$persisted_repeat" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ "$persisted_repeat_id" != "$job_id" ]; then echo "FAIL completed idempotency record did not survive API restart" >&2; exit 1; fi
+echo "PASS completed job state, artifacts, and idempotency survive Runner API restart"
+
 same_queued_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
