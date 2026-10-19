@@ -274,13 +274,31 @@ async function assertTaskTokenBudget(jobId) {
     throw error;
   }
 }
+function roleForAgentLabel(agent) {
+  const value = String(agent || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (value.includes('arquitect')) return 'arquitecto';
+  if (value.includes('esceptic')) return 'esceptico';
+  if (value.includes('arbitro')) return 'arbitro';
+  if (value.includes('validador')) return 'validador';
+  if (value.includes('desarrollador')) return 'desarrollador';
+  if (value.includes('auditor')) return 'auditor';
+  if (value.includes('coordinador')) return 'coordinador';
+  return 'coordinador';
+}
+function appendAgentFeedEvent(payload, { agent, type, title, body, jobId, at = new Date().toISOString() }) {
+  const update = recordAgentPost(payload, { type, title, body, taskId: jobId }, roleForAgentLabel(agent), at);
+  return { posts: update.posts, post: update.post };
+}
 async function startAgent(jobId, stage, progress, agent, content) {
   const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent, type: 'thinking', content }]);
-  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, retryAt: null, providerBlock: null, activeStage: stage } });
+  const at = new Date().toISOString();
+  const transcript = appendEntries(current.payload.transcript, [{ at, agent, type: 'thinking', content }]);
+  const feed = appendAgentFeedEvent(current.payload, { agent, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, at });
+  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage } });
 }
 async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
   const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
+  const at = new Date().toISOString();
   const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
   for (let i = transcript.length - 1; i >= 0; i--) {
     if (transcript[i].agent === agent && transcript[i].type === 'thinking') {
@@ -288,10 +306,14 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
       break;
     }
   }
-  transcript.push({ at: new Date().toISOString(), agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
+  transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
   const checkpointPayload = { ...current.payload, ...extra };
   const memory = recordAgentCheckpoint(checkpointPayload, { agent, stage, content });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), lastCheckpoint: stage, activeStage: null, ...extra, ...memory }, ...publicPatch });
+  const feed = appendAgentFeedEvent(checkpointPayload, {
+    agent, type: 'result', title: 'Checkpoint: ' + stage,
+    body: String(content ?? '').slice(0, 2000), jobId, at
+  });
+  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentFeed: feed.posts, lastCheckpoint: stage, activeStage: null, ...extra, ...memory }, ...publicPatch });
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
