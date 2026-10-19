@@ -85,7 +85,7 @@ const MAX_AGENT_TASKS = 100;
 const POST_TYPES = new Set(['progress', 'decision', 'question', 'blocker', 'result', 'handoff']);
 const TASK_STATUSES = new Set(['pending', 'in_progress', 'blocked', 'in_review', 'done']);
 const TASK_PRIORITIES = new Set(['low', 'normal', 'high', 'urgent']);
-const AGENT_ROLES = new Set(['coordinador', 'arquitecto', 'esceptico', 'auditor', 'validador', 'desarrollador']);
+const AGENT_ROLES = new Set(['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador']);
 
 function boundedListText(value, max, required = false) {
   const text = boundedText(value, max);
