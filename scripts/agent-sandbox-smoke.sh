@@ -256,6 +256,18 @@ while [ "$i" -lt 20 ]; do
   i=$((i + 1))
 done
 if [ "$restart_state" != "running" ]; then echo "FAIL restart smoke job never entered running state ($restart_state)" >&2; exit 1; fi
+restart_cid_file="${workspace}-runner-state/${restart_id}.cid"
+restart_cid=
+i=0
+while [ "$i" -lt 15 ]; do
+  if [ -s "$restart_cid_file" ]; then
+    restart_cid=$(cat "$restart_cid_file")
+    if [ "$(docker inspect --format '{{.State.Running}}' "$restart_cid" 2>/dev/null || true)" = "true" ]; then break; fi
+  fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ -z "$restart_cid" ] || [ "$(docker inspect --format '{{.State.Running}}' "$restart_cid" 2>/dev/null || true)" != "true" ]; then echo "FAIL restart smoke could not confirm a live container before killing the API" >&2; exit 1; fi
 kill -9 "$api_pid" >/dev/null 2>&1 || true
 wait "$api_pid" 2>/dev/null || true
 api_pid=
