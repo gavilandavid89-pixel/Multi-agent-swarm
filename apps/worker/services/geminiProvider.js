@@ -189,20 +189,9 @@ export async function consultarGemini({
           id: String(call.id || randomUUID()), type: 'function',
           function: { name: String(call.name || ''), arguments: JSON.stringify(call.arguments ?? call.input ?? {}) }
         })) }];
-        for (const call of calls) {
-          const name = String(call.name || '');
-          let result;
-          try {
-            const args = call.arguments ?? call.input ?? {};
-            result = await onToolCall({ id: String(call.id || ''), name, arguments: args, model, provider: 'Gemini' });
-          } catch (toolError) {
-            result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
-          }
-          let serialized;
-          try { serialized = JSON.stringify(result ?? { ok: true }); } catch { serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' }); }
-          requestMessages.push({ role: 'tool', tool_call_id: String(call.id || ''), name, content: serialized.slice(0, 12000) });
-        }
         toolRounds++;
+        await saveConversation();
+        await recoverPendingToolCalls();
         continue;
       }
       await onRetry({
@@ -249,6 +238,7 @@ export async function consultarGemini({
           { role: 'assistant', content },
           { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }
         ];
+        await saveConversation();
         console.info('[worker][gemini_continuation]', JSON.stringify({ model, continuation: continuationCount, maxContinuations }));
         continue;
       }
@@ -257,6 +247,7 @@ export async function consultarGemini({
         error.code = 'OUTPUT_TRUNCATED';
         throw error;
       }
+      await saveConversation('completed', accumulatedContent);
       return accumulatedContent;
     }
 
