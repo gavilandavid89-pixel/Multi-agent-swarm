@@ -14,13 +14,21 @@ export function serializeAgentToolResult(result, maxChars = 16000) {
   if (typeof serialized !== 'string') serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' });
   if (serialized.length <= limit) return serialized;
 
-  const summary = JSON.stringify({
-    ok: false,
+  const envelope = result && typeof result === 'object' && !Array.isArray(result) ? result : {};
+  const detail = envelope.result && typeof envelope.result === 'object' && !Array.isArray(envelope.result)
+    ? envelope.result
+    : envelope;
+  const summaryValue = {
+    ok: typeof envelope.ok === 'boolean' ? envelope.ok : false,
     truncated: true,
     serializedChars: serialized.length,
     preview: serialized.slice(0, Math.max(0, Math.floor((limit - 256) / 3))),
-    message: 'La salida de herramienta se resumió para preservar un JSON válido.'
-  });
+    message: String(detail.message || 'La salida de herramienta se resumió para preservar un JSON válido.').slice(0, 500)
+  };
+  for (const key of ['jobId', 'status', 'exitCode', 'timedOut', 'durationMs', 'available', 'checked', 'infraError']) {
+    if (Object.hasOwn(detail, key)) summaryValue[key] = detail[key];
+  }
+  const summary = JSON.stringify(summaryValue);
   if (summary.length <= limit) return summary;
   return JSON.stringify({
     ok: false,
