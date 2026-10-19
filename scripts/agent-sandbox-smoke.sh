@@ -268,6 +268,31 @@ while [ "$i" -lt 40 ]; do
   i=$((i + 1))
 done
 if [ -z "$restart_cid" ] || [ "$(docker inspect --format '{{.State.Running}}' "$restart_cid" 2>/dev/null || true)" != "true" ]; then echo "FAIL restart smoke could not confirm a live container before killing the API" >&2; exit 1; fi
+
+# Queue a second, independent job behind the active job. After the API process
+# is killed, the active job must fail closed while the queued job is recovered
+# and executed exactly once by the new process.
+queued_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
+  command:["node","-e","console.log(\\"runner-queued-recovery-ok\\")"],
+  network:"none",timeoutMs:15000
+}))')
+queued_create=$(curl --max-time 20 -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-restart-queued-03' \
+  -d "$queued_body")
+queued_id=$(printf '%s' "$queued_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$queued_id" ] || [ "$queued_id" = "$restart_id" ]; then echo "FAIL restart smoke did not create an independent queued job" >&2; exit 1; fi
+queued_state=
+i=0
+while [ "$i" -lt 10 ]; do
+  queued_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$queued_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  [ "$queued_state" = "queued" ] && break
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$queued_state" != "queued" ]; then echo "FAIL restart smoke second job was not queued behind active job ($queued_state)" >&2; exit 1; fi
 kill -9 "$api_pid" >/dev/null 2>&1 || true
 wait "$api_pid" 2>/dev/null || true
 api_pid=
