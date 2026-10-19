@@ -194,7 +194,7 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
       }
       return {
         available: true, checked: true, ok, skipped: false, jobId: latest.id,
-        infraError: Boolean(latest.error || [125, 126, 127].includes(latest.exitCode)),
+        infraError: Boolean(latest.error || latest.exitCode === 125),
         retryableTerminalInfrastructureFailure: Boolean(latest.error || latest.exitCode === 125),
         exitCode: latest.exitCode, timedOut: Boolean(latest.timedOut), durationMs: latest.durationMs,
         stdout: String(latest.stdout || '').slice(-12000), stderr: String(latest.stderr || '').slice(-12000),
