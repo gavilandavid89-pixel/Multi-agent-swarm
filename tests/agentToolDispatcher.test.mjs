@@ -14,7 +14,7 @@ function fixture(role = 'desarrollador', maxCalls = 40) {
   const runner = {
     execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: args.command.includes('--large-output') ? 'x'.repeat(15000) : args.command.includes('--secret-output') ? 'ghp_abcdefghijklmnopqrstuvwxyz1234567890' : 'ok' }; },
     check: async () => ({ ok: true }),
-    jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded', apiKey: 'sensitive-value' }),
+    jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded', apiKey: 'sensitive-value', clientSecret: 'client-secret-value', accessToken: 'access-token-value', privateKey: 'private-key-value', nested: { sessionToken: 'session-token-value', Cookie: 'session-cookie-value' } }),
     cancel: async ({ jobId }) => ({ jobId, cancelled: true }),
     artifact: async args => args,
     dependency: async args => ({ prepared: args.manifest })
@@ -58,6 +58,11 @@ test('tool outputs redact known credentials and sensitive object fields', async 
     arguments: { jobId: f.runnerJobId }
   });
   assert.equal(status.result.apiKey, '[REDACTED]');
+  assert.equal(status.result.clientSecret, '[REDACTED]');
+  assert.equal(status.result.accessToken, '[REDACTED]');
+  assert.equal(status.result.privateKey, '[REDACTED]');
+  assert.equal(status.result.nested.sessionToken, '[REDACTED]');
+  assert.equal(status.result.nested.Cookie, '[REDACTED]');
 });
 
 test('workspace reads reject credential-bearing and oversized files', async () => {
