@@ -116,3 +116,30 @@ test('dispatcher exposes shared network tools with strict schemas and role-scope
   assert.equal((await dispatcher.invoke({ name: 'agent_tasks_list', arguments: { status: 'blocked' } })).result[0].filters.status, 'blocked');
   await assert.rejects(dispatcher.invoke({ name: 'agent_tasks_list', arguments: { status: 'banana' } }), /status inválido/);
 });
+
+
+test('automatic stage tasks stay separate and checkpoints close the task opened by that stage', async () => {
+  const { agentStageTaskId, upsertAgentTask } = await import('../apps/worker/services/agentCoordination.js');
+  const firstId = agentStageTaskId('arquitecto', 'Arquitecto', 'Arquitectura');
+  const nextId = agentStageTaskId('esceptico', 'Escéptico', 'Auditoría escéptica');
+  assert.equal(firstId, agentStageTaskId('arquitecto', 'Arquitecto', 'Arquitectura'));
+  assert.notEqual(firstId, nextId);
+
+  const started = upsertAgentTask({}, {
+    taskId: firstId, title: 'Arquitecto: Arquitectura', summary: 'Definir el plan.',
+    status: 'in_progress', assignedRole: 'arquitecto'
+  }, 'arquitecto', '2026-10-18T12:00:00.000Z');
+  const checkpointed = upsertAgentTask({ agentTasks: started.tasks }, {
+    taskId: firstId, title: 'Arquitecto: Auditoría escéptica', summary: 'Plan guardado.',
+    status: 'done', assignedRole: 'arquitecto'
+  }, 'arquitecto', '2026-10-18T12:01:00.000Z');
+  const nextStage = upsertAgentTask({ agentTasks: checkpointed.tasks }, {
+    taskId: nextId, title: 'Escéptico: Auditoría escéptica', summary: 'Buscar contradicciones.',
+    status: 'in_progress', assignedRole: 'esceptico'
+  }, 'esceptico', '2026-10-18T12:02:00.000Z');
+
+  assert.equal(nextStage.tasks.length, 2);
+  assert.equal(nextStage.tasks.find(task => task.taskId === firstId).status, 'done');
+  assert.equal(nextStage.tasks.find(task => task.taskId === nextId).status, 'in_progress');
+  assert.equal(nextStage.tasks.find(task => task.taskId === firstId).history.length, 2);
+});
