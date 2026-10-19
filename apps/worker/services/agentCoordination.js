@@ -152,6 +152,14 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   if (existing && existing.assignedRole !== role && role !== 'coordinador') {
     throw new Error('Solo el responsable asignado o el coordinador puede actualizar esta tarea.');
   }
+  if (existing) {
+    if (input.status === undefined) task.status = existing.status;
+    if (input.priority === undefined) task.priority = existing.priority;
+    if (input.assignedRole === undefined) task.assignedRole = existing.assignedRole;
+    if (input.nextStep === undefined) task.nextStep = existing.nextStep || '';
+    if (input.evidence === undefined) task.evidence = existing.evidence || '';
+    if (input.dependsOn === undefined) task.dependsOn = Array.isArray(existing.dependsOn) ? [...existing.dependsOn] : [];
+  }
   const id = task.taskId || 'task-' + createHash('sha256').update([at, role, task.title].join('\n')).digest('hex').slice(0, 16);
   if (current.some(item => item?.taskId === id) && !existing) throw new Error('El identificador de tarea ya existe.');
   const stored = {
