@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '' };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0 };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -49,6 +49,85 @@ function observeJobStatus(job) {
   else if (wasActive && job.status === 'needs_review') notify(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
+
+// Fetch-based SSE client: unlike EventSource, fetch can send the existing Bearer token.
+function stopTaskEventStream() {
+  state.eventStreamGeneration += 1;
+  state.eventStreamController?.abort();
+  state.eventStreamController = null;
+}
+function startTaskEventStream() {
+  const generation = ++state.eventStreamGeneration;
+  const pause = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+  void (async () => {
+    while (state.accessKey && generation === state.eventStreamGeneration) {
+      const controller = new AbortController();
+      state.eventStreamController = controller;
+      try {
+        const response = await fetch('/api/events', {
+          headers: authHeaders(false),
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (response.status === 401) {
+          state.accessKey = '';
+          state.user = null;
+          sessionStorage.removeItem('swarm-session-token');
+          showAccess();
+          return;
+        }
+        if (!response.ok || !response.body) throw new Error(`Event stream HTTP ${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (generation === state.eventStreamGeneration) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() || '';
+          for (const frame of frames) {
+            let eventName = 'message';
+            const dataLines = [];
+            for (const line of frame.split(/\r?\n/)) {
+              if (line.startsWith('event:')) eventName = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+            }
+            if (!dataLines.length) continue;
+            let payload;
+            try { payload = JSON.parse(dataLines.join('\n')); } catch { continue; }
+            if (eventName === 'task.status' && payload.jobId && payload.status) {
+              observeJobStatus({
+                id: payload.jobId, title: payload.title || '', stage: payload.stage || '',
+                status: payload.status
+              });
+              if (payload.terminal) {
+                void Promise.allSettled([loadJobs(), loadHistorySummary()]);
+                if (state.currentDetailId === payload.jobId) void refresh();
+              }
+            } else if (eventName === 'session.expired') {
+              state.accessKey = '';
+              state.user = null;
+              sessionStorage.removeItem('swarm-session-token');
+              showAccess();
+              stopTaskEventStream();
+              return;
+            }
+          }
+        }
+        try { await reader.cancel(); } catch {}
+      } catch (error) {
+        if (error?.name !== 'AbortError' && generation === state.eventStreamGeneration) {
+          console.warn('[swarm] event stream reconnecting');
+        }
+      } finally {
+        if (state.eventStreamController === controller) state.eventStreamController = null;
+      }
+      if (state.accessKey && generation === state.eventStreamGeneration) await pause(3000);
+    }
+  })();
+}
+
 async function monitorAllJobStatuses() {
   // Keep completion notices working even when the user filters the visible activity list.
   const data = await api('/api/jobs?limit=100&offset=0&status=all');
@@ -504,6 +583,7 @@ async function enterApp() {
   state.user = access.user || state.user;
   $('access-status').textContent = '';
   showApp();
+  startTaskEventStream();
   try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
   if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
@@ -878,7 +958,7 @@ $('change-password-form').addEventListener('submit', async event => {
 
 $('logout-button').addEventListener('click', async () => {
   try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
-  state.accessKey = ''; state.user = null; sessionStorage.removeItem('swarm-session-token'); location.href = '/?login=1';
+  stopTaskEventStream(); state.accessKey = ''; state.user = null; sessionStorage.removeItem('swarm-session-token'); location.href = '/?login=1';
 });
 $('create-invite').addEventListener('click', async () => {
   const button = $('create-invite'); button.disabled = true; $('invite-status').textContent = 'Creando invitación de un solo uso…';
