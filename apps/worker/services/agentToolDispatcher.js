@@ -40,6 +40,22 @@ function safePath(path) {
   if (base === '.env' || (base.startsWith('.env.') && base !== '.env.example') || BLOCKED_FILES.has(base)) throw error('Archivo sensible bloqueado.');
   return path;
 }
+function redactSensitiveOutput(value, depth = 0) {
+  if (depth > 12) return '[nested output omitted]';
+  if (typeof value === 'string') return value.replace(new RegExp(CREDENTIALS.source, 'gi'), '[REDACTED_CREDENTIAL]');
+  if (Array.isArray(value)) return value.map(item => redactSensitiveOutput(item, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      const normalizedKey = key.toLowerCase().replace(/[\\s-]/g, '_');
+      if (/^(?:password|passwd|secret|client_secret|access_token|refresh_token|api_key|apikey|authorization|private_key|credentials)$/.test(normalizedKey)) {
+        return [key, '[REDACTED]'];
+      }
+      return [key, redactSensitiveOutput(item, depth + 1)];
+    }));
+  }
+  return value;
+}
+
 function bounded(value) {
   let out;
   try { out = JSON.stringify(value ?? null); }
@@ -151,7 +167,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest })); break;
       default: throw error('Herramienta desconocida.');
     }
-    return { ok: true, result: bounded(result) };
+    return { ok: true, result: bounded(redactSensitiveOutput(result)) };
   }
   return Object.freeze({ role: normalizedRole, permissions: [...allowed], invoke, get callCount() { return calls; } });
 }
