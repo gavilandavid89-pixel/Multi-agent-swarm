@@ -86,6 +86,18 @@ test('shared task board tracks ownership, status history, and next steps', async
   assert.throws(() => upsertAgentTask({ agentTasks: updated.tasks }, {
     taskId: first.task.taskId, title: first.task.title, summary: 'unauthorized update', status: 'done'
   }, 'desarrollador'), /Solo el responsable/);
+  assert.throws(() => upsertAgentTask({ agentTasks: updated.tasks }, {
+    taskId: first.task.taskId, title: first.task.title, summary: 'coordinator status override', status: 'done'
+  }, 'coordinador'), /solo puede actualizar una tarea existente para reasignarla/);
+  assert.throws(() => upsertAgentTask({ agentTasks: updated.tasks }, {
+    taskId: first.task.taskId, title: first.task.title, summary: 'owner reassignment', assignedRole: 'desarrollador'
+  }, 'auditor'), /Solo el coordinador puede reasignar/);
+  const reassigned = upsertAgentTask({ agentTasks: updated.tasks }, {
+    taskId: first.task.taskId, title: first.task.title, summary: 'Reasignada por el coordinador.',
+    assignedRole: 'desarrollador'
+  }, 'coordinador', '2026-10-18T12:02:00.000Z');
+  assert.equal(reassigned.task.assignedRole, 'desarrollador');
+  assert.equal(reassigned.task.status, 'in_progress', 'reassignment must not override the existing status');
 });
 
 
