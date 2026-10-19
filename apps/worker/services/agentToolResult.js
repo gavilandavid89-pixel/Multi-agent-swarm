@@ -9,8 +9,9 @@ export function serializeAgentToolResult(result, maxChars = 16000) {
   try {
     serialized = JSON.stringify(result ?? { ok: true });
   } catch {
-    serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' });
+    serialized = null;
   }
+  if (typeof serialized !== 'string') serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' });
   if (serialized.length <= limit) return serialized;
 
   const summary = JSON.stringify({
