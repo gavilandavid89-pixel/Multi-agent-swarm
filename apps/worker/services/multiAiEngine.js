@@ -85,7 +85,7 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       const matches = entries.filter(item => item?.name === name && item?.argsHash === argsHash
         && item?.role === agentRole && item?.round === invocationRound);
       return matches.find(item => item.status === 'completed' && item.workspaceHash === workspaceHash)
-        || [...matches].reverse().find(item => item.status === 'started')
+        || [...matches].reverse().find(item => item.status === 'started' && item.workspaceHash === workspaceHash)
         || null;
     },
     saveInvocation: async invocation => {
