@@ -286,8 +286,8 @@ function roleForAgentLabel(agent, stage = '') {
   if (value.includes('coordinador')) return 'coordinador';
   return 'coordinador';
 }
-function appendAgentFeedEvent(payload, { agent, stage, type, title, body, jobId, at = new Date().toISOString() }) {
-  const update = recordAgentPost(payload, { type, title, body, taskId: jobId }, roleForAgentLabel(agent, stage), at);
+function appendAgentFeedEvent(payload, { agent, stage, type, title, body, jobId, taskId, at = new Date().toISOString() }) {
+  const update = recordAgentPost(payload, { type, title, body, taskId: taskId || jobId }, roleForAgentLabel(agent, stage), at);
   return { posts: update.posts, post: update.post };
 }
 function updateAutomaticAgentTask(payload, { agent, stage, content, jobId, status, at, taskId }) {
@@ -308,7 +308,7 @@ async function startAgent(jobId, stage, progress, agent, content) {
   const activeAgentTaskId = agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
   const taskUpdate = updateAutomaticAgentTask(current.payload, { agent, stage, content, jobId, status: 'in_progress', at, taskId: activeAgentTaskId });
   const taskPayload = { ...current.payload, agentTasks: taskUpdate.tasks };
-  const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, at });
+  const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
   return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
 }
 async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}) {
@@ -329,7 +329,7 @@ async function checkpoint(jobId, stage, progress, agent, content, extra = {}, pu
   const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
   const feed = appendAgentFeedEvent(taskPayload, {
     agent, stage, type: 'result', title: 'Checkpoint: ' + stage,
-    body: String(content ?? '').slice(0, 2000), jobId, at
+    body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at
   });
   return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory }, ...publicPatch });
 }
