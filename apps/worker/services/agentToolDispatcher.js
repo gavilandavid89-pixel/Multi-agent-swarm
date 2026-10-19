@@ -71,7 +71,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   }, ['category', 'severity', 'title', 'summary'])
 ]);
 export function getAgentToolDefinitions(role) {
-  const normalizedRole = String(role || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+  const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
   return AGENT_TOOL_DEFINITIONS.filter(definition => allowed.includes(TOOL_TO_PERMISSION[definition.function.name]));
