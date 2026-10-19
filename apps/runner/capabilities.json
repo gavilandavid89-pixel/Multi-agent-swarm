@@ -411,7 +411,7 @@
     "artifacts": "GET /v1/jobs/:id/files returns a bounded, filtered snapshot"
   },
   "debugging": {
-    "status": "python-pdb-batch-input-available-through-trusted-runner-client; no persistent interactive debugger sessions",
+    "status": "python-pdb-batch-input-available-through-agent-tool-dispatcher; no persistent interactive debugger sessions",
     "stdin": {
       "maxBytes": 16384,
       "network": "none-only",
@@ -422,7 +422,7 @@
         "id": "python-pdb",
         "command": "python3 -m pdb <script.py>",
         "input": "bounded stdin debugger commands, for example p expression followed by q",
-        "verifiedBy": "apps/runner/capabilities-smoke.sh and scripts/agent-sandbox-smoke.sh"
+        "verifiedBy": "tests/agentToolDispatcher.test.mjs, apps/runner/capabilities-smoke.sh and scripts/agent-sandbox-smoke.sh"
       }
     ],
     "restrictions": [
