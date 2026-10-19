@@ -293,7 +293,11 @@ function appendAgentFeedEvent(payload, { agent, stage, type, title, body, jobId,
 function updateAutomaticAgentTask(payload, { agent, stage, content, jobId, at, taskId }) {
   const role = roleForAgentLabel(agent, stage);
   const id = taskId || agentStageTaskId(role, agent, stage);
-  const existing = (Array.isArray(payload?.agentTasks) ? payload.agentTasks : []).find(task => task?.taskId === id);
+  const tasks = Array.isArray(payload?.agentTasks) ? payload.agentTasks : [];
+  const existing = tasks.find(task => task?.taskId === id);
+  // If the coordinator reassigned this task, the former stage owner must not
+  // reclaim it or overwrite the new owner's classification during checkpointing.
+  if (existing && existing.assignedRole !== role) return { tasks, task: existing, created: false };
   return upsertAgentTask(payload, {
     taskId: id,
     title: String(agent) + ': ' + String(stage),
