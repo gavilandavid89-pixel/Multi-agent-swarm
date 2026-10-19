@@ -272,3 +272,44 @@ test('a started invocation with a changed workspace gets a new idempotency key',
   assert.equal(journal[1].status, 'completed', 'the changed workspace gets its own completed invocation');
   assert.notEqual(journal[0].workspaceHash, journal[1].workspaceHash);
 });
+
+test('terminal runner infrastructure failures rotate the key while keeping the invocation retryable', async () => {
+  const f = fixture();
+  const journal = [];
+  let attempts = 0;
+  const getInvocation = async query => journal.find(item =>
+    item.name === query.name && item.argsHash === query.argsHash && item.role === query.role
+    && item.round === query.round && item.workspaceHash === query.workspaceHash
+  ) || null;
+  const saveInvocation = async item => {
+    const index = journal.findIndex(old => old.name === item.name && old.argsHash === item.argsHash
+      && old.role === item.role && old.round === item.round && old.workspaceHash === item.workspaceHash);
+    if (index >= 0) journal[index] = { ...journal[index], ...item };
+    else journal.push(item);
+  };
+  const dispatcher = createAgentToolDispatcher({
+    role: 'desarrollador',
+    workspace: {
+      list: async () => [...f.files].map(([path, content]) => ({ path, content })),
+      read: async path => f.files.get(path) ?? null,
+      write: async (path, content) => { f.files.set(path, content); return { path, bytes: content.length }; }
+    },
+    runner: {
+      execute: async args => {
+        f.executed.push(args); attempts++;
+        return attempts === 1
+          ? { infraError: true, retryableTerminalInfrastructureFailure: true, message: 'runner restarted during job' }
+          : { infraError: false, ok: true, exitCode: 0, jobId: f.runnerJobId, stdout: 'ok' };
+      }
+    }, jobId: 'stable-task', round: 1, getInvocation, saveInvocation
+  });
+  const args = { name: 'runner_execute', arguments: { command: ['node', '--version'] } };
+  const firstResult = await dispatcher.invoke(args);
+  const firstKey = f.executed[0].idempotencyKey;
+  assert.equal(firstResult.result.retryableTerminalInfrastructureFailure, undefined, 'internal retry metadata must not leak to the agent');
+  assert.equal(journal[0].status, 'started');
+  assert.notEqual(journal[0].idempotencyKey, firstKey, 'known terminal infrastructure failure gets a fresh idempotency key');
+  await dispatcher.invoke(args);
+  assert.notEqual(f.executed[1].idempotencyKey, firstKey);
+  assert.equal(journal[0].status, 'completed');
+});
