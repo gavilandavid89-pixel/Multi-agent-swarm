@@ -395,7 +395,7 @@ function isDependencyInfrastructureFailure(result) {
   return Boolean(result?.infraError) || /EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|E403|proxy error|access denied|network is unreachable|could not resolve|temporary failure in name resolution|newconnectionerror|could not get|could not transfer artifact|failed to transfer|unknownhostexception|handshake_failure|PKIX path building failed|fetch failed|no space left on device|disk quota exceeded|failed to download|unable to download/i.test(output);
 }
 
-export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
+export async function runProjectToolchainChecks({ taskId, round, files, retryFailedStep = null, retryAttempt = 0 } = {}) {
   const entries = files instanceof Map
     ? [...files.entries()].map(([filePath, file]) => ({ path: filePath, content: String(file?.content || '') }))
     : Array.isArray(files) ? files : [];
@@ -410,7 +410,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
   const result = await runAgentCommand({
     taskId, workspaceId, resetWorkspace: true, files: entries,
     command: ['bash', '-lc', CHECK_SCRIPT], network: 'none', timeoutMs: 60000,
-    idempotencyKey: taskKey + ':validation:' + String(round || 1) + ':' + contentFingerprint
+    idempotencyKey: taskKey + ':validation:' + String(round || 1) + ':' + contentFingerprint + (!retryFailedStep && Number(retryAttempt) > 0 ? ':retry-' + String(Math.trunc(Number(retryAttempt))) : '')
   });
   if (!result.checked) return result;
   if (!result.ok) {
@@ -432,7 +432,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
       const prep = await runAgentCommand({
         taskId, workspaceId, resetWorkspace: false, files: [],
         command: profile.prepare, network: 'restricted', timeoutMs: profile.prepareTimeoutMs,
-        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint
+        idempotencyKey: taskKey + ':deps:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint + (retryFailedStep?.profile === profile.name && retryFailedStep?.phase === 'dependency-preparation' && Number(retryAttempt) > 0 ? ':retry-' + String(Math.trunc(Number(retryAttempt))) : '')
       });
       runtimeChecks.push({ profile: profile.name, phase: 'dependency-preparation', ok: prep.ok, exitCode: prep.exitCode, durationMs: prep.durationMs });
       if (!prep.ok) {
@@ -447,7 +447,7 @@ export async function runProjectToolchainChecks({ taskId, round, files } = {}) {
     const tested = await runAgentCommand({
       taskId, workspaceId, resetWorkspace: false, files: [],
       command: profile.test, network: 'none', timeoutMs: profile.testTimeoutMs,
-      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint
+      idempotencyKey: taskKey + ':tests:' + String(round || 1) + ':' + profileKey + ':' + contentFingerprint + (retryFailedStep?.profile === profile.name && retryFailedStep?.phase === 'tests' && Number(retryAttempt) > 0 ? ':retry-' + String(Math.trunc(Number(retryAttempt))) : '')
     });
     runtimeChecks.push({ profile: profile.name, phase: 'tests', ok: tested.ok, exitCode: tested.exitCode, durationMs: tested.durationMs });
     if (!tested.ok) {
