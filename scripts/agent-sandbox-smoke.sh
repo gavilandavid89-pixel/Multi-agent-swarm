@@ -312,6 +312,25 @@ done
 if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API did not recover after process restart" >&2; exit 1; fi
 recovered_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
 printf '%s' "$recovered_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="failed"||!String(j.error||"").includes("servicio se reinició")){console.error("FAIL restart recovery state",JSON.stringify(j));process.exit(1)}})'
+
+queued_json=
+i=0
+while [ "$i" -lt 30 ]; do
+  queued_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$queued_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  queued_state=$(printf '%s' "$queued_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$queued_state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+printf '%s' "$queued_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("731045")){console.error("FAIL queued job was not resumed after runner API restart",JSON.stringify(j));process.exit(1)}})'
+echo "PASS queued job survives API restart and runs once while interrupted active job fails closed"
+same_queued_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-restart-queued-03' \
+  -d "$queued_body")
+same_queued_id=$(printf '%s' "$same_queued_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ "$same_queued_id" != "$queued_id" ]; then echo "FAIL queued recovery idempotency created a duplicate job" >&2; exit 1; fi
 same_restart_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
   -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
