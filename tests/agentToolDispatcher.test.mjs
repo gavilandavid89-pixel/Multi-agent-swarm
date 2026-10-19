@@ -359,3 +359,54 @@ test('developer can invoke safe catalogued inspection and lint tools without gai
     );
   }
 });
+
+test('worker restart after runner accepted a tool call reuses the durable idempotency key', async () => {
+  const f = fixture();
+  const journal = [];
+  const runnerJobs = new Map();
+  const attemptedKeys = [];
+  let actualLaunches = 0;
+  const getInvocation = async query => journal.find(item =>
+    item.name === query.name && item.argsHash === query.argsHash && item.role === query.role
+    && item.round === query.round && item.workspaceHash === query.workspaceHash
+  ) || null;
+  const saveInvocation = async item => {
+    const index = journal.findIndex(old => old.name === item.name && old.argsHash === item.argsHash
+      && old.role === item.role && old.round === item.round && old.workspaceHash === item.workspaceHash);
+    if (index >= 0) journal[index] = { ...journal[index], ...item };
+    else journal.push(item);
+  };
+  const makeDispatcher = () => createAgentToolDispatcher({
+    role: 'desarrollador',
+    workspace: {
+      list: async () => [...f.files].map(([path, content]) => ({ path, content })),
+      read: async path => f.files.get(path) ?? null,
+      write: async (path, content) => { f.files.set(path, content); return { path, bytes: content.length }; }
+    },
+    runner: {
+      execute: async args => {
+        const key = args.idempotencyKey;
+        attemptedKeys.push(key);
+        if (runnerJobs.has(key)) return runnerJobs.get(key);
+        actualLaunches++;
+        const completed = { jobId: f.runnerJobId, exitCode: 0, stdout: 'durable-result' };
+        // Simulate the process dying after the Runner accepted/completed the job,
+        // but before the Worker can persist the tool result in its encrypted journal.
+        runnerJobs.set(key, completed);
+        if (actualLaunches === 1) throw new Error('simulated worker interruption after remote acceptance');
+        return completed;
+      }
+    },
+    jobId: 'stable-task', round: 1, getInvocation, saveInvocation
+  });
+  const args = { name: 'runner_execute', arguments: { command: ['node', '--version'] } };
+  await assert.rejects(makeDispatcher().invoke(args), /simulated worker interruption/);
+  assert.equal(journal[0].status, 'started', 'pre-call checkpoint survives the simulated process loss');
+  const resumed = await makeDispatcher().invoke(args);
+  assert.equal(resumed.result.stdout, 'durable-result');
+  assert.equal(resumed.replayed, undefined);
+  assert.equal(actualLaunches, 1, 'the Runner idempotency contract prevents duplicate execution');
+  assert.equal(attemptedKeys.length, 2);
+  assert.equal(attemptedKeys[0], attemptedKeys[1], 'recovery reuses the persisted idempotency key for an ambiguous transport failure');
+  assert.equal(journal[0].status, 'completed', 'the resumed Worker persists the recovered result');
+});
