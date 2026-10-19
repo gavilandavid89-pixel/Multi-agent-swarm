@@ -153,3 +153,38 @@ test('limits calls and per-file size', async () => {
   await assert.rejects(f.dispatcher.invoke({ name: 'workspace_list', arguments: {} }), { code: 'AGENT_TOOL_CALL_LIMIT' });
   await assert.rejects(fixture().dispatcher.invoke({ name: 'workspace_write', arguments: { path: 'huge.txt', content: 'x'.repeat(256 * 1024 + 1) } }), /256 KiB/);
 });
+
+
+test('remote tool calls are checkpointed and completed results replay without another runner call', async () => {
+  const f = fixture();
+  const journal = [];
+  const getInvocation = async query => journal.find(item =>
+    item.name === query.name && item.argsHash === query.argsHash && item.role === query.role
+    && item.round === query.round && (item.status === 'started' || item.workspaceHash === query.workspaceHash)
+  ) || null;
+  const saveInvocation = async item => {
+    const index = journal.findIndex(old => old.name === item.name && old.argsHash === item.argsHash
+      && old.role === item.role && old.round === item.round && old.workspaceHash === item.workspaceHash);
+    if (index >= 0) journal[index] = { ...journal[index], ...item };
+    else journal.push(item);
+  };
+  const make = () => createAgentToolDispatcher({
+    role: 'desarrollador', workspace: {
+      list: async () => [...f.files].map(([path, content]) => ({ path, content })),
+      read: async path => f.files.get(path) ?? null,
+      write: async (path, content) => { f.files.set(path, content); return { path, bytes: content.length }; }
+    }, runner: {
+      execute: async args => { f.executed.push(args); return { jobId: f.runnerJobId, exitCode: 0, stdout: 'ok' }; },
+      check: async () => ({ ok: true }), dependency: async () => ({ ok: true })
+    }, jobId: 'stable-task', round: 1, getInvocation, saveInvocation
+  });
+  const first = await make().invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } });
+  assert.equal(first.result.stdout, 'ok');
+  assert.equal(f.executed.length, 1);
+  assert.match(f.executed[0].idempotencyKey, /^swarm-tool-/);
+  assert.equal(journal[0].status, 'completed');
+  const replay = await make().invoke({ name: 'runner_execute', arguments: { command: ['node', '--version'] } });
+  assert.equal(replay.result.stdout, 'ok');
+  assert.equal(replay.replayed, true);
+  assert.equal(f.executed.length, 1);
+});
