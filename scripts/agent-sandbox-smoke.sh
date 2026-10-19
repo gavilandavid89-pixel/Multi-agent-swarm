@@ -522,7 +522,7 @@ echo "PASS runner cancels an active process and reports terminal state"
 
 timeout_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
-  command:["node","-e","setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
+  command:["node","-e","console.log('host-restart-ready');setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
 }))')
 timeout_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
@@ -718,15 +718,20 @@ host_restart_create=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
 host_restart_id=$(printf '%s' "$host_restart_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
 if [ -z "$host_restart_id" ]; then echo "FAIL simulated host restart test did not create a job" >&2; exit 1; fi
 host_restart_state=
+host_restart_started=0
 i=0
 while [ "$i" -lt 30 ]; do
-  host_restart_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$host_restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
-  [ "$host_restart_state" = "running" ] && break
+  host_restart_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$host_restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  host_restart_state=$(printf '%s' "$host_restart_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  if printf '%s' "$host_restart_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.exit(String(JSON.parse(s).stdout||"").includes("host-restart-ready")?0:1))'; then
+    host_restart_started=1
+    break
+  fi
   case "$host_restart_state" in failed|timed_out|cancelled|succeeded) echo "FAIL host restart test job ended before simulated restart ($host_restart_state)" >&2; exit 1 ;; esac
   sleep 1
   i=$((i + 1))
 done
-if [ "$host_restart_state" != "running" ]; then echo "FAIL host restart test job never entered running state ($host_restart_state)" >&2; exit 1; fi
+if [ "$host_restart_state" != "running" ] || [ "$host_restart_started" -ne 1 ]; then echo "FAIL host restart test job did not begin executing before simulated restart ($host_restart_state)" >&2; exit 1; fi
 
 # Simulate host boot ordering: the API process is gone while Docker restarts,
 # then a fresh API starts with the same state directory and recovers both jobs.
