@@ -270,7 +270,13 @@
       "Arquitecto": {
         "allow": [
           "workspace.list",
-          "workspace.read"
+          "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list"
         ],
         "deny": [
           "workspace.write",
@@ -286,7 +292,13 @@
       "Coordinador": {
         "allow": [
           "workspace.list",
-          "workspace.read"
+          "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list"
         ],
         "deny": [
           "workspace.write",
@@ -303,6 +315,12 @@
         "allow": [
           "workspace.list",
           "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list",
           "workspace.write",
           "runner.check",
           "runner.execute",
@@ -320,7 +338,35 @@
       "Escéptico": {
         "allow": [
           "workspace.list",
-          "workspace.read"
+          "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list"
+        ],
+        "deny": [
+          "workspace.write",
+          "runner.check",
+          "runner.execute",
+          "runner.prepareDependencies",
+          "runner.cancel",
+          "host.configure",
+          "network.configure",
+          "secret.read"
+        ]
+      },
+      "Árbitro": {
+        "allow": [
+          "workspace.list",
+          "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list"
         ],
         "deny": [
           "workspace.write",
@@ -336,7 +382,13 @@
       "Auditor": {
         "allow": [
           "workspace.list",
-          "workspace.read"
+          "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list"
         ],
         "deny": [
           "workspace.write",
@@ -353,6 +405,12 @@
         "allow": [
           "workspace.list",
           "workspace.read",
+          "agent.findings.list",
+          "agent.finding.report",
+          "agent.feed.publish",
+          "agent.feed.list",
+          "agent.task.upsert",
+          "agent.tasks.list",
           "runner.check",
           "runner.jobStatus",
           "runner.artifact.read"
@@ -377,7 +435,13 @@
       "runner.prepareDependencies",
       "runner.jobStatus",
       "runner.cancel",
-      "runner.artifact.read"
+      "runner.artifact.read",
+      "agent.findings.list",
+      "agent.finding.report",
+      "agent.feed.publish",
+      "agent.feed.list",
+      "agent.task.upsert",
+      "agent.tasks.list"
     ]
   },
   "notIncluded": [
