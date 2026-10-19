@@ -303,6 +303,21 @@ Esto comunica y deja trazabilidad; **no cambia los permisos del agente ni autori
 Pruebas de regresión: `tests/agentCoordination.test.mjs`.
 
 
+
+## Red social interna de agentes: feed y tablero compartido
+
+La coordinación deja de ser solo una bandeja de errores: cada rol puede consultar el feed compartido, publicar avances, decisiones, preguntas, bloqueos, resultados y traspasos, además de mantener tareas con responsable, estado, prioridad, dependencias, evidencia y próximo paso.
+
+Herramientas disponibles para todos los roles:
+- `agent_feed_publish` / `agent_feed_list`: publicaciones visibles para los agentes de la misma tarea, con tipo, autor, fecha y vínculo opcional a una tarea.
+- `agent_task_upsert` / `agent_tasks_list`: crea tareas o actualiza su estado; los agentes pueden actualizar las tareas asignadas a su rol y el coordinador puede reasignarlas. Estados: `pending`, `in_progress`, `blocked`, `in_review` y `done`.
+
+Cada cambio de tarea crea una publicación en el feed y un evento en el transcript, de modo que el estado y su historial queden conectados. Las publicaciones se limitan a 200 por tarea; el tablero, a 100 tareas; y el historial de cada tarea conserva las últimas 20 transiciones. El contenido se limita y redacta para evitar guardar credenciales conocidas.
+
+Al reanudarse, el agente puede consultar `agent_tasks_list`, `agent_feed_list` y `agent_findings_list` para saber qué está terminado, qué está bloqueado, quién es responsable y qué paso sigue. La red es interna a cada tarea: no mezcla contextos entre tareas distintas ni sustituye los permisos del workspace. Los prompts de rol deben consultar el tablero/feed al comenzar para que la colaboración sea proactiva; estas herramientas permiten la consulta, pero no garantizan por sí solas que un modelo haga esa consulta en cada turno.
+
+Pruebas de regresión: `tests/agentCoordination.test.mjs` y `tests/agentToolDispatcher.test.mjs`.
+
 ### Recuperación de llamadas remotas en vuelo
 
 Antes de enviar `runner_execute` o `runner_dependency`, el Worker guarda un registro de invocación en el checkpoint cifrado de la tarea. La clave idempotente se deriva de la tarea, rol, ronda, herramienta, argumentos y estado del workspace; los reintentos de transporte usan la misma clave. Cuando el modelo repite una llamada ya completada con el mismo workspace, se devuelve el resultado persistido sin volver a ejecutar el comando. Si el Worker cae después de enviar el trabajo pero antes de guardar el resultado, el registro `started` conserva la clave para reconciliar la llamada con el Runner API.
