@@ -653,4 +653,81 @@ if [ "$status" -eq 0 ]; then
 fi
 echo "PASS root filesystem read-only"
 
+# Exercise a real Docker daemon restart while an execution is active.
+# The API process and its state directory stay in place for this first pass.
+daemon_restart_body=$(node -e 'process.stdout.write(JSON.stringify({
+  files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
+  command:["node","-e","setTimeout(()=>console.log(\\"daemon-restart-job-finished\\"),30000)"],
+  network:"none",timeoutMs:60000
+}))')
+daemon_restart_create=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' \
+  -H 'x-swarm-idempotency-key: smoke-runner-daemon-restart-01' \
+  -d "$daemon_restart_body")
+daemon_restart_id=$(printf '%s' "$daemon_restart_create" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).id||""))')
+if [ -z "$daemon_restart_id" ]; then echo "FAIL Docker daemon restart test did not create a job" >&2; exit 1; fi
+daemon_restart_state=
+i=0
+while [ "$i" -lt 30 ]; do
+  daemon_restart_state=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$daemon_restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min' | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  [ "$daemon_restart_state" = "running" ] && break
+  case "$daemon_restart_state" in failed|timed_out|cancelled|succeeded) echo "FAIL daemon restart test job ended before daemon restart ($daemon_restart_state)" >&2; exit 1 ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$daemon_restart_state" != "running" ]; then echo "FAIL daemon restart test job never entered running state ($daemon_restart_state)" >&2; exit 1; fi
+if ! command -v systemctl >/dev/null 2>&1 || ! sudo -n systemctl is-active --quiet docker; then
+  echo "FAIL Docker daemon restart test requires an active systemd Docker service and passwordless sudo" >&2
+  exit 1
+fi
+sudo -n systemctl restart docker
+ready=0
+i=0
+while [ "$i" -lt 90 ]; do
+  if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API died during Docker daemon restart" >&2; exit 1; fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API did not regain readiness after Docker daemon restart" >&2; exit 1; fi
+daemon_restart_json=
+i=0
+while [ "$i" -lt 45 ]; do
+  daemon_restart_json=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$daemon_restart_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+  daemon_restart_state=$(printf '%s' "$daemon_restart_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
+  case "$daemon_restart_state" in succeeded|failed|timed_out|cancelled) break ;; esac
+  sleep 1
+  i=$((i + 1))
+done
+case "$daemon_restart_state" in succeeded|failed|timed_out|cancelled) ;; *) echo "FAIL active job remained non-terminal after Docker daemon restart ($daemon_restart_state)" >&2; exit 1 ;; esac
+echo "PASS Docker daemon restart restores API readiness and resolves the active job to a terminal state"
+
+# Simulate a full host restart boundary: stop the API, restart Docker, then
+# start a fresh API process against the same persistent state directory.
+# This validates boot-time recovery semantics, but is not a physical VM reboot.
+kill "$api_pid" >/dev/null 2>&1 || true
+wait "$api_pid" 2>/dev/null || true
+api_pid=
+sudo -n systemctl restart docker
+RUNNER_SHARED_SECRET=runner-smoke-secret-32-characters-min \
+RUNNER_API_SENTINEL=must-not-leak \
+RUNNER_STATE_DIR="${workspace}-runner-state" \
+PORT=3200 node apps/runner-api/server.js > "${workspace}-runner-api.log" 2>&1 &
+api_pid=$!
+ready=0
+i=0
+while [ "$i" -lt 100 ]; do
+  if curl -fsS http://127.0.0.1:3200/readyz >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$api_pid" >/dev/null 2>&1; then cat "${workspace}-runner-api.log" >&2; exit 1; fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ "$ready" -ne 1 ]; then cat "${workspace}-runner-api.log" >&2; echo "FAIL runner API did not recover with persistent state after simulated host restart" >&2; exit 1; fi
+host_recovered_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id" -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$host_recovered_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s);if(j.status!=="succeeded"||!String(j.stdout||"").includes("runner-api-ok")){console.error("FAIL completed job did not survive simulated host restart",JSON.stringify(j));process.exit(1)}})'
+host_recovered_artifacts=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$job_id"/files -H 'x-swarm-runner-secret: runner-smoke-secret-32-characters-min')
+printf '%s' "$host_recovered_artifacts" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const f=JSON.parse(s).files||[];if(!f.some(x=>x.path==="generated.txt"&&x.content==="artifact-ok")){console.error("FAIL completed artifact did not survive simulated host restart",JSON.stringify(f));process.exit(1)}})'
+echo "PASS simulated host restart preserves completed job state and artifacts on the persistent state directory"
+
 echo "Agent sandbox smoke tests passed."
