@@ -657,8 +657,8 @@ echo "PASS root filesystem read-only"
 # The API process and its state directory stay in place for this first pass.
 daemon_restart_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
-  command:["node","-e","setTimeout(()=>{},30000)"],
-  network:"none",timeoutMs:60000
+  command:["node","-e","setTimeout(()=>{},180000)"],
+  network:"none",timeoutMs:210000
 }))')
 daemon_restart_create=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
@@ -677,6 +677,21 @@ while [ "$i" -lt 30 ]; do
   i=$((i + 1))
 done
 if [ "$daemon_restart_state" != "running" ]; then echo "FAIL daemon restart test job never entered running state ($daemon_restart_state)" >&2; exit 1; fi
+# The API marks a job running before the container is ready. Confirm Docker
+# actually launched the isolated container before restarting the daemon, or the
+# restart can happen during setup and the command may only start afterward.
+daemon_restart_cid_file="${workspace}-runner-state/jobs/${daemon_restart_id}.cid"
+daemon_restart_cid=
+i=0
+while [ "$i" -lt 40 ]; do
+  if [ -s "$daemon_restart_cid_file" ]; then
+    daemon_restart_cid=$(cat "$daemon_restart_cid_file")
+    if [ "$(docker inspect --format '{{.State.Running}}' "$daemon_restart_cid" 2>/dev/null || true)" = "true" ]; then break; fi
+  fi
+  sleep 1
+  i=$((i + 1))
+done
+if [ -z "$daemon_restart_cid" ] || [ "$(docker inspect --format '{{.State.Running}}' "$daemon_restart_cid" 2>/dev/null || true)" != "true" ]; then echo "FAIL daemon restart smoke could not confirm a live execution container before daemon restart" >&2; exit 1; fi
 if ! command -v systemctl >/dev/null 2>&1 || ! sudo -n systemctl is-active --quiet docker; then
   echo "FAIL Docker daemon restart test requires an active systemd Docker service and passwordless sudo" >&2
   exit 1
