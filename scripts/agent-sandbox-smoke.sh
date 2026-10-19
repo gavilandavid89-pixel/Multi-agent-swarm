@@ -734,9 +734,10 @@ host_restart_job=$(curl -fsS http://127.0.0.1:3200/v1/jobs/"$host_restart_id" -H
 host_restart_state=$(printf '%s' "$host_restart_job" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).status||""))')
 if [ "$host_restart_state" != "running" ]; then echo "FAIL host restart test job was not active immediately before simulated restart ($host_restart_state): $host_restart_job" >&2; exit 1; fi
 
-# Simulate host boot ordering: the API process is gone while Docker restarts,
-# then a fresh API starts with the same state directory and recovers both jobs.
-kill "$api_pid" >/dev/null 2>&1 || true
+# Simulate abrupt host loss/boot ordering: SIGKILL prevents the API's graceful
+# shutdown handler from rewriting an interrupted running job as user-cancelled.
+# Docker then restarts while the API is down; the new process must recover state.
+kill -9 "$api_pid" >/dev/null 2>&1 || true
 wait "$api_pid" 2>/dev/null || true
 api_pid=
 sudo -n systemctl restart docker
