@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { serializeAgentToolResult } from './agentToolResult.js';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
@@ -314,9 +315,8 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
            } catch (toolError) {
              result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
            }
-           let serialized;
-           try { serialized = JSON.stringify(result ?? { ok: true }); } catch { serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' }); }
-           requestMessages.push({ role: 'tool', tool_call_id: String(call.id || ''), name, content: serialized.slice(0, 16000) });
+           const serialized = serializeAgentToolResult(result);
+           requestMessages.push({ role: 'tool', tool_call_id: String(call.id || ''), name, content: serialized });
          }
          toolRounds++;
          continue;
