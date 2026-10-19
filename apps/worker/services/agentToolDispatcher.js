@@ -105,6 +105,9 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (Object.keys(args).some(k => k !== 'path')) throw error('Argumentos extra no permitidos.');
         result = await workspace.read(safePath(args.path));
         if (result == null) throw error('Archivo no encontrado.');
+        if (typeof result !== 'string') throw error('El archivo no es texto legible.');
+        if (Buffer.byteLength(result, 'utf8') > 256 * 1024) throw error('Archivo supera el límite de lectura de 256 KiB.');
+        if (CREDENTIALS.test(result)) throw error('Lectura bloqueada: el archivo contiene posibles credenciales.');
         break;
       case 'workspace_write': {
         if (Object.keys(args).some(k => !['path', 'content'].includes(k))) throw error('Argumentos extra no permitidos.');
