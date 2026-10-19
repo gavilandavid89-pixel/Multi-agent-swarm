@@ -3,6 +3,10 @@ const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', 
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
+window.SwarmEvents?.on('task.notice', event => {
+  const { message, level } = event.detail || {};
+  if (message) showTaskNotice(message, level || 'warning');
+});
 function authHeaders(json = true) { return { ...(json ? { 'content-type': 'application/json' } : {}), ...(state.accessKey ? { authorization: `Bearer ${state.accessKey}` } : {}) }; }
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) } });
@@ -35,10 +39,14 @@ function observeJobStatus(job) {
   const wasActive = ['queued', 'running'].includes(previousStatus);
   const terminal = ['completed', 'failed', 'needs_review'].includes(job.status);
   const budgetBlocked = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
-  if (wasActive && job.status === 'completed') showTaskNotice(`Los agentes terminaron «${job.title || `tarea ${job.id.slice(0,8)}`}». El resultado está listo para revisar.`, 'completed');
-  else if (wasActive && job.status === 'failed') showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
-  else if (wasActive && job.status === 'needs_review' && budgetBlocked) showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
-  else if (wasActive && job.status === 'needs_review') showTaskNotice(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» necesita revisión humana antes de considerarla aprobada.`, 'warning');
+  window.SwarmEvents?.emit('task.status.changed', {
+    jobId: job.id, title: job.title || '', previousStatus, status: job.status, wasActive, terminal
+  });
+  const notify = (message, level) => window.SwarmEvents?.emit('task.notice', { message, level });
+  if (wasActive && job.status === 'completed') notify(`Los agentes terminaron «${job.title || `tarea ${job.id.slice(0,8)}`}». El resultado está listo para revisar.`, 'completed');
+  else if (wasActive && job.status === 'failed') notify(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» se interrumpió. Abrí el diagnóstico para ver la causa.`, 'failed');
+  else if (wasActive && job.status === 'needs_review' && budgetBlocked) notify(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» alcanzó su presupuesto. El checkpoint está guardado y la continuación se prepara automáticamente.`, 'warning');
+  else if (wasActive && job.status === 'needs_review') notify(`«${job.title || `Tarea ${job.id.slice(0,8)}`}» necesita revisión humana antes de considerarla aprobada.`, 'warning');
   return { changed: true, wasActive, terminal };
 }
 async function monitorAllJobStatuses() {
