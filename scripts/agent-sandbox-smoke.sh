@@ -522,7 +522,7 @@ echo "PASS runner cancels an active process and reports terminal state"
 
 timeout_body=$(node -e 'process.stdout.write(JSON.stringify({
   files:[],workspaceId:"33333333-3333-4333-8333-333333333333",resetWorkspace:true,
-  command:["node","-e","console.log('host-restart-ready');setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
+  command:["node","-e","console.log(\"host-restart-ready\");setTimeout(()=>{},30000)"],network:"none",timeoutMs:2000
 }))')
 timeout_job=$(curl -fsS -X POST http://127.0.0.1:3200/v1/jobs \
   -H 'content-type: application/json' \
