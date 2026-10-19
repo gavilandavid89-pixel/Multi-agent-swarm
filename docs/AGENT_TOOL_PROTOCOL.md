@@ -8,7 +8,7 @@ El catálogo de capacidades instalado está versionado en `apps/runner/capabilit
 
 1. El Worker valida que la tarea y el agente tengan permiso para usar herramientas.
 2. El dispatcher convierte una llamada tipada del agente en una operación conocida del cliente del runner. El agente nunca recibe AGENT_RUNNER_SHARED_SECRET ni RUNNER_SHARED_SECRET.
-3. El Worker asigna un workspaceId aislado y una clave de idempotencia determinista. El contenido del workspace se persiste en el payload cifrado de la tarea; la persistencia/reattachment de un checkpoint por cada tool-call en vuelo aún debe validarse tras reinicios del Worker.
+3. El Worker asigna un workspaceId aislado. Cada invocación obtiene una clave de idempotencia propia que se reutiliza en los reintentos de transporte; así no colisionan llamadas distintas cuando se reinicia el Worker. El contenido del workspace se persiste en el payload cifrado de la tarea; la persistencia/reattachment de la clave y el checkpoint de un tool-call en vuelo tras reinicios aún debe validarse.
 4. La Runner API autentica al Worker, valida límites y archivos, y encola un job. El host de ejecución inicia un contenedor efímero con límites de recursos y filesystem controlado.
 5. El Worker consulta el estado del job hasta completar la llamada y devuelve el ID cuando corresponde. La Runner API persiste los jobs y protege las solicitudes idempotentes; la reanudación del tool-call de modelo desde un checkpoint tras reiniciar el Worker sigue siendo un criterio de aceptación pendiente y no debe darse por garantizada.
 6. La API devuelve salida acotada y una instantánea de archivos validada. El Worker filtra datos sensibles, persiste los resultados y los entrega al agente que pidió la herramienta.
