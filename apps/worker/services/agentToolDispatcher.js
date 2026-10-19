@@ -272,7 +272,7 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
     }
     const retryableInfrastructureFailure = Boolean(result && typeof result === 'object' && result.infraError === true);
     const retryableTerminalInfrastructureFailure = Boolean(result && typeof result === 'object' && result.retryableTerminalInfrastructureFailure === true);
-    const publicResult = result && typeof result === 'object'
+    const publicResult = result && typeof result === 'object' && !Array.isArray(result)
       ? Object.fromEntries(Object.entries(result).filter(([key]) => key !== 'retryableTerminalInfrastructureFailure'))
       : result;
     const safeResult = bounded(redactSensitiveOutput(publicResult));
