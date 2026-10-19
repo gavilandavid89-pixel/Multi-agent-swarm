@@ -62,3 +62,8 @@ test('The Swarm validation/repair loop consumes real sandbox results', () => {
   assert.ok(server.includes("resumeMode: 'runner-only'"));
   assert.ok(server.includes('Reintento acotado: se conserva la entrega y la validación de IA ya guardadas'));
 });
+
+test('journal checkpoint identity includes workspace hash when updating a started invocation', () => {
+  const pendingIndexBlock = engine.slice(engine.indexOf('const pendingIndex ='), engine.indexOf('const identityIndex ='));
+  assert.ok(pendingIndexBlock.includes('item?.workspaceHash === invocation.workspaceHash'));
+});
