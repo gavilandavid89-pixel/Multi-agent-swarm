@@ -188,6 +188,19 @@ test('task dependencies must exist and cannot create cycles', async () => {
   }, 'coordinador', '2026-10-19T12:01:00.000Z');
   assert.deepEqual(dependent.task.dependsOn, ['task-prerequisite']);
   assert.throws(() => upsertAgentTask({ agentTasks: dependent.tasks }, {
+    taskId: 'task-implementation', title: 'Implement API', summary: 'Cannot start before the contract is done.',
+    assignedRole: 'desarrollador', status: 'in_progress'
+  }, 'desarrollador'), /completar sus dependencias/);
+  const completedPrerequisite = upsertAgentTask({ agentTasks: dependent.tasks }, {
+    taskId: 'task-prerequisite', title: 'Define API contract', summary: 'Contract approved.',
+    assignedRole: 'arquitecto', status: 'done'
+  }, 'arquitecto', '2026-10-19T12:02:00.000Z');
+  const startedDependent = upsertAgentTask({ agentTasks: completedPrerequisite.tasks }, {
+    taskId: 'task-implementation', title: 'Implement API', summary: 'Now the contract is ready.',
+    assignedRole: 'desarrollador', status: 'in_progress'
+  }, 'desarrollador', '2026-10-19T12:03:00.000Z');
+  assert.equal(startedDependent.task.status, 'in_progress');
+  assert.throws(() => upsertAgentTask({ agentTasks: dependent.tasks }, {
     taskId: 'task-unassigned', title: 'Assign someone else work', summary: 'This must be coordinated.',
     assignedRole: 'auditor'
   }, 'desarrollador'), /Solo el coordinador puede asignar/);
