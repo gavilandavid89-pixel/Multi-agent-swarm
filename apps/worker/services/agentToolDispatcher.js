@@ -70,6 +70,12 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
     evidence: { type: 'string', maxLength: 3000 }, filePath: { type: 'string', maxLength: 240 }
   }, ['category', 'severity', 'title', 'summary'])
 ]);
+export function getAgentToolDefinitions(role) {
+  const normalizedRole = String(role || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+  const allowed = PERMISSIONS[normalizedRole];
+  if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
+  return AGENT_TOOL_DEFINITIONS.filter(definition => allowed.includes(TOOL_TO_PERMISSION[definition.function.name]));
+}
 function error(message, code = 'AGENT_TOOL_INVALID_ARGUMENT') { const e = new Error(message); e.code = code; return e; }
 function canonical(value) {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
