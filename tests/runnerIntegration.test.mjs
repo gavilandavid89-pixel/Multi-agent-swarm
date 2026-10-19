@@ -29,6 +29,7 @@ test('Worker runner integration is optional by default and authenticates remote 
   assert.ok(client.includes("timeoutMs: 60000"));
   assert.ok(client.includes("Number(timeoutMs) + 90000"));
   assert.ok(client.includes("infraError: true"));
+  assert.ok(client.includes('infraError: Boolean(latest.error || latest.exitCode === 125)'));
   assert.ok(client.includes('retryableTerminalInfrastructureFailure: Boolean(latest.error || latest.exitCode === 125)'));
   assert.ok(client.includes("isPrivateRunnerHost"));
   assert.ok(client.includes("baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)"));
