@@ -332,25 +332,29 @@ async function runJob(jobId) {
     if (!proposal) {
       await startAgent(jobId, 'Arquitectura', 5, 'Arquitecto', 'Voy a ordenar el objetivo, fijar las decisiones técnicas y dejar criterios claros para que el equipo pueda comprobar el resultado.');
       await assertTaskTokenBudget(jobId);
-      proposal = await agenteArquitecto(objective, onRetry('Arquitecto', 'Arquitectura'));
+      const architectTools = await createAgentToolContext(jobId, 1, 'arquitecto', '');
+      proposal = await agenteArquitecto(objective, onRetry('Arquitecto', 'Arquitectura'), architectTools);
       await checkpoint(jobId, 'Auditoría escéptica', 15, 'Arquitecto', proposal, { proposal });
     }
     if (!critique) {
       await startAgent(jobId, 'Auditoría escéptica', 15, 'Escéptico', 'Voy a poner a prueba la propuesta: buscaré contradicciones, situaciones límite y fallos que podrían pasar inadvertidos.');
       await assertTaskTokenBudget(jobId);
-      critique = await agenteEsceptico(objective, proposal, onRetry('Escéptico', 'Auditoría escéptica'));
+      const skepticTools = await createAgentToolContext(jobId, 1, 'esceptico', '');
+      critique = await agenteEsceptico(objective, proposal, onRetry('Escéptico', 'Auditoría escéptica'), skepticTools);
       await checkpoint(jobId, 'Síntesis técnica', 25, 'Escéptico', critique, { proposal, critique });
     }
     if (!strategy) {
       await startAgent(jobId, 'Síntesis técnica', 25, 'Árbitro', 'Revisaré las objeciones una por una y decidiré qué controles son necesarios antes de avanzar.');
       await assertTaskTokenBudget(jobId);
-      strategy = await agenteArbitro(objective, proposal, critique, onRetry('Árbitro', 'Síntesis técnica'));
+      const arbitratorTools = await createAgentToolContext(jobId, 1, 'arbitro', '');
+      strategy = await agenteArbitro(objective, proposal, critique, onRetry('Árbitro', 'Síntesis técnica'), arbitratorTools);
       await checkpoint(jobId, 'Desarrollo', 35, 'Árbitro', strategy, { proposal, critique, strategy });
     }
     if (!coherence) {
       await startAgent(jobId, 'Mapa de coherencia', 30, 'Coordinador de coherencia', 'Voy a comprobar cómo encajan las partes, qué información se pasan entre sí y qué acuerdos necesita respetar el equipo.');
       await assertTaskTokenBudget(jobId);
-      coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry('Coordinador de coherencia', 'Mapa de coherencia'));
+      const coordinatorTools = await createAgentToolContext(jobId, 1, 'coordinador', '');
+      coherence = await agenteCoordinador(objective, strategy, proposal, critique, onRetry('Coordinador de coherencia', 'Mapa de coherencia'), coordinatorTools);
       await checkpoint(jobId, 'Mapa de coherencia', 32, 'Coordinador de coherencia', coherence, { proposal, critique, strategy, coherence });
     }
     if (!delivery) {
