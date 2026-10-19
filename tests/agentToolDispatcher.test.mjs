@@ -188,3 +188,43 @@ test('remote tool calls are checkpointed and completed results replay without an
   assert.equal(replay.replayed, true);
   assert.equal(f.executed.length, 1);
 });
+
+
+test('infrastructure failures remain retryable and preserve the same idempotency key', async () => {
+  const f = fixture();
+  const journal = [];
+  let attempts = 0;
+  const getInvocation = async query => journal.find(item =>
+    item.name === query.name && item.argsHash === query.argsHash && item.role === query.role
+    && item.round === query.round && (item.status === 'started' || item.workspaceHash === query.workspaceHash)
+  ) || null;
+  const saveInvocation = async item => {
+    const index = journal.findIndex(old => old.name === item.name && old.argsHash === item.argsHash
+      && old.role === item.role && old.round === item.round && old.workspaceHash === item.workspaceHash);
+    if (index >= 0) journal[index] = { ...journal[index], ...item };
+    else journal.push(item);
+  };
+  const dispatcher = createAgentToolDispatcher({
+    role: 'desarrollador',
+    workspace: {
+      list: async () => [...f.files].map(([path, content]) => ({ path, content })),
+      read: async path => f.files.get(path) ?? null,
+      write: async (path, content) => { f.files.set(path, content); return { path, bytes: content.length }; }
+    },
+    runner: {
+      execute: async args => {
+        f.executed.push(args); attempts++;
+        return attempts === 1
+          ? { infraError: true, ok: false, message: 'runner unavailable' }
+          : { infraError: false, ok: true, exitCode: 0, jobId: f.runnerJobId, stdout: 'ok' };
+      }
+    }, jobId: 'stable-task', round: 1, getInvocation, saveInvocation
+  });
+  const args = { name: 'runner_execute', arguments: { command: ['node', '--version'] } };
+  await dispatcher.invoke(args);
+  assert.equal(journal[0].status, 'started');
+  await dispatcher.invoke(args);
+  assert.equal(journal[0].status, 'completed');
+  assert.equal(f.executed.length, 2);
+  assert.equal(f.executed[0].idempotencyKey, f.executed[1].idempotencyKey);
+});
