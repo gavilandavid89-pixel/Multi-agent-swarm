@@ -158,8 +158,36 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       return listAgentTasks(record?.payload, options);
     }
   });
+  const conversationStore = {
+    loadConversation: async baseHash => {
+      const record = await getPayload(jobId);
+      const key = workspaceId + ':' + String(baseHash);
+      const entries = record?.payload?.agentConversations || {};
+      const saved = entries[key];
+      return saved && saved.baseHash === baseHash ? saved : null;
+    },
+    saveConversation: async snapshot => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al guardar la conversación del agente.');
+      const key = workspaceId + ':' + String(snapshot.baseHash || '');
+      const nextSnapshot = { ...snapshot, workspaceId, updatedAt: new Date().toISOString() };
+      const serialized = JSON.stringify(nextSnapshot);
+      if (serialized.length > 900000) {
+        const error = new Error('El checkpoint de conversación supera el límite seguro de 900 KB; se conserva el journal de herramientas, pero no se puede garantizar la reanudación exacta del turno.');
+        error.code = 'AGENT_CONVERSATION_CHECKPOINT_TOO_LARGE';
+        throw error;
+      }
+      const current = record.payload.agentConversations && typeof record.payload.agentConversations === 'object'
+        ? record.payload.agentConversations : {};
+      const entries = { ...current, [key]: nextSnapshot };
+      const keep = Object.entries(entries)
+        .sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || '')))
+        .slice(0, 16);
+      await updateJob(jobId, { payload: { agentConversations: Object.fromEntries(keep) } });
+    }
+  };
   return {
-    workspace, workspaceId, tools: getAgentToolDefinitions(role),
+    workspace, workspaceId, tools: getAgentToolDefinitions(role), conversationStore,
     onToolCall: ({ name, arguments: args }) => dispatcher.invoke({ name, arguments: args })
   };
 }
