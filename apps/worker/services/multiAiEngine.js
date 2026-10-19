@@ -8,6 +8,7 @@ import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
+import { recordAgentFinding, listAgentFindings } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -76,7 +77,25 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       }));
     }
   };
-  const dispatcher = createAgentToolDispatcher({ role, workspace, runner, jobId, round, maxCalls: 40 });
+  const dispatcher = createAgentToolDispatcher({
+    role, workspace, runner, jobId, round, maxCalls: 40,
+    listFindings: async agentRole => {
+      const record = await getPayload(jobId);
+      return listAgentFindings(record?.payload, agentRole);
+    },
+    reportFinding: async (finding, sourceRole) => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al registrar el hallazgo.');
+      const update = recordAgentFinding(record.payload, finding, sourceRole);
+      const transcript = appendEntries(record.payload.transcript, update.notifications);
+      await updateJob(jobId, { payload: { agentFindings: update.findings, transcript } });
+      return {
+        findingId: update.finding.id, created: update.created,
+        status: update.finding.status, notifiedRoles: update.finding.targetRoles,
+        message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
+      };
+    }
+  });
   return {
     workspace, workspaceId, tools: AGENT_TOOL_DEFINITIONS,
     onToolCall: ({ name, arguments: args }) => dispatcher.invoke({ name, arguments: args })
