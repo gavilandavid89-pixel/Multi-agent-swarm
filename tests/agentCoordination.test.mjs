@@ -271,7 +271,7 @@ test('end-to-end agent handoff shares findings, feed updates, task ownership, an
     }
   });
   const finding = (await developer.invoke({ name: 'agent_finding_report', arguments: {
-    category: 'security', severity: 'high', title: 'Potential token in debug output',
+    category: 'quality', severity: 'high', title: 'Debug output exposes authorization metadata',
     summary: 'A debug path may expose authorization data.',
     evidence: 'Reproduced with a redacted test fixture.', filePath: 'src/debug.js'
   }})).result;
