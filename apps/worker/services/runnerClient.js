@@ -139,8 +139,9 @@ export async function runAgentCommand({ taskId, workspaceId, resetWorkspace = tr
   if (baseUrl.protocol === 'http:' && !isPrivateRunnerHost(baseUrl.hostname)) {
     return { available: true, checked: false, ok: false, infraError: true, message: 'HTTP solo se admite para hosts privados/locales del runner; para un host público se exige HTTPS.' };
   }
-  if (stdin !== undefined && (typeof stdin !== 'string' || Buffer.byteLength(stdin, 'utf8') > 16 * 1024 || network !== 'none')) {
-    return { available: true, checked: false, ok: false, infraError: false, message: 'stdin del depurador debe ser texto de hasta 16 KiB y solo puede usarse con network none.' };
+  if (stdin !== undefined && (typeof stdin !== 'string' || Buffer.byteLength(stdin, 'utf8') > 16 * 1024 || network !== 'none'
+    || !Array.isArray(command) || command[0] !== 'python3' || command[1] !== '-m' || command[2] !== 'pdb' || command.length < 4)) {
+    return { available: true, checked: false, ok: false, infraError: false, message: 'stdin del depurador debe ser texto de hasta 16 KiB y solo puede usarse con python3 -m pdb y network none.' };
   }
   if (!Array.isArray(command) || !command.length || command.length > 32 || command.some(arg => typeof arg !== 'string' || arg.length > 4096)) {
     return { available: true, checked: false, ok: false, message: 'La herramienta solicitó un comando inválido.' };
