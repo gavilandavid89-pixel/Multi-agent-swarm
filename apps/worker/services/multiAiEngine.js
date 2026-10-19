@@ -3,7 +3,7 @@ import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, cr
 import { checkJavascriptSyntax, extractFiles } from './codeChecks.js';
 import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
 import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
-import { AGENT_TOOL_DEFINITIONS, createAgentToolDispatcher } from './agentToolDispatcher.js';
+import { getAgentToolDefinitions, createAgentToolDispatcher } from './agentToolDispatcher.js';
 import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
@@ -159,7 +159,7 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     }
   });
   return {
-    workspace, workspaceId, tools: AGENT_TOOL_DEFINITIONS,
+    workspace, workspaceId, tools: getAgentToolDefinitions(role),
     onToolCall: ({ name, arguments: args }) => dispatcher.invoke({ name, arguments: args })
   };
 }
