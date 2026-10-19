@@ -292,6 +292,42 @@ async function runJob(jobId) {
     let validation = payload.validation || null; let syntax = payload.syntax || null;
     let resumeState = getValidationResumeState(payload, (await getPayload(jobId))?.publicJob.attempt || 0);
     let round = resumeState.round;
+    // A runner-infrastructure retry reuses the persisted AI validation and delivery.
+    // Stable runner idempotency keys let the runner return an existing result when available.
+    if (payload.resumeMode === 'runner-only' && resumeState.validationSaved) {
+      const runnerExecution = await runProjectToolchainChecks({
+        taskId: jobId, round, files: extractFiles(delivery)
+      });
+      const baseSyntax = syntax || await checkJavascriptSyntax(delivery);
+      const hasRuntimeTests = Array.isArray(runnerExecution.runtimeChecks)
+        && runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
+      const executionStatus = hasRuntimeTests
+        ? (runnerExecution.ok ? 'APROBADO' : 'FALLO')
+        : runnerExecution.checked && !runnerExecution.ok ? 'FALLO'
+          : runnerExecution.checked ? 'SOLO ESTÁTICO'
+          : runnerExecution.skipped ? 'NO EJECUTADO' : 'NO DISPONIBLE';
+      syntax = {
+        ...baseSyntax,
+        runnerExecution,
+        executionStatus,
+        ok: Boolean(baseSyntax.ok && runnerExecution.ok),
+        message: [baseSyntax.message, 'Reintento del runner (' + executionStatus + '): ' + String(runnerExecution.message || (runnerExecution.ok ? 'sin comprobación de ejecución' : 'falló la ejecución')).slice(0, 2500)].filter(Boolean).join('\\n')
+      };
+      const latest = await getPayload(jobId);
+      if (latest) {
+        await updateJob(jobId, {
+          status: 'running',
+          stage: 'Reanudando desde checkpoint · pruebas aisladas',
+          progress: Math.min(98, Math.max(55, latest.publicJob.progress || 55)),
+          error: null,
+          payload: {
+            ...latest.payload, syntax, resumeMode: null,
+            lastCheckpoint: runnerExecution.infraError ? 'runner-infra-error' : 'runner-recheck'
+          }
+        });
+      }
+      payload = (await getPayload(jobId))?.payload || {};
+    }
     while (round <= MAX_ROUNDS) {
       const saved = resumeState.validationSaved;
       const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
