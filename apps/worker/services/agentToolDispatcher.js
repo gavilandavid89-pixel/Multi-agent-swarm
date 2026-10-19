@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const PERMISSIONS = {
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
@@ -270,11 +270,19 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         result = rememberRunnerJobs(await runner.dependency({ jobId, round, workspace, manifest: args.manifest, idempotencyKey: invocation?.idempotencyKey })); break;
       default: throw error('Herramienta desconocida.');
     }
-    const safeResult = bounded(redactSensitiveOutput(result));
+    const retryableInfrastructureFailure = Boolean(result && typeof result === 'object' && result.infraError === true);
+    const retryableTerminalInfrastructureFailure = Boolean(result && typeof result === 'object' && result.retryableTerminalInfrastructureFailure === true);
+    const publicResult = result && typeof result === 'object'
+      ? Object.fromEntries(Object.entries(result).filter(([key]) => key !== 'retryableTerminalInfrastructureFailure'))
+      : result;
+    const safeResult = bounded(redactSensitiveOutput(publicResult));
     if (invocation && journaled) {
-      const retryableInfrastructureFailure = Boolean(result && typeof result === 'object' && result.infraError === true);
       await saveInvocation(retryableInfrastructureFailure
-        ? { ...invocation, status: 'started', lastErrorAt: new Date().toISOString() }
+        ? {
+            ...invocation,
+            ...(retryableTerminalInfrastructureFailure ? { idempotencyKey: 'swarm-tool-retry-' + randomUUID() } : {}),
+            status: 'started', lastErrorAt: new Date().toISOString()
+          }
         : { ...invocation, status: 'completed', result: safeResult, completedAt: new Date().toISOString() });
     }
     return { ok: true, result: safeResult };
