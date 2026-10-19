@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
 import { normalizeProviderResponse, parseProviderResponseBody, validateGeminiResponse } from './providerResponse.js';
 
@@ -95,7 +95,8 @@ export async function consultarGemini({
   maxToolRounds = 8,
   failoverOnRetryable = false,
   beforeProviderRequest,
-  apiKey: suppliedApiKey
+  apiKey: suppliedApiKey,
+  conversationStore = null
 }) {
   const apiKey = suppliedApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Falta configurar GEMINI_API_KEY en el servicio swarm-worker.');
@@ -106,10 +107,61 @@ export async function consultarGemini({
   let safeMaxTokens = Math.min(maxSafeOutputTokens, requestedMaxTokens);
   let retry = 0;
   let emptyRetries = 0;
-  let continuationCount = 0;
-  let toolRounds = 0;
-  let accumulatedContent = '';
-  let requestMessages = messages;
+  const baseHash = createHash('sha256').update(JSON.stringify(messages)).digest('hex');
+  const savedConversation = typeof conversationStore?.loadConversation === 'function'
+    ? await conversationStore.loadConversation(baseHash) : null;
+  if (savedConversation?.baseHash === baseHash && savedConversation.status === 'completed' && typeof savedConversation.result === 'string') {
+    return savedConversation.result;
+  }
+  let continuationCount = Number(savedConversation?.continuationCount) || 0;
+  let requestMessages = savedConversation?.baseHash === baseHash && Array.isArray(savedConversation.messages) ? savedConversation.messages : messages;
+  let toolRounds = requestMessages.filter(item => item?.role === 'assistant' && Array.isArray(item.tool_calls)).length;
+  let accumulatedContent = savedConversation?.baseHash === baseHash && typeof savedConversation.accumulatedContent === 'string' ? savedConversation.accumulatedContent : '';
+  const saveConversation = async (status = 'active', result = undefined) => {
+    if (typeof conversationStore?.saveConversation !== 'function') return;
+    const snapshot = { baseHash, messages: requestMessages, toolRounds, accumulatedContent, continuationCount, status,
+      ...(typeof result === 'string' ? { result } : {}) };
+    if (JSON.stringify(snapshot).length > 900000) {
+      const error = new Error('El checkpoint de conversación de Gemini supera el límite seguro de 900 KB.');
+      error.code = 'AGENT_CONVERSATION_CHECKPOINT_TOO_LARGE';
+      throw error;
+    }
+    await conversationStore.saveConversation(snapshot);
+  };
+  const recoverPendingToolCalls = async () => {
+    let assistantIndex = -1;
+    for (let i = requestMessages.length - 1; i >= 0; i--) {
+      if (requestMessages[i]?.role === 'assistant' && Array.isArray(requestMessages[i].tool_calls)) { assistantIndex = i; break; }
+    }
+    if (assistantIndex < 0) return;
+    const calls = requestMessages[assistantIndex].tool_calls.slice(0, 8);
+    const completedIds = new Set(requestMessages.slice(assistantIndex + 1).filter(item => item?.role === 'tool').map(item => String(item.tool_call_id || '')));
+    if (calls.some(call => !completedIds.has(String(call?.id || ''))) && (!Array.isArray(tools) || !tools.length || typeof onToolCall !== 'function')) {
+      const error = new Error('Hay llamadas de herramientas de Gemini pendientes en el checkpoint, pero no hay dispatcher autorizado.');
+      error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
+      throw error;
+    }
+    for (const call of calls) {
+      const id = String(call?.id || '');
+      if (completedIds.has(id)) continue;
+      const name = String(call?.function?.name || '');
+      let args;
+      try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch { args = null; }
+      let result;
+      try {
+        if (!name || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos de herramienta inválidos.');
+        result = await onToolCall({ id, name, arguments: args, model, provider: 'Gemini', recovered: true });
+      } catch (toolError) {
+        result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
+      }
+      let serialized;
+      try { serialized = JSON.stringify(result ?? { ok: true }); } catch { serialized = JSON.stringify({ ok: false, error: 'Resultado no serializable.' }); }
+      requestMessages.push({ role: 'tool', tool_call_id: id, name, content: serialized.slice(0, 12000) });
+      completedIds.add(id);
+      await saveConversation();
+    }
+  };
+  await recoverPendingToolCalls();
 
   while (true) {
     if (beforeProviderRequest) await beforeProviderRequest();
