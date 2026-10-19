@@ -52,7 +52,7 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     execute: async input => {
       return refreshFromArtifacts(await runAgentCommand({
         taskId: jobId, workspaceId, files: await readFiles(), command: input.command,
-        network: input.network, timeoutMs: input.timeoutMs, includeArtifacts: true,
+        network: input.network, timeoutMs: input.timeoutMs, stdin: input.stdin, includeArtifacts: true,
       }));
     },
     check: async () => runProjectToolchainChecks({ taskId: jobId, round, files: await readFiles() }),
