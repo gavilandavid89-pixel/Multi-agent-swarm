@@ -14,7 +14,7 @@ function fixture(role = 'desarrollador', maxCalls = 40) {
   const runner = {
     execute: async args => { executed.push(args); return { jobId: runnerJobId, exitCode: 0, stdout: args.command.includes('--large-output') ? 'x'.repeat(15000) : args.command.includes('--secret-output') ? 'ghp_abcdefghijklmnopqrstuvwxyz1234567890' : 'ok' }; },
     check: async () => ({ ok: true }),
-    jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded' }),
+    jobStatus: async ({ jobId }) => ({ jobId, status: 'succeeded', apiKey: 'sensitive-value' }),
     cancel: async ({ jobId }) => ({ jobId, cancelled: true }),
     artifact: async args => args,
     dependency: async args => ({ prepared: args.manifest })
@@ -48,11 +48,15 @@ test('tool outputs redact known credentials and sensitive object fields', async 
   });
   assert.equal(response.ok, true);
   assert.equal(response.result.stdout, '[REDACTED_CREDENTIAL]');
-  const artifact = await f.dispatcher.invoke({
+  await f.dispatcher.invoke({
     name: 'runner_execute',
     arguments: { command: ['node', '--version'] }
   });
-  assert.equal(artifact.result.exitCode, 0);
+  const status = await f.dispatcher.invoke({
+    name: 'runner_job_status',
+    arguments: { jobId: f.runnerJobId }
+  });
+  assert.equal(status.result.apiKey, '[REDACTED]');
 });
 
 test('workspace reads reject credential-bearing and oversized files', async () => {
