@@ -256,7 +256,7 @@ while [ "$i" -lt 20 ]; do
   i=$((i + 1))
 done
 if [ "$restart_state" != "running" ]; then echo "FAIL restart smoke job never entered running state ($restart_state)" >&2; exit 1; fi
-restart_cid_file="${workspace}-runner-state/${restart_id}.cid"
+restart_cid_file="${workspace}-runner-state/jobs/${restart_id}.cid"
 restart_cid=
 i=0
 while [ "$i" -lt 40 ]; do
