@@ -46,7 +46,7 @@ function runBrowser(args, env, timeoutMs = 30000) {
       clearTimeout(timer);
       resolve(value);
     };
-    const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1280x900x24 -nolisten tcp', 'chromium', ...args], {
+    const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1280x900x24 -nolisten tcp', 'timeout', '--signal=TERM', '--kill-after=2s', '20s', 'chromium', ...args], {
       env, stdio: ['ignore', 'pipe', 'pipe']
     });
     timer = setTimeout(() => {
@@ -87,7 +87,7 @@ try {
   await fs.writeFile(entry, document, { mode: 0o600 });
   const profile = path.join(temporaryRoot, '.chromium-profile');
   const result = await runBrowser([
-    '--no-sandbox', '--disable-background-networking',
+    '--timeout=10000', '--no-sandbox', '--disable-background-networking',
     '--disable-sync', '--disable-extensions', '--disable-component-update',
     '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
     '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
@@ -95,7 +95,7 @@ try {
     '--virtual-time-budget=1500', '--dump-dom', '--user-data-dir=' + profile,
     pathToFileURL(entry).href
   ], { PATH: process.env.PATH || '/usr/bin:/bin', HOME: temporaryRoot, LANG: 'C.UTF-8' });
-  if (result.timedOut) throw new Error('Chromium superó el límite de 30 segundos.');
+  if (result.timedOut) throw new Error('Chromium/Xvfb superó el límite de 25 segundos.');
   if (result.code !== 0) throw new Error('Chromium/Xvfb falló: ' + String(result.stderr || result.stdout || 'código ' + result.code).slice(0, 1000));
   const encoded = result.stdout.match(/data-swarm-js-errors="([^"]*)"/i)?.[1];
   if (!encoded) throw new Error('Chromium no devolvió el marcador de errores JavaScript.');
