@@ -225,3 +225,113 @@ test('automatic stage task IDs normalize whitespace in agent and stage labels', 
     agentStageTaskId('arquitecto', '  Arquitecto Principal  ', '  Diseño del sistema  ')
   );
 });
+
+
+test('end-to-end agent handoff shares findings, feed updates, task ownership, and validator evidence', async () => {
+  const {
+    listAgentFindings, recordAgentFinding,
+    listAgentPosts, recordAgentPost,
+    listAgentTasks, upsertAgentTask
+  } = await import('../apps/worker/services/agentCoordination.js');
+  const { createAgentToolDispatcher } = await import('../apps/worker/services/agentToolDispatcher.js');
+
+  // Simulate the durable shared payload used by the worker. Each tool adapter
+  // writes back to this same state, so the next role must observe prior writes.
+  const state = { agentFindings: [], agentFeed: [], agentTasks: [] };
+  const workspace = { list: async () => [], read: async () => null, write: async () => ({ ok: true }) };
+  const runner = {};
+  const coordinator = createAgentToolDispatcher({
+    role: 'coordinador', workspace, runner, jobId: 'e2e-coordination',
+    updateTask: async (input, role) => {
+      const saved = upsertAgentTask({ agentTasks: state.agentTasks }, input, role);
+      state.agentTasks = saved.tasks;
+      return saved.task;
+    },
+    listTasks: async filters => listAgentTasks({ agentTasks: state.agentTasks }, filters)
+  });
+
+  const task = (await coordinator.invoke({ name: 'agent_task_upsert', arguments: {
+    taskId: 'e2e-security-review', title: 'Review possible token exposure',
+    summary: 'Investigate a reported security concern and provide evidence.',
+    assignedRole: 'auditor', status: 'pending', priority: 'high'
+  }})).result;
+  assert.equal(task.assignedRole, 'auditor');
+
+  const developer = createAgentToolDispatcher({
+    role: 'desarrollador', workspace, runner, jobId: 'e2e-coordination',
+    reportFinding: async (input, role) => {
+      const saved = recordAgentFinding({ agentFindings: state.agentFindings }, input, role, '2026-10-19T12:00:00.000Z');
+      state.agentFindings = saved.findings;
+      return saved.finding;
+    },
+    publishPost: async (input, role) => {
+      const saved = recordAgentPost({ agentFeed: state.agentFeed }, input, role, '2026-10-19T12:01:00.000Z');
+      state.agentFeed = saved.posts;
+      return saved.post;
+    }
+  });
+  const finding = (await developer.invoke({ name: 'agent_finding_report', arguments: {
+    category: 'security', severity: 'high', title: 'Potential token in debug output',
+    summary: 'A debug path may expose authorization data.',
+    evidence: 'Reproduced with a redacted test fixture.', filePath: 'src/debug.js'
+  }})).result;
+  await developer.invoke({ name: 'agent_feed_publish', arguments: {
+    type: 'handoff', title: 'Security finding needs review',
+    body: 'Finding ' + finding.id + ' is routed to the auditor with redacted reproduction evidence.',
+    taskId: 'e2e-security-review'
+  }});
+
+  const auditor = createAgentToolDispatcher({
+    role: 'auditor', workspace, runner, jobId: 'e2e-coordination',
+    listFindings: async role => listAgentFindings({ agentFindings: state.agentFindings }, role),
+    listPosts: async filters => listAgentPosts({ agentFeed: state.agentFeed }, filters),
+    updateTask: async (input, role) => {
+      const saved = upsertAgentTask({ agentTasks: state.agentTasks }, input, role);
+      state.agentTasks = saved.tasks;
+      return saved.task;
+    },
+    listTasks: async filters => listAgentTasks({ agentTasks: state.agentTasks }, filters),
+    publishPost: async (input, role) => {
+      const saved = recordAgentPost({ agentFeed: state.agentFeed }, input, role, '2026-10-19T12:02:00.000Z');
+      state.agentFeed = saved.posts;
+      return saved.post;
+    }
+  });
+
+  const inbox = (await auditor.invoke({ name: 'agent_findings_list', arguments: {} })).result;
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].id, finding.id, 'the second agent must see the first agent\'s finding');
+  const handoff = (await auditor.invoke({ name: 'agent_feed_list', arguments: { taskId: 'e2e-security-review' } })).result;
+  assert.equal(handoff.length, 1);
+  assert.equal(handoff[0].role, 'desarrollador');
+
+  const started = (await auditor.invoke({ name: 'agent_task_upsert', arguments: {
+    taskId: 'e2e-security-review', title: 'Review possible token exposure',
+    summary: 'Auditor is investigating the reported finding.',
+    status: 'in_progress', nextStep: 'Inspect the redacted reproduction evidence.'
+  }})).result;
+  assert.equal(started.status, 'in_progress');
+  const completed = (await auditor.invoke({ name: 'agent_task_upsert', arguments: {
+    taskId: 'e2e-security-review', title: 'Review possible token exposure',
+    summary: 'Review completed; the reproduced case uses a redacted fixture.',
+    status: 'done', evidence: 'src/debug.js: redacted reproduction reviewed; no live credential used.',
+    nextStep: 'Independent validator checks the evidence.'
+  }})).result;
+  assert.equal(completed.status, 'done');
+  assert.match(completed.evidence, /redacted reproduction reviewed/);
+
+  const validator = createAgentToolDispatcher({
+    role: 'validador', workspace, runner, jobId: 'e2e-coordination',
+    listFindings: async role => listAgentFindings({ agentFindings: state.agentFindings }, role),
+    listPosts: async filters => listAgentPosts({ agentFeed: state.agentFeed }, filters),
+    listTasks: async filters => listAgentTasks({ agentTasks: state.agentTasks }, filters)
+  });
+  const validatorFindings = (await validator.invoke({ name: 'agent_findings_list', arguments: {} })).result;
+  const completedTasks = (await validator.invoke({ name: 'agent_tasks_list', arguments: {
+    assignedRole: 'auditor', status: 'done'
+  }})).result;
+  const visibleFeed = (await validator.invoke({ name: 'agent_feed_list', arguments: { taskId: 'e2e-security-review' } })).result;
+  assert.equal(validatorFindings[0].id, finding.id, 'validator must receive the same shared finding');
+  assert.equal(completedTasks[0].evidence, completed.evidence, 'validator must see evidence from the task owner');
+  assert.ok(visibleFeed.some(post => post.type === 'handoff'), 'handoff must remain visible after later agent actions');
+});
