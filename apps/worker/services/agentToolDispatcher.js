@@ -1,10 +1,15 @@
 const PERMISSIONS = {
-  coordinador: ['workspace_list', 'workspace_read'],
-  arquitecto: ['workspace_list', 'workspace_read'],
-  esceptico: ['workspace_list', 'workspace_read'],
-  auditor: ['workspace_list', 'workspace_read'],
-  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact'],
-  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency']
+  coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+
+  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+
+  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+
+  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report'],
+
+  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report'],
+
+  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report']
 };
 const BLOCKED_DIRS = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.docker', 'node_modules', '.venv', 'venv']);
 const BLOCKED_FILES = new Set(['.npmrc', '.netrc', '.pypirc', '.git-credentials', 'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519', 'terraform.tfstate', 'terraform.tfvars', 'kubeconfig']);
@@ -13,6 +18,7 @@ const BINARIES = new Set(['node', 'npm', 'npx', 'python3', 'pytest', 'php', 'com
 const TOOL_TO_PERMISSION = {
   workspace_list: 'workspace_list', workspace_read: 'workspace_read', workspace_write: 'workspace_write',
   runner_execute: 'runner_execute', runner_check: 'runner_check', runner_job_status: 'runner_job_status',
+  agent_findings_list: 'agent_findings_list', agent_finding_report: 'agent_finding_report',
   runner_cancel: 'runner_cancel', runner_artifact: 'runner_artifact', runner_dependency: 'runner_dependency'
 };
 const tool = (name, description, properties = {}, required = []) => ({
@@ -28,7 +34,14 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   tool('runner_job_status', 'Consulta estado de un trabajo.', { jobId: { type: 'string' } }, ['jobId']),
   tool('runner_cancel', 'Cancela un trabajo.', { jobId: { type: 'string' } }, ['jobId']),
   tool('runner_artifact', 'Consulta un artefacto de una ejecución.', { jobId: { type: 'string' }, artifactId: { type: 'string' } }, ['jobId', 'artifactId']),
-  tool('runner_dependency', 'Prepara dependencias mediante red restringida.', { manifest: { type: 'string', enum: ['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'] } }, ['manifest'])
+  tool('runner_dependency', 'Prepara dependencias mediante red restringida.', { manifest: { type: 'string', enum: ['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'] } }, ['manifest']),
+  tool('agent_findings_list', 'Consulta hallazgos abiertos relevantes para tu rol, informados por otros agentes.', {}, []),
+  tool('agent_finding_report', 'Registra un bug, riesgo, fallo de prueba o mejora que debe revisar otro agente. No realices cambios fuera de tu rol: informa evidencia y ruta.', {
+    category: { type: 'string', enum: ['bug', 'security', 'test', 'architecture', 'performance', 'quality', 'product', 'other'] },
+    severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+    title: { type: 'string', maxLength: 160 }, summary: { type: 'string', maxLength: 2000 },
+    evidence: { type: 'string', maxLength: 3000 }, filePath: { type: 'string', maxLength: 240 }
+  }, ['category', 'severity', 'title', 'summary'])
 ]);
 function error(message, code = 'AGENT_TOOL_INVALID_ARGUMENT') { const e = new Error(message); e.code = code; return e; }
 function safePath(path) {
@@ -81,7 +94,7 @@ function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
   for (const child of children) collectRunnerJobIds(child, ids, depth + 1);
   return ids;
 }
-export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40 } = {}) {
+export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings } = {}) {
   const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
@@ -165,6 +178,15 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (Object.keys(args).some(k => !['jobId', 'artifactId'].includes(k)) || typeof args.jobId !== 'string' || typeof args.artifactId !== 'string') throw error('Identificadores de artefacto inválidos.');
         requireOwnedRunnerJob(args.jobId);
         result = await runner.artifact({ jobId: args.jobId, artifactId: args.artifactId }); break;
+      case 'agent_findings_list':
+        if (Object.keys(args).length) throw error('agent_findings_list no acepta argumentos.');
+        if (typeof listFindings !== 'function') throw error('La bandeja de hallazgos no está disponible.');
+        result = await listFindings(normalizedRole); break;
+      case 'agent_finding_report': {
+        if (Object.keys(args).some(k => !['category', 'severity', 'title', 'summary', 'evidence', 'filePath'].includes(k))) throw error('Campos extra no permitidos en el hallazgo.');
+        if (typeof reportFinding !== 'function') throw error('El registro de hallazgos no está disponible.');
+        result = await reportFinding(args, normalizedRole); break;
+      }
       case 'runner_dependency':
         if (Object.keys(args).some(k => k !== 'manifest')) throw error('Argumentos extra no permitidos para runner_dependency.');
         if (!['package-lock.json', 'requirements.txt', 'pyproject.toml', 'composer.lock', 'Gemfile.lock', 'go.sum', 'Cargo.lock', 'pom.xml'].includes(args.manifest)) throw error('Manifest no permitido.');
