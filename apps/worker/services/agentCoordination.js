@@ -89,12 +89,12 @@ const AGENT_ROLES = new Set(['coordinador', 'arquitecto', 'esceptico', 'arbitro'
 
 export function agentStageTaskId(sourceRole, agent, stage) {
   const role = normalizeRole(sourceRole);
-  const agentLabel = String(agent || '').trim().replace(/\\s+/g, ' ').toLowerCase();
-  const stageLabel = String(stage || '').trim().replace(/\\s+/g, ' ').toLowerCase();
+  const agentLabel = String(agent || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const stageLabel = String(stage || '').trim().replace(/\s+/g, ' ').toLowerCase();
   if (!AGENT_ROLES.has(role) || !agentLabel || !stageLabel) {
     throw new Error('Rol, agente y etapa son obligatorios para identificar una tarea automática.');
   }
-  const digest = createHash('sha256').update([role, agentLabel, stageLabel].join('\\n')).digest('hex').slice(0, 12);
+  const digest = createHash('sha256').update([role, agentLabel, stageLabel].join('\n')).digest('hex').slice(0, 12);
   return 'agent-stage-' + role + '-' + digest;
 }
 
