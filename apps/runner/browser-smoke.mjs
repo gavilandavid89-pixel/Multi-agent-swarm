@@ -87,7 +87,7 @@ try {
   await fs.writeFile(entry, document, { mode: 0o600 });
   const profile = path.join(temporaryRoot, '.chromium-profile');
   const result = await runBrowser([
-    '--timeout=10000', '--no-sandbox', '--disable-background-networking',
+    '--timeout=10000', '--headless=new', '--no-sandbox', '--disable-background-networking',
     '--disable-sync', '--disable-extensions', '--disable-component-update',
     '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
     '--no-default-browser-check', '--host-resolver-rules=MAP * ~NOTFOUND',
@@ -103,7 +103,7 @@ try {
   try { errors = JSON.parse(decodeURIComponent(encoded)); } catch { throw new Error('No se pudo leer el resultado del navegador.'); }
   if (errors.length) throw new Error('Se detectaron errores JavaScript en el navegador: ' + errors.join('; ').slice(0, 1500));
   console.log('SWARM_BROWSER_CHECKED=1');
-  console.log('Chromium/Xvfb abrió ' + htmlFiles[0] + ' sin excepciones JavaScript detectadas.');
+  console.log('Chromium abrió ' + htmlFiles[0] + ' sin excepciones JavaScript detectadas.');
 } catch (error) {
   console.error(String(error?.message || error).slice(0, 2000));
   process.exitCode = 1;
