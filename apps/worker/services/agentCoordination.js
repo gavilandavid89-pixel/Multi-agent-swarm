@@ -184,6 +184,20 @@ export function upsertAgentTask(payload, input, sourceRole, at = new Date().toIS
   }
   const id = task.taskId || 'task-' + createHash('sha256').update([at, role, task.title].join('\n')).digest('hex').slice(0, 16);
   if (current.some(item => item?.taskId === id) && !existing) throw new Error('El identificador de tarea ya existe.');
+  const taskById = new Map(current.filter(item => item && typeof item.taskId === 'string').map(item => [item.taskId, item]));
+  for (const dependencyId of task.dependsOn) {
+    if (!taskById.has(dependencyId)) throw new Error('La dependencia debe apuntar a una tarea existente: ' + dependencyId);
+  }
+  const reachesTask = (startId, targetId, visited = new Set()) => {
+    if (startId === targetId) return true;
+    if (visited.has(startId)) return false;
+    visited.add(startId);
+    const node = taskById.get(startId);
+    return Array.isArray(node?.dependsOn) && node.dependsOn.some(nextId => reachesTask(nextId, targetId, visited));
+  };
+  if (task.dependsOn.some(dependencyId => reachesTask(dependencyId, id))) {
+    throw new Error('La dependencia crearía un ciclo entre tareas.');
+  }
   const previousHistory = Array.isArray(existing?.history) ? existing.history : [];
   const statusChanged = !existing || existing.status !== task.status;
   const stored = {
