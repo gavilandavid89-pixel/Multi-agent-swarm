@@ -163,6 +163,7 @@ app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
     ? {
         ...record.payload, transcript, tokenBudget: 1000000, result: null,
         retryAt: null, providerBlock: null, providerFailureStreak: 0,
+        runnerRetryCount: Math.max(0, Number(record.payload.runnerRetryCount) || 0) + 1,
         activeStage: null, resumeMode: 'runner-only'
       }
     : {
