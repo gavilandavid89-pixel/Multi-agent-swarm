@@ -455,9 +455,14 @@ async function workerRequest(route, options = {}, mayWake = true) {
   }
 }
 const activeChatTurnDispatches = new Set();
+const chatTurnDispatchCooldowns = new Map();
 function dispatchChatTurn(userId, chatId, turnId) {
   const key = String(turnId);
-  if (activeChatTurnDispatches.has(key)) return;
+  const now = Date.now();
+  for (const [pendingId, until] of chatTurnDispatchCooldowns) if (until <= now) chatTurnDispatchCooldowns.delete(pendingId);
+  if (activeChatTurnDispatches.has(key) || (chatTurnDispatchCooldowns.get(key) || 0) > now) return;
+  if (chatTurnDispatchCooldowns.size >= 5000) chatTurnDispatchCooldowns.clear();
+  chatTurnDispatchCooldowns.set(key, now + 10000);
   activeChatTurnDispatches.add(key);
   void workerRequest(`/internal/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turnId)}/run`, {
     method: 'POST',
