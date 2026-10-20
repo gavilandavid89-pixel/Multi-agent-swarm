@@ -85,7 +85,7 @@ export async function processConversationTurn(turnId) {
     } catch (error) { await db.query('ROLLBACK').catch(() => {}); throw error; }
     finally { db.release(); }
   } catch (error) {
-    await pool.query(
+    await requirePool().query(
       `UPDATE conversation_turns SET status='failed', last_error=$2, finished_at=now()
         WHERE id=$1 AND status <> 'completed'`,
       [turnId, 'No se pudo completar la respuesta. Verificá la configuración del proveedor e intentá de nuevo.']
@@ -102,7 +102,7 @@ export async function processConversationTurn(turnId) {
 export async function closeConversationTurnStore() { if (pool) await pool.end(); }
 
 export async function hasConversationTurn(turnId, conversationId, userId) {
-  const { rows } = await pool.query(
+  const { rows } = await requirePool().query(
     'SELECT id FROM conversation_turns WHERE id=$1 AND conversation_id=$2 AND user_id=$3',
     [turnId, conversationId, userId]
   );
