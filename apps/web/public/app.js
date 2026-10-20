@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0, chats: [], currentChatId: null, currentChat: null, chatMessages: [] };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0, chats: [], currentChatId: null, currentChat: null, chatMessages: [], taskWorkspaceStarted: false };
 function mountChatHome() {
   const drawer = $('chats-drawer');
   const slot = $('main-chat-slot');
@@ -27,8 +27,8 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('landing-hero')?.classList.remove('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -605,7 +605,7 @@ function showChatHome() {
   clearInterval(state.pollHandle); state.pollHandle = null;
   clearInterval(state.listPollHandle); state.listPollHandle = null;
   state.taskWorkspaceStarted = false;
-  setConnection(true, 'Chats listos');
+  setConnection(false, 'Sincronizando chats…');
   void loadChats();
 }
 function showTaskWorkspace() {
@@ -627,7 +627,7 @@ async function enterApp() {
   state.user = access.user || state.user;
   $('access-status').textContent = '';
   showApp();
-  setConnection(true, 'Chats listos');
+  setConnection(false, 'Sincronizando chats…');
   await loadChats();
 }
 $('access-form').addEventListener('submit', async event => {
