@@ -57,7 +57,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
     priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] }, nextStep: { type: 'string', maxLength: 1000 },
     assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador'] },
     dependsOn: { type: 'array', items: { type: 'string', maxLength: 64 }, maxItems: 20 }, evidence: { type: 'string', maxLength: 2000 }
-  }, ['title', 'summary']),
+  }, ['summary']),
   tool('agent_tasks_list', 'Consulta el tablero compartido de tareas, opcionalmente filtrado por responsable o estado.', {
     assignedRole: { type: 'string', enum: ['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador'] },
     status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
