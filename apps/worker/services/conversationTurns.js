@@ -89,7 +89,7 @@ export async function processConversationTurn(turnId) {
     await pool.query(
       `UPDATE conversation_turns SET status='failed', last_error=$2, finished_at=now()
         WHERE id=$1 AND status <> 'completed'`,
-      [turnId, safeMessage]
+      [turnId, 'No se pudo completar la respuesta. Verificá la configuración del proveedor e intentá de nuevo.']
     );
     await pool.query(
       `UPDATE conversation_messages SET metadata=metadata || jsonb_build_object('turnStatus','failed')
