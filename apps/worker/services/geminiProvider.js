@@ -60,11 +60,14 @@ function toGeminiContents(messages) {
       // Preserve all original parts rather than rebuilding only functionCall blocks.
       parts = structuredClone(item.geminiParts);
     } else if (role === 'model' && Array.isArray(item?.tool_calls)) {
-      parts = item.tool_calls.map(call => {
+      parts = item.tool_calls.map((call, callIndex) => {
         let args = {};
         try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
         const thoughtSignature = String(call?.thought_signature || call?.thoughtSignature || call?.function?.thought_signature || call?.function?.thoughtSignature || '');
-        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || '') }, ...(thoughtSignature ? { thoughtSignature } : {}) };
+        // Cross-provider or legacy tool calls have no Gemini signature. Google documents this
+        // sentinel for imported calls; only the first parallel call needs a signature.
+        const signature = thoughtSignature || (callIndex === 0 ? 'skip_thought_signature_validator' : '');
+        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || '') }, ...(signature ? { thoughtSignature: signature } : {}) };
       });
       if (item.content) parts.unshift({ text: String(item.content) });
     } else if (item.role === 'tool') {
