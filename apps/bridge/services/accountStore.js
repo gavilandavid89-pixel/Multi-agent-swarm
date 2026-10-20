@@ -218,14 +218,27 @@ export async function listManagedUsers() {
   const { rows } = await pool.query(
     "SELECT id,username,role,account_code,created_at,disabled_at FROM app_users ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, username ASC"
   );
-  return Promise.all(rows.map(async row => ({
-    id: row.id,
-    username: row.username,
-    role: row.role,
-    accountCode: row.account_code || await ensureAccountCode(row.id),
-    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
-    disabledAt: row.disabled_at ? (row.disabled_at instanceof Date ? row.disabled_at.toISOString() : new Date(row.disabled_at).toISOString()) : null
-  })));
+  const users = await Promise.all(rows.map(async row => {
+    let accountCode = row.account_code;
+    if (!accountCode) {
+      try {
+        accountCode = await ensureAccountCode(row.id);
+      } catch (error) {
+        // A user may be deleted after the initial list query; skip that stale row.
+        if (error?.status === 404) return null;
+        throw error;
+      }
+    }
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      accountCode,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      disabledAt: row.disabled_at ? (row.disabled_at instanceof Date ? row.disabled_at.toISOString() : new Date(row.disabled_at).toISOString()) : null
+    };
+  }));
+  return users.filter(Boolean);
 }
 
 export async function setManagedUserDisabled(userId, disabled) {
