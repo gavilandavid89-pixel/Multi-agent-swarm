@@ -570,3 +570,41 @@ body:not(.auth-gate) .history-filter{touch-action:pan-y}
 .preview-window-launcher{position:fixed;z-index:10051;left:16px;top:16px;right:auto;bottom:auto;display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 14px;border:1px solid #c5a747;border-radius:14px;background:linear-gradient(145deg,#393d41,#202326);color:#f4f5f6;box-shadow:0 8px 30px #0009;font:inherit;font-size:12px;font-weight:700;touch-action:none;user-select:none;cursor:grab}
 .preview-window-launcher.hidden{display:none!important}
 @media(max-width:700px){.artifact-preview.preview-window{padding:9px;max-height:calc(100dvh - 12px);border-radius:13px}.artifact-preview.preview-window .section-head{align-items:center}.artifact-preview.preview-window .section-head h3{font-size:13px}.artifact-preview.preview-window .preview-window-controls{gap:4px}.artifact-preview.preview-window .preview-window-controls button{min-width:32px;min-height:32px;padding:3px 7px}.artifact-preview.preview-window iframe{height:calc(var(--swarm-viewport-height,100dvh) - 150px)}.artifact-preview.preview-window.preview-maximized{inset:max(4px,env(safe-area-inset-top)) max(4px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(4px,env(safe-area-inset-left))}.preview-window-launcher{min-height:42px;max-width:calc(100vw - 16px)}}
+
+
+/* Independent chats: visually separate from task history while preserving the original violet/pink theme. */
+.chats-drawer { width:min(960px,calc(100vw - 24px)); max-width:960px; }
+.chats-toolbar { display:flex; gap:8px; margin:12px 0; }
+.chats-toolbar .button { flex:1; }
+.chat-workspace { display:grid; grid-template-columns:minmax(190px,.36fr) minmax(0,1fr); gap:14px; min-height:360px; }
+.chats-list { display:flex; flex-direction:column; gap:7px; min-width:0; max-height:min(58vh,620px); overflow:auto; padding-right:3px; }
+.chat-list-item { display:flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:12px; padding:8px; background:#130d1eaa; }
+.chat-list-item.selected { border-color:#b58aff9c; background:#a879ff16; }
+.chat-list-open { flex:1; min-width:0; border:0; padding:4px; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+.chat-list-title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:700; }
+.chat-list-meta { display:block; color:var(--muted); font-size:10px; }
+.chat-list-item .mini-button { padding:5px 7px; font-size:10px; }
+.chat-thread { display:flex; flex-direction:column; min-width:0; min-height:0; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:#100b1b66; }
+.chat-thread-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px; border-bottom:1px solid var(--line); }
+.chat-thread-head h4 { margin:0; font-size:14px; overflow-wrap:anywhere; }
+.chat-thread-actions { display:flex; gap:5px; }
+.chat-messages { display:flex; flex:1; flex-direction:column; gap:10px; min-height:220px; max-height:min(52vh,520px); overflow:auto; padding:12px; }
+.chat-message { max-width:92%; border:1px solid var(--line); border-radius:13px; padding:10px 12px; background:#211632; overflow-wrap:anywhere; white-space:pre-wrap; }
+.chat-message.user { align-self:flex-end; background:#a879ff20; border-color:#a879ff42; }
+.chat-message.assistant { align-self:flex-start; background:#ff72bd0d; }
+.chat-message-role { display:block; color:var(--muted); font-size:10px; font-weight:800; margin-bottom:4px; }
+.chat-message-content { margin:0; font:inherit; white-space:pre-wrap; }
+.chat-message-form { display:flex; align-items:flex-end; gap:8px; padding:10px; border-top:1px solid var(--line); }
+.chat-message-form textarea { min-height:44px; max-height:140px; resize:vertical; padding:10px 12px; }
+.chat-message-form .button { min-height:44px; flex-shrink:0; }
+.chat-turn-status { display:block; margin-top:5px; color:var(--muted); font-size:10px; }
+@media(max-width:700px) {
+  .chats-drawer { width:calc(100vw - 12px); }
+  .chat-workspace { grid-template-columns:1fr; gap:10px; }
+  .chats-list { flex-direction:row; max-height:120px; overflow-x:auto; overflow-y:hidden; }
+  .chat-list-item { flex:0 0 210px; }
+  .chat-messages { max-height:40vh; min-height:180px; }
+  .chat-thread-head { align-items:flex-start; flex-direction:column; }
+  .chat-message-form { align-items:stretch; flex-direction:column; }
+  .chat-message-form .button { width:100%; }
+}
