@@ -1219,8 +1219,6 @@ $('begin-task-button')?.addEventListener('click', () => {
   if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
   const zipTools = $('zip-preview-panel');
   if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
-  const zipTools = $('zip-preview-panel');
-  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
   $('detail-panel').classList.add('hidden');
   $('welcome-chat')?.classList.remove('hidden');
   state.currentDetailId = null;
@@ -1241,6 +1239,8 @@ $('close-detail').addEventListener('click', () => {
   document.body.classList.remove('composer-open');
   const composer = document.querySelector('.composer');
   if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
   $('welcome-chat')?.classList.remove('hidden');
   state.currentDetailId = null;
   state.lastJobStatus = null;
