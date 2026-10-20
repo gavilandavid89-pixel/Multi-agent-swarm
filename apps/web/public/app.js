@@ -599,6 +599,10 @@ async function showDetail(id) {
   document.body.classList.add('swarm-task-view');
   const composer = document.querySelector('#app-content > .composer') || document.querySelector('.composer');
   if (composer && composer.parentElement !== $('detail-panel')) $('detail-panel').append(composer);
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('detail-panel')) $('detail-panel').append(zipTools);
+  $('detail-panel').classList.remove('task-tools-open');
+  $('toggle-task-tools')?.setAttribute('aria-expanded', 'false');
   renderChatSidebar();
   $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
@@ -1213,12 +1217,23 @@ $('begin-task-button')?.addEventListener('click', () => {
   document.body.classList.add('composer-open');
   const composer = document.querySelector('.composer');
   if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
   $('detail-panel').classList.add('hidden');
   $('welcome-chat')?.classList.remove('hidden');
   state.currentDetailId = null;
   state.lastJobStatus = null;
   renderChatSidebar();
   $('objective')?.focus({ preventScroll: true });
+});
+$('toggle-task-tools')?.addEventListener('click', () => {
+  const panel = $('detail-panel');
+  const opening = !panel.classList.contains('task-tools-open');
+  panel.classList.toggle('task-tools-open', opening);
+  $('toggle-task-tools').setAttribute('aria-expanded', String(opening));
+  $('toggle-task-tools').textContent = opening ? 'Ocultar herramientas ▴' : 'Herramientas ▾';
 });
 $('close-detail').addEventListener('click', () => {
   $('detail-panel').classList.add('hidden');
