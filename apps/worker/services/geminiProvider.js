@@ -55,7 +55,11 @@ function toGeminiContents(messages) {
     }
     let role = item.role === 'assistant' ? 'model' : 'user';
     let parts = [];
-    if (role === 'model' && Array.isArray(item?.tool_calls)) {
+    if (role === 'model' && Array.isArray(item?.geminiParts) && item.geminiParts.length) {
+      // Gemini 3 requires provider-returned thought signatures to round-trip with the exact parts.
+      // Preserve all original parts rather than rebuilding only functionCall blocks.
+      parts = structuredClone(item.geminiParts);
+    } else if (role === 'model' && Array.isArray(item?.tool_calls)) {
       parts = item.tool_calls.map(call => {
         let args = {};
         try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
@@ -238,7 +242,7 @@ export async function consultarGemini({
           throw error;
         }
         const calls = translated.toolCalls.slice(0, 8);
-        requestMessages = [...requestMessages, { role: 'assistant', content, tool_calls: calls.map(call => ({
+        requestMessages = [...requestMessages, { role: 'assistant', content, ...(Array.isArray(translated.providerData) ? { geminiParts: structuredClone(translated.providerData) } : {}), tool_calls: calls.map(call => ({
           id: String(call.id || randomUUID()), type: 'function',
           function: { name: String(call.name || ''), arguments: JSON.stringify(call.arguments ?? call.input ?? {}) },
           ...(call.thoughtSignature ? { thought_signature: String(call.thoughtSignature) } : {})
