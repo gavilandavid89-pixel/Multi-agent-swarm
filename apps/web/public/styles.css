@@ -627,3 +627,7 @@ body:not(.auth-gate) .history-filter{touch-action:pan-y}
  .ambient{display:none}.panel{backdrop-filter:none;box-shadow:0 8px 28px #00000016}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+body:not(.auth-gate) .hero{display:none}
+.shell{width:100%;max-width:none;margin:0;padding:14px 18px 18px}
+@media(max-width:760px){.shell{padding:10px 9px calc(10px + env(safe-area-inset-bottom))}}
