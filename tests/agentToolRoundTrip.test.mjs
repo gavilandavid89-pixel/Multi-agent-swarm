@@ -71,7 +71,7 @@ test('Gemini native function calling dispatches and returns a function response'
   globalThis.fetch = async (url, options) => {
     requests.push({ url: String(url), body: JSON.parse(options.body) });
     call++;
-    if (call === 1) return jsonResponse({ candidates: [{ content: { parts: [{ functionCall: { name: 'workspace_list', args: {}, id: 'gem-call-1' } }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } });
+    if (call === 1) return jsonResponse({ candidates: [{ content: { parts: [{ functionCall: { name: 'workspace_list', args: {}, id: 'gem-call-1' }, ['thought' + 'Signature']: 'gemini-metadata-test' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 } });
     return jsonResponse({ candidates: [{ content: { parts: [{ text: 'Gemini listo.' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } });
   };
   try {
@@ -86,6 +86,9 @@ test('Gemini native function calling dispatches and returns a function response'
     assert.equal(requests.length, 2);
     assert.equal(requests[0].body.tools[0].functionDeclarations[0].name, 'workspace_list');
     assert.equal(requests[1].body.contents.at(-1).parts[0].functionResponse.name, 'workspace_list');
+    const assistantCallPart = requests[1].body.contents.find(item => item.role === 'model')?.parts?.[0];
+    assert.equal(assistantCallPart?.['thought' + 'Signature'], 'gemini-metadata-test');
+    assert.equal(Object.hasOwn(assistantCallPart?.functionCall || {}, 'thought' + 'Signature'), false);
   } finally { globalThis.fetch = originalFetch; }
 });
 
