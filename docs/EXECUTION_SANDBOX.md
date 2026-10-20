@@ -9,12 +9,12 @@ La comprobación actual de sintaxis (node --check) no es ejecución funcional y 
 ## Arquitectura objetivo
 
 1. El worker empaqueta una entrega inmutable con jobId, artifactDigest, lenguaje/runtime solicitado y una lista de pruebas.
-2. Envía un trabajo a un ejecutor separado que no comparte DATABASE_URL, claves de IA, credenciales de usuario ni permisos de escritura sobre el repositorio.
+2. El Worker usa `apps/worker/services/runnerClient.js` para enviar trabajos a `apps/runner-api`, un plano de control privado que no comparte DATABASE_URL, claves de IA, credenciales de usuario ni permisos de escritura sobre el repositorio.
 3. El ejecutor inicia un entorno efímero no privilegiado, con sistema de archivos temporal, límites de CPU/memoria/procesos/tamaño de salida y tiempo máximo.
-4. La red de la ejecución está deshabilitada por defecto. Las dependencias se resuelven mediante imágenes o cachés previamente aprobadas; no se permite que un proyecto pida libremente una URL arbitraria.
-5. Se capturan código de salida, salida estándar/error truncada, duración, runtime e identidad/hash de la entrega. El resultado se guarda como evidencia asociada al checkpoint.
+4. La red de la ejecución está deshabilitada por defecto. La preparación de dependencias puede usar una red separada con proxy de salida y allowlist de dominios; la fase de pruebas debe volver a ejecutarse sin red. No se permite que el modelo pida libremente una URL arbitraria. El proxy de desarrollo no sustituye una política de egress/DNS del host para código hostil.
+5. La API acepta tareas asíncronas autenticadas, con idempotencia, polling, cancelación, límites de cola y TTL de resultados. Se capturan código de salida, salida estándar/error truncada, duración y artefactos acotados. El Worker guarda el resultado de ejecución en el checkpoint de validación y usa los fallos como hallazgos del ciclo correctivo.
 6. El Validador distingue explícitamente NO_EJECUTADO, FALLO, APROBADO y ERROR_DE_INFRAESTRUCTURA. Una prueba que no arrancó no es una prueba aprobada.
-7. El agente corrector recibe errores concretos y puede producir una nueva versión; cada iteración vuelve a ejecutarse contra un hash nuevo.
+7. El agente corrector recibe errores concretos y puede producir una nueva versión; cada iteración vuelve a ejecutarse contra un hash nuevo. La integración automática ya está conectada al ciclo de validación, pero el servicio remoto sigue optativo y no se habilita hasta configurar el host privado.
 
 ## Runtimes iniciales
 
@@ -28,6 +28,8 @@ La comprobación actual de sintaxis (node --check) no es ejecución funcional y 
 - No ejecutar mediante eval, node:vm o child_process dentro del worker como si eso fuera un sandbox.
 - No montar el socket Docker ni usar contenedores privilegiados.
 - No pasar variables de entorno del servicio padre al proceso generado.
+- No habilitar salida restringida para una tarea arbitraria: reservarla a preparación de dependencias sin secretos y en copia descartable.
+- El modo de red restringida debe fallar cerrado si falta la red interna o la allowlist; nunca caer a bridge/host.
 - No aceptar nombres de imágenes, comandos, rutas, volúmenes o URLs arbitrarios del modelo.
 - Limitar el tamaño de los artefactos y validar rutas contra traversal.
 - Aislar trabajos y usuarios; nunca reutilizar un directorio mutable entre tareas.
@@ -36,4 +38,4 @@ La comprobación actual de sintaxis (node --check) no es ejecución funcional y 
 
 ## Despliegue y validación
 
-Antes de desplegar se debe escoger una plataforma que permita aislamiento real de procesos/red. Un servicio web separado en Render, por sí solo, no demuestra que el código no confiable esté aislado. La implementación debe probar límites, interrupción por timeout, limpieza entre ejecuciones, bloqueo de red, ausencia de secretos y recuperación ante caída del runner.
+La API y su contrato están implementados en `apps/runner-api`, y el Worker ya consume el cliente cuando se configura. Antes de habilitarlo, debe provisionarse un host privado con Docker (preferentemente rootless), firewall y sin secretos de producción. Un servicio web en Render Free no garantiza un daemon Docker apto para ejecutar contenedores hermanos. La CI debe probar límites, timeout, limpieza, red restringida, ausencia de secretos, autenticación y recuperación ante caída del runner.

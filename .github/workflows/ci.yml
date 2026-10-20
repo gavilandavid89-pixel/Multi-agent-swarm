@@ -1,4 +1,7 @@
 name: Swarm checks
+concurrency:
+  group: swarm-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 on:
   pull_request:
   push:
@@ -37,7 +40,7 @@ jobs:
         run: |
           npm --prefix apps/bridge audit --audit-level=high --no-fund
           npm --prefix apps/worker audit --audit-level=high --no-fund
-      - name: Run Chromium/Xvfb browser smoke test
+      - name: Verify Worker delegates generated HTML to the isolated runner
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb xauth
@@ -45,3 +48,15 @@ jobs:
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)" node scripts/ui-layout-smoke.mjs
       - name: Build worker Docker image
         run: docker build -f apps/worker/Dockerfile apps/worker
+
+  agent-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate isolated agent sandbox scripts
+        run: sh -n scripts/run-agent-sandbox.sh && sh -n scripts/agent-sandbox-smoke.sh && sh -n apps/runner/capabilities-smoke.sh && bash -n apps/runner/godot-smoke.sh && node --check apps/runner/browser-smoke.mjs
+      - name: Validate egress proxy Compose configuration
+        run: docker compose -f docker-compose.runner-egress.yml config -q
+      - name: Build and exercise isolated agent runner and restricted egress proxy
+        run: sh scripts/agent-sandbox-smoke.sh

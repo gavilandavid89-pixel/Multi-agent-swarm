@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { serializeAgentToolResult } from './agentToolResult.js';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
@@ -36,6 +37,68 @@ export function retryDelay(retry, retryAfter, bodyText = '') {
   const base = Number.isFinite(configuredBase) ? Math.min(60000, Math.max(250, configuredBase)) : 3000;
   return getProviderRetryDelayMs({ retry, retryAfter, bodyText, baseMs: base, random: Math.random });
 }
+async function restoreAgentConversation(messages, conversationStore) {
+  const baseHash = createHash('sha256').update(JSON.stringify(messages)).digest('hex');
+  const saved = typeof conversationStore?.loadConversation === 'function'
+    ? await conversationStore.loadConversation(baseHash) : null;
+  if (saved?.baseHash === baseHash && saved.status === 'completed' && typeof saved.result === 'string') {
+    return { baseHash, completed: true, result: saved.result, requestMessages: saved.messages || messages,
+      toolRounds: Number(saved.toolRounds) || 0, accumulatedContent: saved.accumulatedContent || '',
+      continuationCount: Number(saved.continuationCount) || 0 };
+  }
+  const requestMessages = saved?.baseHash === baseHash && Array.isArray(saved.messages) ? saved.messages : messages;
+  return {
+    baseHash, completed: false, requestMessages,
+    toolRounds: requestMessages.filter(item => item?.role === 'assistant' && Array.isArray(item.tool_calls)).length,
+    accumulatedContent: saved?.baseHash === baseHash && typeof saved.accumulatedContent === 'string' ? saved.accumulatedContent : '',
+    continuationCount: Number(saved?.continuationCount) || 0
+  };
+}
+async function saveAgentConversation(conversationStore, state, status = 'active', result = undefined) {
+  if (typeof conversationStore?.saveConversation !== 'function') return;
+  await conversationStore.saveConversation({
+    baseHash: state.baseHash, messages: state.requestMessages, toolRounds: state.toolRounds,
+    accumulatedContent: state.accumulatedContent, continuationCount: state.continuationCount,
+    status, ...(typeof result === 'string' ? { result } : {})
+  });
+}
+async function recoverPendingAgentToolCalls(state, { tools, onToolCall, model, providerName, conversationStore }) {
+  let assistantIndex = -1;
+  for (let i = state.requestMessages.length - 1; i >= 0; i--) {
+    if (state.requestMessages[i]?.role === 'assistant' && Array.isArray(state.requestMessages[i].tool_calls)) {
+      assistantIndex = i;
+      break;
+    }
+  }
+  if (assistantIndex < 0) return;
+  const calls = state.requestMessages[assistantIndex].tool_calls.slice(0, 8);
+  const completedIds = new Set(state.requestMessages.slice(assistantIndex + 1)
+    .filter(item => item?.role === 'tool').map(item => String(item.tool_call_id || '')));
+  if (calls.some(call => !completedIds.has(String(call?.id || '')))
+      && (!Array.isArray(tools) || !tools.length || typeof onToolCall !== 'function')) {
+    const error = new Error('Hay llamadas de herramientas pendientes en el checkpoint, pero no hay un dispatcher autorizado para recuperarlas.');
+    error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
+    throw error;
+  }
+  for (const call of calls) {
+    const id = String(call?.id || '');
+    if (completedIds.has(id)) continue;
+    const name = String(call?.function?.name || '');
+    let args;
+    try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch { args = null; }
+    let result;
+    try {
+      if (!name || !args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Argumentos de herramienta inválidos.');
+      result = await onToolCall({ id, name, arguments: args, model, provider: providerName, recovered: true });
+    } catch (toolError) {
+      result = { ok: false, error: String(toolError?.message || 'La herramienta falló.').slice(0, 1000), code: String(toolError?.code || 'AGENT_TOOL_FAILED').slice(0, 80) };
+    }
+    state.requestMessages.push({ role: 'tool', tool_call_id: id, name, content: serializeAgentToolResult(result) });
+    completedIds.add(id);
+    await saveAgentConversation(conversationStore, state);
+  }
+}
+
 export function estimateInputTokens(messages) {
   const characters = (Array.isArray(messages) ? messages : []).reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
   // Conservative estimate for Spanish and source code; provider-reported usage remains authoritative.
@@ -172,7 +235,7 @@ export async function consultarWithProviderContext(options, userContext = null, 
   throw error;
 }
 
-function buildProviderRequest({ model, messages, temperature, maxTokens, reasoningEffort, responseFormat, apiKey, baseUrl, providerName }) {
+function buildProviderRequest({ model, messages, temperature, maxTokens, reasoningEffort, responseFormat, apiKey, baseUrl, providerName, tools, toolChoice }) {
   let target;
   try { target = new URL(baseUrl); } catch { throw new Error('La URL base del proveedor no es válida.'); }
   if (target.hostname.toLowerCase() === 'api.anthropic.com') {
@@ -186,16 +249,34 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     const converted = [];
     for (const item of Array.isArray(messages) ? messages : []) {
       if (item?.role === 'system') continue;
-      const role = item?.role === 'assistant' ? 'assistant' : 'user';
-      const rawContent = String(item?.content ?? '');
-      if (!rawContent) continue;
-      const content = ['user', 'assistant'].includes(item?.role) ? rawContent : `Resultado de herramienta (${String(item?.name || item?.role || 'tool')}): ${rawContent}`;
+      let role = item?.role === 'assistant' ? 'assistant' : 'user';
+      let content;
+      if (role === 'assistant' && Array.isArray(item?.tool_calls)) {
+        content = item.tool_calls.map(call => {
+          let input = {};
+          try { input = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
+          return { type: 'tool_use', id: String(call.id || ''), name: String(call?.function?.name || ''), input };
+        });
+        if (typeof item.content === 'string' && item.content) content.unshift({ type: 'text', text: item.content });
+      } else if (item?.role === 'tool') {
+        content = [{ type: 'tool_result', tool_use_id: String(item.tool_call_id || ''), content: String(item.content || '') }];
+      } else {
+        const rawContent = String(item?.content ?? '');
+        if (!rawContent) continue;
+        content = rawContent;
+      }
       const previous = converted[converted.length - 1];
-      if (previous?.role === role) previous.content += `\n\n${content}`;
+      if (previous?.role === role && typeof previous.content === 'string' && typeof content === 'string') previous.content += '\n\n' + content;
+      else if (previous?.role === role && Array.isArray(previous.content) && Array.isArray(content)) previous.content.push(...content);
       else converted.push({ role, content });
     }
     if (!converted.length) throw new Error('Anthropic recibió una conversación vacía.');
-    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}) };
+    const nativeTools = Array.isArray(tools) ? tools.map(item => ({
+      name: String(item?.function?.name || ''),
+      description: String(item?.function?.description || ''),
+      input_schema: item?.function?.parameters || { type: 'object', properties: {}, additionalProperties: false }
+    })).filter(item => item.name) : [];
+    const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}), ...(nativeTools.length ? { tools: nativeTools, tool_choice: { type: 'auto' } } : {}) };
     return { url: endpoint, options: { method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) } };
   }
   return {
@@ -203,12 +284,12 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     options: {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}) })
+      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: toolChoice || 'auto' } : {}) })
     }
   };
 }
 
-async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false }) {
+async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false, tools, onToolCall, maxToolRounds = 8, conversationStore = null }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
   if (typeof onRetry.getMaxOutputTokens === 'function') {
@@ -224,7 +305,22 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
   const apiKey = suppliedApiKey;
   if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0; let continuationCount = 0; let accumulatedContent = ''; let requestMessages = messages;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0;
+  const conversationState = await restoreAgentConversation(messages, conversationStore);
+  if (conversationState.completed) return conversationState.result;
+  let continuationCount = conversationState.continuationCount;
+  let toolRounds = conversationState.toolRounds;
+  let accumulatedContent = conversationState.accumulatedContent;
+  let requestMessages = conversationState.requestMessages;
+  const saveConversation = (status = 'active', result) => {
+    conversationState.requestMessages = requestMessages;
+    conversationState.toolRounds = toolRounds;
+    conversationState.accumulatedContent = accumulatedContent;
+    conversationState.continuationCount = continuationCount;
+    return saveAgentConversation(conversationStore, conversationState, status, result);
+  };
+  await recoverPendingAgentToolCalls(conversationState, { tools, onToolCall, model, providerName, conversationStore });
+  requestMessages = conversationState.requestMessages;
   const outputBudget = Number.parseInt(process.env.MAX_OUTPUT_TOKENS_PER_CALL || '6000', 10);
   const maxSafeOutputTokens = Math.max(256, Number.isFinite(outputBudget) ? outputBudget : 3200);
   const requestedMaxTokens = Math.max(256, Number(maxTokens) || 1200);
@@ -239,7 +335,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
+    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName, tools, toolChoice: 'auto' }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -270,7 +366,28 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         continue;
       }
       const choice = data?.choices?.[0]; const message = choice?.message; const content = message?.content;
-      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) { const toolError = deferredProviderError(model, retry + 1, retryDelay(retry + 1), 'la respuesta requiere llamadas a herramientas que el motor aún no ejecuta', providerName); throw toolError; }
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length) {
+         if (!Array.isArray(tools) || !tools.length || typeof onToolCall !== 'function') {
+           const error = new Error('El proveedor solicitó herramientas, pero esta llamada no tiene un dispatcher autorizado.');
+           error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
+           throw error;
+         }
+         if (toolRounds >= Math.max(1, Math.min(12, Number(maxToolRounds) || 8))) {
+           const error = new Error('El agente superó el máximo de rondas de herramientas permitido.');
+           error.code = 'AGENT_TOOL_ROUND_LIMIT';
+           throw error;
+         }
+         const usage = data?.usage || {};
+         await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
+         const calls = message.tool_calls.slice(0, 8);
+         requestMessages = [...requestMessages, { role: 'assistant', content: typeof content === 'string' ? content : '', tool_calls: calls }];
+         toolRounds++;
+         await saveConversation();
+         await recoverPendingAgentToolCalls(conversationState, { tools, onToolCall, model, providerName, conversationStore });
+         requestMessages = conversationState.requestMessages;
+         /* Each result is durably checkpointed by recoverPendingAgentToolCalls before the next provider round. */
+         continue;
+       }
       const usage = data?.usage || {};
       await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
       if (typeof content !== 'string' || !content.trim()) {
@@ -290,10 +407,12 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
+        await saveConversation();
         console.info('[worker][provider_continuation]', JSON.stringify({ provider: providerName, model, continuation: continuationCount, maxContinuations }));
         continue;
       }
       if (truncated && continueOnLength) { const error = new Error(`La respuesta de ${model} sigue truncada tras ${continuationCount} continuaciones; no se considera una entrega completa. Reducí el tamaño por módulo o aumentá MAX_CONTINUATION_CALLS.`); error.code = 'OUTPUT_TRUNCATED'; throw error; }
+      await saveConversation('completed', accumulatedContent);
       return accumulatedContent;
     }
     const body = await response.text().catch(() => '');
@@ -382,16 +501,16 @@ function boundContext(value, maxChars, label) {
   const tail = Math.floor(maxChars * 0.23);
   return `${text.slice(0, head)}\n\n[...${label} recortado para respetar el límite de tokens; se conserva el inicio y el final...]\n\n${text.slice(-tail)}`;
 }
-export async function agenteCoordinador(objetivo, estrategia, propuesta, critica, onRetry) {
+export async function agenteCoordinador(objetivo, estrategia, propuesta, critica, onRetry, toolContext = null) {
   return consultarModelo({
-    model: reasoningModel(), temperature: 0.1, maxTokens: 1800, onRetry,
+    model: reasoningModel(), temperature: 0.1, maxTokens: 1800, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4,
     messages: [
-      sys('Coordinador de coherencia', 'Tu voz es didáctica y conectiva: explicá cómo una decisión de un archivo afecta a los demás, traducí la jerga interna a consecuencias concretas y retomá los acuerdos anteriores. Fijá un contrato de equipo conciso: alcance y decisiones invariables; inventario de módulos con responsable lógico; dependencias en orden; exportaciones/importaciones, rutas, esquemas y eventos compartidos; límites de seguridad; compatibilidad y criterios de coherencia. Distinguí archivos confirmados de propuestos. Evitá definir dos veces la misma responsabilidad. Indicá qué otros módulos hay que revisar si cambia un contrato. No inventes archivos ni presentes supuestos como hechos; cada agente debe avisar antes de romper un contrato.'),
+      sys('Coordinador de coherencia', 'Tu voz es didáctica y conectiva: Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos. Explicá cómo una decisión de un archivo afecta a los demás, traducí la jerga interna a consecuencias concretas y retomá los acuerdos anteriores. Fijá un contrato de equipo conciso: alcance y decisiones invariables; inventario de módulos con responsable lógico; dependencias en orden; exportaciones/importaciones, rutas, esquemas y eventos compartidos; límites de seguridad; compatibilidad y criterios de coherencia. Distinguí archivos confirmados de propuestos. Evitá definir dos veces la misma responsabilidad. Indicá qué otros módulos hay que revisar si cambia un contrato. No inventes archivos ni presentes supuestos como hechos; cada agente debe avisar antes de romper un contrato.'),
       { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 2200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2600, 'estrategia') + '\n\nPROPUESTA:\n' + boundContext(propuesta, 1400, 'propuesta') + '\n\nAUDITORÍA ESCÉPTICA:\n' + boundContext(critica, 1400, 'auditoría') }
     ]
   });
 }
-export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry) {
+export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega, onRetry, toolContext = null) {
   const source = String(entrega ?? '');
   const maxChars = 8500;
   const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
@@ -414,9 +533,9 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
       model: validationModel(), temperature: 0, maxTokens: 1200, reasoningEffort: 'low',
-      responseFormat: { type: 'json_object' }, onRetry,
+      responseFormat: toolContext ? null : { type: 'json_object' }, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4,
       messages: [
-        sys('Coordinador de coherencia · auditor', 'Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Usá internamente tres alter egos y combiná sus hallazgos sin repetirlos: (1) Detective de contratos: nombres de funciones/clases, importaciones/exportaciones, rutas, formatos, configuración y dependencias; (2) Abogado del diablo: supuestos falsos, casos límite, errores lógicos, seguridad y comportamiento ante interrupciones; (3) Guardián de entrega: archivos completos, objetivo/criterios de aceptación y ausencia de contradicciones. Cada hallazgo debe incluir ruta concreta, evidencia textual verificable, impacto y corrección mínima; separá bloqueos reales de mejoras opcionales. Usá el mapa para comprobar contratos con otros lotes. El mensaje incluye el INVENTARIO COMPLETO de archivos: uno fuera de este lote puede existir en otro. PROHIBIDO afirmar que falta un archivo si figura en el inventario. No inventes incompatibilidades, no supongas pruebas ejecutadas y no marques como error algo no verificable. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
+        sys('Coordinador de coherencia · auditor', 'Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos.  Auditá SOLO los archivos del lote actual contra el mapa de coherencia. Si detectás un riesgo o mejora cuya solución corresponde a otro rol, registralo con `agent_finding_report` indicando ruta y evidencia, sin asumir permisos ni trabajo de ese rol. Usá internamente tres alter egos y combiná sus hallazgos sin repetirlos: (1) Detective de contratos: nombres de funciones/clases, importaciones/exportaciones, rutas, formatos, configuración y dependencias; (2) Abogado del diablo: supuestos falsos, casos límite, errores lógicos, seguridad y comportamiento ante interrupciones; (3) Guardián de entrega: archivos completos, objetivo/criterios de aceptación y ausencia de contradicciones. Cada hallazgo debe incluir ruta concreta, evidencia textual verificable, impacto y corrección mínima; separá bloqueos reales de mejoras opcionales. Usá el mapa para comprobar contratos con otros lotes. El mensaje incluye el INVENTARIO COMPLETO de archivos: uno fuera de este lote puede existir en otro. PROHIBIDO afirmar que falta un archivo si figura en el inventario. No inventes incompatibilidades, no supongas pruebas ejecutadas y no marques como error algo no verificable. Devolvé ÚNICAMENTE JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. Si falta contexto crítico o la entrega está truncada, usá NEEDS_CHANGES. No afirmes haber ejecutado código.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nMAPA DE COHERENCIA:\n' + boundContext(mapaCoherencia, 2200, 'mapa de coherencia') + '\nINVENTARIO COMPLETO DE ARCHIVOS DE LA ENTREGA (pueden estar distribuidos en otros lotes):\n' + manifestText + '\nARCHIVOS COMPLETOS DEL LOTE:\n' + batches[i] }
       ]
     });
@@ -432,23 +551,23 @@ export async function agenteAuditorCoherencia(objetivo, mapaCoherencia, entrega,
     batchesReviewed: results.length
   };
 }
-export async function agenteArquitecto(objetivo, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Arquitecto', 'Tu voz es serena, ordenada y precisa: abrí con la idea central y después estructurá OBJETIVO/ALCANCE, decisiones e invariantes, módulos afectados, orden de etapas, criterios de aceptación observables, pruebas y riesgos/supuestos. Respondé a lo que el usuario pidió y dejá una base clara para que el Escéptico pueda cuestionarla. Favorecé la solución mínima; distinguí requisitos obligatorios de mejoras opcionales. No inventes infraestructura ni prometas pruebas ejecutadas.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
+export async function agenteArquitecto(objetivo, onRetry, toolContext = null) {
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4, messages: [sys('Arquitecto', 'Tu voz es serena, ordenada y precisa: Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos. Abrí con la idea central y después estructurá OBJETIVO/ALCANCE, decisiones e invariantes, módulos afectados, orden de etapas, criterios de aceptación observables, pruebas y riesgos/supuestos. Respondé a lo que el usuario pidió y dejá una base clara para que el Escéptico pueda cuestionarla. Favorecé la solución mínima; distinguí requisitos obligatorios de mejoras opcionales. No inventes infraestructura ni prometas pruebas ejecutadas.'), { role: 'user', content: boundContext(objetivo, 6500, 'objetivo') }] });
 }
-export async function agenteEsceptico(objetivo, propuesta, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1000, onRetry, messages: [sys('Escéptico/Auditor', 'Tu voz es inquisitiva, directa y un poco desconfiada, pero nunca sarcástica con el usuario. Contestá sobre la propuesta del Arquitecto y señalá qué podría salir mal con escenarios concretos, no opiniones de estilo. Priorizá BLOQUEANTE/ALTO/MEDIO; por hallazgo incluye condición, impacto y cómo comprobarlo. Máximo cinco riesgos distintos, eliminá duplicados y reconocé lo que no podés verificar.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
+export async function agenteEsceptico(objetivo, propuesta, onRetry, toolContext = null) {
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1000, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4, messages: [sys('Escéptico/Auditor', 'Tu voz es inquisitiva, directa y un poco desconfiada, pero nunca sarcástica con el usuario. Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos. Contestá sobre la propuesta del Arquitecto y señalá qué podría salir mal con escenarios concretos, no opiniones de estilo. Priorizá BLOQUEANTE/ALTO/MEDIO; por hallazgo incluye condición, impacto y cómo comprobarlo. Máximo cinco riesgos distintos, eliminá duplicados y reconocé lo que no podés verificar.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1800, 'objetivo')}\n\nPROPUESTA DEL ARQUITECTO:\n${boundContext(propuesta, 5200, 'propuesta')}` }] });
 }
-export async function agenteArbitro(objetivo, propuesta, critica, onRetry) {
-  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, messages: [sys('Árbitro técnico', 'Sos el supervisor del comité: mantené el tono más formal, calmo y respetuoso. Dirigite a las objeciones del Escéptico y resolvé cada una con ACEPTAR/RECHAZAR/APLAZAR y una razón breve; no copies la crítica entera. Convertí los riesgos aceptados en controles verificables y fijá un plan mínimo ordenado, criterios de aceptación y dudas para decisión humana. No escondas desacuerdos sin resolver.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
+export async function agenteArbitro(objetivo, propuesta, critica, onRetry, toolContext = null) {
+  return consultarModelo({ model: reasoningModel(), maxTokens: 1200, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4, messages: [sys('Árbitro técnico', 'Sos el supervisor del comité: mantené el tono más formal, calmo y respetuoso. Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos. Dirigite a las objeciones del Escéptico y resolvé cada una con ACEPTAR/RECHAZAR/APLAZAR y una razón breve; no copies la crítica entera. Convertí los riesgos aceptados en controles verificables y fijá un plan mínimo ordenado, criterios de aceptación y dudas para decisión humana. No escondas desacuerdos sin resolver.'), { role: 'user', content: `OBJETIVO:\n${boundContext(objetivo, 1500, 'objetivo')}\n\nPROPUESTA:\n${boundContext(propuesta, 3000, 'propuesta')}\n\nAUDITORÍA ESCÉPTICA:\n${boundContext(critica, 3000, 'auditoría')}` }] });
 }
-export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}) {
+export async function agenteDesarrollador(objetivo, estrategia, errores = '', onRetry, entregaActual = '', mapaCoherencia = '', canContinue = () => true, onPartialOutput = () => {}, toolContext = null) {
   const repairing = Boolean(errores && String(errores).trim());
   return consultarModelo({
-    model: codingModel(), temperature: 0.15, maxTokens: (currentUserProviders() ? Boolean(currentUserProviders().gemini) : Boolean(process.env.GEMINI_API_KEY)) ? (repairing ? 50000 : 60000) : (repairing ? 5000 : 6000), onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput,
+    model: codingModel(), temperature: 0.15, maxTokens: (currentUserProviders() ? Boolean(currentUserProviders().gemini) : Boolean(process.env.GEMINI_API_KEY)) ? (repairing ? 50000 : 60000) : (repairing ? 5000 : 6000), onRetry, continueOnLength: true, maxContinuations: Number.parseInt(process.env.MAX_CONTINUATION_CALLS || '4', 10), canContinue, onPartialOutput, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 8,
     messages: [
       sys('Desarrollador sénior', repairing
-        ? 'Tu voz es práctica y resolutiva: explicá brevemente cómo tus cambios responden al plan y a los hallazgos previos. Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
-        : 'Tu voz es práctica y resolutiva: explicá brevemente cómo el código responde al plan acordado. Producí una solución utilizable. Si el objetivo requiere archivos, cada archivo debe aparecer por separado con un encabezado exacto ### Archivo: ruta/archivo.ext y debajo un bloque de código con su lenguaje; incluí el contenido completo, no fragmentos ni pseudocódigo. Usá rutas relativas seguras, sin .., y no mezcles archivos en un mismo bloque. No afirmes que pasó pruebas si no hay resultados reales.'),
+        ? 'Tu voz es práctica y resolutiva: explicá brevemente cómo tus cambios responden al plan y a los hallazgos previos. Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos.  Si al ejecutar código encontrás un riesgo de seguridad, problema de arquitectura, pruebas u otra mejora que exceda tu rol, registralo con `agent_finding_report` para que lo atienda el agente responsable; no ocultes el hallazgo ni hagas cambios fuera de tu responsabilidad. Corregí la entrega existente con el mínimo cambio necesario. No regeneres archivos que no están afectados. Revisá el código previo, corregí todos los hallazgos concretos y devolvé COMPLETOS solo los archivos que cambian, cada uno con encabezado exacto ### Archivo: ruta/archivo.ext y un bloque de código. Nunca recortes un archivo ni reemplaces su contenido por puntos suspensivos. Si un archivo es demasiado grande, priorizá un archivo por respuesta y declaralo explícitamente.'
+        : 'Tu voz es práctica y resolutiva: explicá brevemente cómo el código responde al plan acordado. Consultá `agent_findings_list` al comenzar y revisá avisos abiertos relacionados. Si al ejecutar código encontrás un riesgo de seguridad, problema de arquitectura, pruebas u otra mejora que exceda tu rol, registralo con `agent_finding_report` para que lo atienda el agente responsable; no ocultes el hallazgo ni hagas cambios fuera de tu responsabilidad. Producí una solución utilizable. Si el objetivo requiere archivos, cada archivo debe aparecer por separado con un encabezado exacto ### Archivo: ruta/archivo.ext y debajo un bloque de código con su lenguaje; incluí el contenido completo, no fragmentos ni pseudocódigo. Usá rutas relativas seguras, sin .., y no mezcles archivos en un mismo bloque. No afirmes que pasó pruebas si no hay resultados reales.'),
       { role: 'user', content: 'OBJETIVO:\n' + boundContext(objetivo, 1200, 'objetivo') + '\n\nESTRATEGIA APROBADA:\n' + boundContext(estrategia, 2200, 'estrategia') + '\n\n' +
         (mapaCoherencia ? 'MAPA COMPARTIDO DE COHERENCIA; respetá estos contratos entre archivos:\n' + boundContext(mapaCoherencia, 4200, 'mapa de coherencia') + '\n\n' : '') + (repairing ? 'HALLAZGOS QUE DEBÉS CORREGIR:\n' + boundContext(errores, 1600, 'hallazgos') + '\n\nENTREGA ACTUAL; conservá todo lo correcto y reemplazá solo los archivos afectados:\n' + boundContext(entregaActual, 6200, 'entrega actual') : 'Generá la primera versión completa.') }
     ]
@@ -533,7 +652,7 @@ export function parseValidationResponse(rawValue) {
     raw: raw.slice(0, 12000)
   };
 }
-export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
+export async function agenteValidador(objetivo, estrategia, entrega, onRetry, toolContext = null) {
   const source = String(entrega ?? '');
   const maxChars = 8500;
   const sections = source.split(/(?=^#{1,6}\s+(?:Archivo|File|Ruta)\s*:)/gim).filter(part => part.trim());
@@ -558,9 +677,9 @@ export async function agenteValidador(objetivo, estrategia, entrega, onRetry) {
   for (let i = 0; i < batches.length; i++) {
     const raw = await consultarModelo({
       model: validationModel(), temperature: 0, maxTokens: 1000, reasoningEffort: 'low',
-      responseFormat: { type: 'json_object' }, onRetry,
+      responseFormat: toolContext ? null : { type: 'json_object' }, onRetry, tools: toolContext?.tools, onToolCall: toolContext?.onToolCall, conversationStore: toolContext?.conversationStore, maxToolRounds: 4,
       messages: [
-        sys('Validador independiente', 'Tu voz es sobria, imparcial y basada en evidencia: respondé al resultado del Desarrollador, distinguí fallos confirmados de sospechas y explicá el impacto sin dramatizar. Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE un objeto JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. No uses Markdown, bloques de código ni texto antes/después del objeto. No reemplaces corchetes por entidades HTML (&#91; o &#93;). Escapá las comillas dobles dentro de las cadenas y no uses comas finales. Limitá findings a 10 elementos y summary a 600 caracteres. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
+        sys('Validador independiente', 'Tu voz es sobria, imparcial y basada en evidencia: Consultá `agent_tasks_list` y `agent_feed_list` al comenzar para recuperar responsables, avances y pendientes; consultá `agent_findings_list` para revisar avisos abiertos relacionados. Publicá decisiones, preguntas, avances o bloqueos relevantes con `agent_feed_publish`. Como responsable de una etapa, consultá `agent_tasks_list` para localizar tu tarea (por `assignedRole`), y actualizá explícitamente esa tarea con `agent_task_upsert` antes de terminar: elegí su estado según evidencia propia, resumí el resultado y dejá el próximo paso. `pending` = aún no empezada; `in_progress` = trabajo activo; `blocked` = impedimento concreto con causa; `in_review` = entrega lista para revisión; `done` = criterios de aceptación de tu responsabilidad cumplidos. No marques `done` por suposición ni cambies el estado de tareas de otros roles. El Worker registra checkpoints y eventos, pero no decide el estado por vos.  Si detectás un problema o mejora que corresponde a otro rol, registralo con `agent_finding_report` con ruta y evidencia, sin asumir el trabajo de ese rol. Respondé al resultado del Desarrollador, distinguí fallos confirmados de sospechas y explicá el impacto sin dramatizar. Actuá como validador independiente con tres alter egos internos: (1) probador de aceptación, compara el objetivo con el código visible; (2) revisor adversarial, intenta refutar que funcione y busca casos límite/seguridad; (3) auditor de integración, busca imports y contratos inconsistentes. Auditá SOLO los archivos del lote actual. Los hallazgos deben citar ruta y evidencia, explicar impacto y proponer corrección mínima. No declares que el código se ejecutó: la sintaxis determinista se informa por separado. No rechaces por preferencias de estilo ni inventes archivos faltantes. Devolvé ÚNICAMENTE un objeto JSON válido con el esquema exacto: {"verdict":"APPROVED" o "NEEDS_CHANGES","findings":["..."],"summary":"..."}. No uses Markdown, bloques de código ni texto antes/después del objeto. No reemplaces corchetes por entidades HTML (&#91; o &#93;). Escapá las comillas dobles dentro de las cadenas y no uses comas finales. Limitá findings a 10 elementos y summary a 600 caracteres. Buscá truncamiento y errores lógicos. No afirmes haber revisado otros lotes.'),
         { role: 'user', content: 'LOTE ' + (i + 1) + '/' + batches.length + '\nOBJETIVO:\n' + boundContext(objetivo, 700, 'objetivo') + '\nESTRATEGIA:\n' + boundContext(estrategia, 1000, 'estrategia') + '\nARCHIVOS:\n' + batches[i] }
       ]
     });

@@ -102,6 +102,11 @@ function fromGemini(data, options) {
   const candidate = data.candidates?.[0];
   const parts = candidate?.content?.parts || [];
   const content = textFromParts(parts);
+  const toolCalls = parts.filter(part => part?.functionCall && typeof part.functionCall.name === 'string').map(part => ({
+    id: String(part.functionCall.id || ''),
+    name: String(part.functionCall.name),
+    arguments: part.functionCall.args ?? {}
+  }));
   const blocked = !candidate && Boolean(data.promptFeedback?.blockReason);
   return canonical(content, {
     ...options,
@@ -110,6 +115,7 @@ function fromGemini(data, options) {
     status: blocked ? 'blocked' : 'success',
     usage: data.usageMetadata || {},
     finishReason: blocked ? 'content_filter' : candidate?.finishReason,
+    toolCalls,
     warnings: blocked ? ['GEMINI_PROMPT_BLOCKED'] : []
   });
 }
@@ -193,7 +199,14 @@ export function normalizeOpenAICompatibleResponse(data) {
     choices: [{
       message: {
         content: normalized.content,
-        ...(normalized.toolCalls.length ? { tool_calls: normalized.toolCalls } : {}),
+        ...(normalized.toolCalls.length ? { tool_calls: normalized.toolCalls.map(call => ({
+          id: String(call.id || ''),
+          type: 'function',
+          function: {
+            name: String(call.name || ''),
+            arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? call.input ?? {})
+          }
+        })) } : {}),
         ...(normalized.status === 'blocked' ? { refusal: normalized.content || 'Respuesta bloqueada por el proveedor.' } : {})
       },
       finish_reason: normalized.finishReason

@@ -53,6 +53,9 @@ Para comprobar sintaxis y ejecutar pruebas unitarias: `npm run check`.
 - `SWARM_API_ENCRYPTION_KEY`: la misma clave de cifrado de APIs que usa el bridge.
 - `DATABASE_PATH`: ruta SQLite heredada, solo para importar historial local si existe.
 - `WORKER_CONCURRENCY`: tareas simultáneas (por defecto, 2).
+- `AGENT_RUNNER_BASE_URL`: URL privada de `apps/runner-api`; si queda vacía, la ejecución remota se omite y se mantienen los chequeos deterministas.
+- `AGENT_RUNNER_SHARED_SECRET`: secreto aleatorio independiente de `WORKER_SHARED_SECRET`; debe coincidir con `RUNNER_SHARED_SECRET` del host del runner.
+- `AGENT_RUNNER_REQUIRED`: `false` por defecto; al ponerlo en `true`, el Swarm no puede aprobar una tarea si el runner no está disponible o falla.
 - `MAX_TASK_TOKENS`: presupuesto acumulado por tarea (por defecto, 1.000.000; ajustable entre 4.000 y 1.000.000).
 - `MAX_OUTPUT_TOKENS_PER_CALL`: máximo de salida permitido por llamada al modelo (por defecto, 6.000; cada agente puede imponer un límite inferior).
 
@@ -124,6 +127,9 @@ Este mapa documenta el destino lógico y el valor esperado de cada variable. **N
 | `WORKER_CONCURRENCY` | Entero entre 1 y 8; el código actual usa 1 por defecto | — | Máximo de tareas concurrentes |
 | `MAX_TASK_TOKENS` | Entero entre 4.000 y 1.000.000; por defecto 1.000.000 | — | Presupuesto acumulado por tarea |
 | `MAX_OUTPUT_TOKENS_PER_CALL` | Entero; el README del proyecto documenta 6.000 por defecto | — | Límite de salida por llamada |
+| `AGENT_RUNNER_BASE_URL` | **No agregado al blueprint de Render**; configuración futura manual | Worker → Runner | URL privada del host aislado. Mantenerla sin configurar hasta provisionar red privada y firewall; usar HTTPS si no es una IP/host privado confiable |
+| `AGENT_RUNNER_SHARED_SECRET` | **No agregado al blueprint de Render**; configuración futura manual | Worker ↔ Runner | Secreto aleatorio de 32+ caracteres, igual a `RUNNER_SHARED_SECRET` y distinto de `WORKER_SHARED_SECRET`. Nunca registrar ni compartir con agentes/modelos |
+| `AGENT_RUNNER_REQUIRED` | `false` por defecto; **no agregado al blueprint de Render** | Worker | Solo considerar `true` tras validar el host; si falta el runner, bloquea la aprobación automática y conserva el checkpoint |
 
 ### Estado verificado y puntos pendientes
 
@@ -155,3 +161,171 @@ El botón **Convocar votación en segundo plano** registra la propuesta y devuel
 - La interfaz permite convocarla mientras la tarea está en cola, ejecutándose o ya finalizada; una pausa por agotamiento de presupuesto requiere resolver primero el presupuesto.
 - Se permite una votación activa por tarea para evitar concurrencia duplicada. Repetir la misma propuesta activa reutiliza el estado en curso; repetir una propuesta ya completada recupera el resultado guardado sin volver a consumir tokens.
 - El resultado aparece al refrescar el detalle de la tarea. Si el proceso del Worker se reinicia durante la votación, el registro puede quedar en estado `running`; una futura mejora debe incluir recuperación de votaciones abandonadas al arrancar.
+
+## Entorno aislado de ejecución para agentes
+
+La rama experimental `feature/agent-execution-sandbox` añade un runner local/CI separado para ejecutar código de proyectos con red deshabilitada por defecto y un modo optativo de salida limitada mediante proxy con allowlist. Aplica límites de recursos, raíz de solo lectura y un único directorio de trabajo escribible. Incluye Node.js/TypeScript, Python con pytest/Black/Flake8/mypy, Java/Maven, Go, PHP/Composer, Ruby/Bundler, C/C++, Rust, Godot 4.4.1 headless, Chromium/Xvfb, ESLint/Prettier, ShellCheck/shfmt, SQLite y utilidades de búsqueda/JSON. El inventario legible por máquina vive en `apps/runner/capabilities.json` y se verifica en CI.
+
+- Diseño, capacidades, límites, integración y comandos de prueba: [docs/AGENT_EXECUTION_ENVIRONMENT.md](docs/AGENT_EXECUTION_ENVIRONMENT.md).
+- Contrato de herramientas de agentes, permisos por rol, recuperación, artefactos y criterios de aceptación: [docs/AGENT_TOOL_PROTOCOL.md](docs/AGENT_TOOL_PROTOCOL.md).
+- La vista en vivo con escritorio remoto está documentada como una fase segura posterior; Xvfb/Chromium ya sirven para pruebas automatizadas, pero no se expone un VNC público.
+- API autenticada de ejecución y descubrimiento de capacidades (`GET /v1/capabilities`): [apps/runner-api/](apps/runner-api/); contrato y despliegue en host aislado: [apps/runner-api/README.md](apps/runner-api/README.md).
+- Proxy de salida y allowlist inicial: [apps/runner/egress-proxy/](apps/runner/egress-proxy/); topología Docker: [docker-compose.runner-egress.yml](docker-compose.runner-egress.yml).
+
+### Cómo se conecta con los agentes
+
+El modelo no recibe la clave de Runner API ni acceso directo a Docker. El camino de ejecución está mediado por el Worker:
+
+1. El Worker extrae y filtra los archivos de la entrega; rechaza rutas conocidas de credenciales y patrones de secretos.
+2. Envía un trabajo autenticado a `apps/runner-api` con un ID de tarea, un workspace aislado, un comando argv y límites definidos por el servidor.
+3. La API crea un contenedor nuevo para cada paso, limita recursos y tiempo, y devuelve un ID de trabajo. El Worker consulta el estado de forma asíncrona; puede reintentar sin duplicar trabajos mediante idempotencia.
+4. El Worker recibe salida acotada y artefactos filtrados. Los fallos de sintaxis/tests se convierten en evidencia para el ciclo de corrección; la nueva entrega se vuelve a ejecutar en modo sin red.
+5. La preparación de dependencias, cuando es necesaria, es un paso separado con egress restringido; nunca comparte secretos y no se usa como fase de pruebas.
+
+**Interfaz de herramientas para agentes:** el Worker conecta el tool-calling de los proveedores compatibles con `apps/worker/services/agentToolDispatcher.js` y `multiAiEngine.js`. El desarrollador puede leer/escribir su workspace y solicitar ejecución, comprobaciones, estado, cancelación, artefactos y preparación de dependencias; el validador puede leer y comprobar; los roles de auditoría tienen permisos de lectura. El dispatcher valida rol, esquema de argumentos, rutas, archivos sensibles y cantidad de llamadas. `GET /v1/capabilities` solo descubre capacidades instaladas: no concede permisos. El modelo nunca elige imagen Docker, volúmenes, variables de entorno, secretos, política de red ni límites. La integración remota sigue optativa hasta provisionar y validar un host privado dedicado.
+
+### Modos de red del runner experimental
+
+- Predeterminado: `SWARM_RUNNER_NETWORK=none`; la ejecución no tiene red.
+- Opcional para dependencias: primero iniciá el proxy con `docker compose -f docker-compose.runner-egress.yml up --build -d`, y después usá `SWARM_RUNNER_NETWORK=restricted sh scripts/run-agent-sandbox.sh ./copia-descartable npm ci --ignore-scripts`. La salida se limita a los hosts de `apps/runner/egress-proxy/allowed-domains.txt`; destinos no listados se deniegan. Requiere Docker Compose v2.33+ por `gw_priority`. Preferí `--ignore-scripts` durante la descarga de dependencias; no expongas secretos y repetí las pruebas funcionales después, con la red apagada. Apagá el proxy con `docker compose -f docker-compose.runner-egress.yml down`.
+- No agregues dominios sin revisar su necesidad. No habilites la red restringida para ejecutar tareas arbitrarias que tengan secretos. El modo restringido falla cerrado si la red no existe o no está marcada como interna.
+- La API acepta trabajos asíncronos con idempotencia, autenticación servicio a servicio, límites de salida, timeout, cancelación, snapshots de artefactos y workspaces reutilizables por tarea. El Worker ya tiene un cliente optativo: ejecuta comprobaciones de sintaxis y perfiles de Node/npm, Python/pytest, Go, Rust, Maven, Gradle, Composer, Bundler, Godot headless y Chromium/Xvfb. Las dependencias se preparan con egress limitado y las pruebas posteriores corren sin red.
+- La API y el Worker rechazan archivos con nombres típicos de credenciales y patrones de claves privadas/tokens conocidos. Es defensa en profundidad, no un detector perfecto: no envíes secretos al runner.
+- El Worker no pasa claves del proveedor ni variables del host al contenedor. La ejecución remota se omite por defecto si no se configura `AGENT_RUNNER_BASE_URL`; con `AGENT_RUNNER_REQUIRED=true`, un runner ausente o fallido impide aprobar automáticamente.
+- **No desplegar la API de runner en el Render Free del Worker** suponiendo que habrá un daemon Docker disponible. La API necesita un host de ejecución dedicado con Docker (preferentemente rootless), red privada y firewall; el servicio no está desplegado. La integración en el Worker permanece desactivada por defecto.
+
+- Frontera de seguridad y arquitectura: [docs/EXECUTION_SANDBOX.md](docs/EXECUTION_SANDBOX.md).
+
+### Variables del host Runner API (no son variables de Render Worker)
+
+| Variable | Dónde se configura | Propósito y regla |
+|---|---|---|
+| `RUNNER_SHARED_SECRET` | Host dedicado de ejecución | Secreto aleatorio de 32+ caracteres; debe coincidir con `AGENT_RUNNER_SHARED_SECRET` del Worker y ser distinto de `WORKER_SHARED_SECRET`. Nunca se registra ni se entrega a agentes. |
+| `RUNNER_BIND_HOST` | Host dedicado | `127.0.0.1` por defecto. Cambiar solo a una interfaz privada después de configurar firewall/red privada; nunca publicar la API en Internet. |
+| `PORT` | Host dedicado | Puerto HTTP de la API, predeterminado `3200`; el firewall solo debe permitir al Worker. |
+| `RUNNER_STATE_DIR` | Host dedicado | Directorio persistente para jobs/workspaces, predeterminado `/var/lib/swarm-runner`; propietario del usuario de servicio y permisos restrictivos. |
+| `RUNNER_CONCURRENCY` | Host dedicado | Debe ser `1` por ahora; la API rechaza otros valores hasta que cada job tenga su propia frontera de red. |
+| `RUNNER_DOCKER_BIN` | Host dedicado | Ruta del cliente Docker si no está en `PATH`; preferir Docker rootless y nunca montar el socket en los contenedores de trabajos. |
+| `SWARM_RUNNER_IMAGE` | Host dedicado | Imagen de ejecución preconstruida; valor predeterminado `swarm-agent-runner:local`. No permitir que el agente elija imágenes. |
+
+**Integración por etapas:** la CI de la rama construye y prueba el runner, el proxy y la API real contra Docker. Eso no significa que haya un host dedicado provisionado. Para activarlo, primero construí la imagen y ejecutá `sh scripts/agent-sandbox-smoke.sh` en el host aislado; configurá el secreto y el firewall; probá el Worker con `AGENT_RUNNER_REQUIRED=false`; solo después de verificar resultados reales se debe considerar `true`. El archivo `render.yaml` se mantiene idéntico a `main`: no se cambia el blueprint ni se habilita la ejecución remota de producción como parte de esta rama.
+
+## Estado técnico del sandbox de agentes (revisión 18-10-2026)
+
+Esta sección registra las garantías que se verificaron en la rama experimental, cómo repetir las comprobaciones y qué queda pendiente. **El estado de CI corresponde a un commit concreto**; un cambio posterior requiere volver a comprobar sus propios checks.
+
+### Estado de la rama y CI
+
+- Rama de trabajo: `feature/agent-execution-sandbox`.
+- Pull request: [#103 — Agent execution sandbox](https://github.com/gavilandavid89-pixel/Multi-agent-swarm/pull/103). Se mantiene como **draft** para revisión; no se fusiona ni se despliega automáticamente.
+- Commit comprobado: `e9951624728c890fbbd0d15b1aadbd53fa90d20f`.
+- [Ejecución de GitHub Actions para ese commit](https://github.com/gavilandavid89-pixel/Multi-agent-swarm/actions/runs/39180896313): los jobs `syntax-and-tests` y `agent-sandbox` terminaron con conclusión `success`. Incluyeron sintaxis y tests unitarios, auditoría de dependencias, verificación de delegación HTML al runner, construcción de la imagen Worker, validación de scripts y configuración del proxy, y construcción/prueba del runner aislado con el proxy de egress restringido.
+- Los commits posteriores deben validar su propio SHA; el resultado anterior no demuestra que un cambio futuro también pase CI.
+
+### Flujo de ejecución y límites de confianza
+
+El flujo de herramientas se mantiene mediado por el Worker; el modelo no recibe credenciales del runner ni puede elegir imágenes, volúmenes, variables del host o políticas de red.
+
+1. El dispatcher comprueba que la herramienta esté disponible para el rol y valida sus argumentos antes de actuar. El desarrollador puede editar su workspace y pedir ejecuciones; el validador tiene capacidades de lectura/comprobación y los roles de auditoría no reciben permisos de escritura.
+2. Los archivos se filtran antes de enviarse al runner. Se rechazan rutas conocidas de credenciales y contenidos que coinciden con detectores de secretos. Estos filtros son defensa en profundidad, no garantía de detección perfecta: **nunca incluyas secretos en una entrega**.
+3. Las ejecuciones ordinarias usan `network: "none"`. El modelo no puede cambiar ese valor a través de `runner_execute`. La preparación de dependencias es una operación separada y limitada a manifests conocidos, con egress restringido por el proxy y una allowlist revisada.
+4. El runner crea un contenedor nuevo por ejecución, con límites de CPU/memoria/tiempo, workspace controlado y salida/artefactos acotados. La API autentica las solicitudes servicio a servicio y limita la concurrencia porque el aislamiento de red por trabajo aún requiere una frontera dedicada.
+5. El Worker consulta el estado de los trabajos de forma asíncrona. Las claves de idempotencia se reutilizan en reintentos de transporte para evitar crear duplicados cuando la respuesta HTTP se pierde. Una clave repetida con una solicitud distinta debe rechazarse en vez de reutilizar silenciosamente un trabajo incompatible.
+
+### Depuración por lotes con stdin restringido
+
+El runner admite una entrada estándar acotada solo para una invocación de depurador Python PDB. No equivale a una terminal interactiva persistente:
+
+- `stdin` debe ser texto y no puede superar **16 KiB**.
+- El comando debe comenzar exactamente con `python3 -m pdb`; no se permite pasar stdin a comandos ordinarios como `node -e`.
+- La política de red continúa siendo `none`; stdin no habilita egress ni cambia el comando autorizado.
+- Worker/cliente y Runner API validan la condición, de modo que la API rechaza también una solicitud inválida si un caller intenta saltarse la validación del Worker.
+- La entrada es por lote. No hay todavía una sesión PDB persistente con intercambios sucesivos entre modelo y proceso, ni adaptadores equivalentes para Node Inspector, Java JDB u otros depuradores.
+
+### Salidas grandes, redacción y artefactos
+
+- Las salidas de herramientas se acotan sin producir JSON truncado inválido: la respuesta conserva los campos esenciales e informa de truncamiento y tamaño serializado cuando corresponde.
+- La redacción cubre nombres sensibles comunes tanto en `camelCase` como en estructuras anidadas. Es una medida preventiva y no debe tratarse como sustituto de no enviar credenciales.
+- Los artefactos de ejecución se recuperan solo tras completar satisfactoriamente el trabajo y vuelven a pasar por los límites de cantidad, ruta y tamaño antes de integrarse al workspace del agente.
+- Las comprobaciones deterministas y las pruebas ejecutadas en el runner aportan evidencia, pero no prueban por sí solas que una entrega sea segura, completa o correcta en todos los entornos.
+
+### Comprobaciones reproducibles
+
+Desde la raíz del repositorio, con Node.js 22.x y las dependencias instaladas:
+
+```sh
+npm run check
+```
+
+En un host de prueba aislado con Docker disponible, imagen del runner construida y variables de la API configuradas:
+
+```sh
+docker compose -f docker-compose.runner-egress.yml config
+sh scripts/agent-sandbox-smoke.sh
+```
+
+El smoke test requiere que la Runner API esté disponible en `127.0.0.1:3200` y que el secreto de prueba coincida con la configuración del runner. Comprueba el flujo básico y una solicitud negativa: stdin no debe aceptarse para un comando normal. No ejecutes este smoke contra un host de producción ni publiques la API en Internet. La prueba de integración del runner debe realizarse en un host dedicado; CI puede construir y ejercitar el contenedor en su entorno efímero, pero eso no significa que exista un host de ejecución de producción provisionado.
+
+### Recuperación, reinicios y límites pendientes
+
+Hay que distinguir tres capas de recuperación:
+
+- **Checkpoint del flujo de agentes:** el Worker persiste la propuesta, la crítica, la estrategia, el mapa de coherencia, la entrega parcial/final, el workspace de herramientas y los resultados de validación. Al reiniciar, el flujo comprueba qué fases ya tienen datos guardados y salta esas fases; el bloqueo por tarea impide que dos procesos ejecuten la misma tarea simultáneamente. Si el agente de desarrollo se interrumpe a mitad de una entrega, conserva archivos del workspace y texto parcial para continuar desde ese material, no desde una conversación vacía.
+- **Reintento acotado de infraestructura (implementado en esta rama):** si la tarea ya tiene entrega y validación de IA guardadas y lo que falló fue la infraestructura del runner, el reintento conserva esos checkpoints y no vuelve a llamar al auditor o validador de IA. También conserva las claves de idempotencia de los pasos que ya terminaron y genera una clave nueva solo para el paso fallido, para que una ejecución fallida persistida no se reutilice indefinidamente como si fuera un resultado nuevo. Se registra `resumeMode: "runner-only"` y se limpia al guardar el nuevo resultado. Si las comprobaciones vuelven a fallar por infraestructura, la tarea queda pendiente de revisión; si revelan un fallo real del proyecto, el ciclo normal de corrección puede continuar. Para errores incompletos o de código se mantiene el reintento general.
+- **Trabajo remoto del runner:** la API del runner persiste el estado del job, el workspace, la clave de idempotencia y los artefactos en su directorio de estado. Las claves deterministas de comprobación permiten reutilizar el resultado de una ejecución ya aceptada cuando la API conserva ese job. Al reiniciar el Worker, las tareas pendientes se vuelven a encolar; no se debe asumir que un proceso de contenedor que estaba activo sobrevivió.
+
+**Límites importantes:** un checkpoint evita repetir etapas que ya terminaron y fueron persistidas, pero no puede garantizar cero tokens repetidos si el proveedor de IA se interrumpe después de generar una respuesta y antes de que el Worker la guarde. Tampoco equivale a guardar y restaurar el estado interno de razonamiento del modelo: la recuperación utiliza las decisiones, los mensajes, archivos y resultados persistidos como contexto. El paso que quedó en vuelo puede necesitar ejecutarse de nuevo.
+
+La selección de este camino de recuperación está cubierta por `tests/retryRecovery.test.mjs`; la integración del Worker verifica que el modo acotado se conecte con la ruta de reintento y el motor de validación.
+
+**Límite restante:** el journal de invocaciones ya persiste la identidad estable, los argumentos validados (mediante su hash), la clave idempotente y el estado de cada llamada antes del envío. Si el Worker se reinicia mientras una llamada está en vuelo, el registro `started` permite repetir la misma invocación y reconciliarla con el Runner API sin crear deliberadamente un segundo trabajo. Sin embargo, no restaura por sí solo el turno interno del proveedor de IA ni garantiza que el modelo vuelva a emitir esa llamada tras un reinicio; tampoco puede recuperar una respuesta del proveedor que nunca llegó a guardarse. La garantía depende de que el Runner API conserve el estado/idempotencia y de que la reanudación vuelva a solicitar la misma herramienta con los mismos argumentos y workspace. Siguen pendientes pruebas de reinicio reales en cada ventana entre envío, aceptación, finalización y persistencia del resultado.
+
+### Activación y seguridad operativa
+
+- La integración remota sigue optativa. Dejá `AGENT_RUNNER_REQUIRED=false` hasta haber validado un host dedicado, red privada, firewall, imagen y smoke tests reales.
+- No despliegues la Runner API en un servicio que no garantice un daemon Docker disponible, ni publiques su puerto. No compartas `RUNNER_SHARED_SECRET` con el modelo o con el código ejecutado.
+- Esta rama no cambia `render.yaml`, no activa el runner en producción y no modifica Render, Neon ni `comite-database`. No se ha realizado migración ni borrado de datos.
+- El runner usa contenedores Docker como una capa de aislamiento; no equivale a una VM o microVM dedicada frente a código hostil multiusuario. Para cargas de alto riesgo, usa un host efímero dedicado y una frontera de virtualización más fuerte.
+
+
+
+## Coordinación de hallazgos entre agentes
+
+Los agentes pueden informar problemas o mejoras que descubren mientras trabajan aunque la solución pertenezca a otro rol. El dispatcher ofrece dos herramientas acotadas:
+
+- `agent_finding_report`: registra categoría, severidad, título, resumen, evidencia opcional y ruta afectada.
+- `agent_findings_list`: consulta hallazgos abiertos dirigidos al rol actual o informados por ese mismo agente.
+
+El Worker persiste los hallazgos en el payload cifrado de la tarea y añade notificaciones al transcript. El enrutamiento inicial es determinista: los riesgos de seguridad van al auditor y coordinador; los bugs al desarrollador, validador y coordinador; las pruebas al validador, desarrollador y coordinador; y los temas de arquitectura al arquitecto y coordinador. Los hallazgos repetidos se deduplican por categoría, título y resumen para evitar bucles de notificaciones, manteniendo un contador de apariciones.
+
+Esto comunica y deja trazabilidad; **no cambia los permisos del agente ni autoriza a un agente a editar fuera de su rol**. El agente receptor debe consultar la bandeja y decidir dentro de sus permisos. La bandeja tiene un límite de 100 hallazgos por tarea y el texto/campos tienen límites de tamaño.
+
+Pruebas de regresión: `tests/agentCoordination.test.mjs`.
+
+
+
+## Red social interna de agentes: feed y tablero compartido
+
+La coordinación deja de ser solo una bandeja de errores: cada rol puede consultar el feed compartido, publicar avances, decisiones, preguntas, bloqueos, resultados y traspasos, además de mantener tareas con responsable, estado, prioridad, dependencias, evidencia y próximo paso.
+
+Herramientas disponibles para todos los roles:
+- `agent_feed_publish` / `agent_feed_list`: publicaciones visibles para los agentes de la misma tarea, con tipo, autor, fecha y vínculo opcional a una tarea.
+- `agent_task_upsert` / `agent_tasks_list`: crea tareas o actualiza su estado. **El agente responsable clasifica el estado de su propia tarea** con base en evidencia y registra resumen/próximo paso; solo ese rol puede actualizarla, salvo el coordinador para reasignaciones autorizadas. Estados: `pending` (sin empezar), `in_progress` (trabajo activo), `blocked` (impedimento concreto), `in_review` (entrega lista para revisión) y `done` (criterios de aceptación del responsable cumplidos).
+
+Cada cambio de tarea crea una publicación en el feed y un evento en el transcript, de modo que el estado y su historial queden conectados. Además, el Worker publica automáticamente eventos de inicio de etapa y checkpoints, y mantiene tareas separadas por etapa y rol; el ID activo se conserva entre inicio y checkpoint para actualizar la tarea correcta sin sobrescribir las anteriores. El Worker puede crear la tarea como `pending` y refrescar su resumen/evidencia, pero **no cambia automáticamente su estado a `in_progress`, `blocked` ni `done`**: la clasificación la escribe el agente responsable mediante `agent_task_upsert`. Si el runner detecta un fallo de infraestructura, publica un evento `blocker` enlazado a la tarea, pero deja que su responsable clasifique el estado. Así se separan los hechos automáticos (evento/checkpoint) de la valoración del agente. Los eventos automáticos del feed enlazan con el ID de la tarea de etapa correspondiente, no solo con el ID global del trabajo. El checkpoint acredita que el Worker guardó una salida; no cambia por sí mismo la clasificación del responsable. Si falla la infraestructura del runner, el feed publica un evento `blocker` para que el agente responsable pueda clasificar la tarea; el feed no depende exclusivamente de que el modelo recuerde informar su avance. Las publicaciones se limitan a 200 por tarea; el tablero, a 100 tareas; y el historial de cada tarea conserva las últimas 20 transiciones. El contenido se limita y redacta para evitar guardar credenciales conocidas.
+
+Al reanudarse, el agente puede consultar `agent_tasks_list`, `agent_feed_list` y `agent_findings_list` para saber qué está terminado, qué está bloqueado, quién es responsable y qué paso sigue. La red es interna a cada tarea: no mezcla contextos entre tareas distintas ni sustituye los permisos del workspace. Los prompts de rol deben consultar el tablero/feed al comenzar para que la colaboración sea proactiva; estas herramientas permiten la consulta, pero no garantizan por sí solas que un modelo haga esa consulta en cada turno.
+
+Pruebas de regresión: `tests/agentCoordination.test.mjs` y `tests/agentToolDispatcher.test.mjs`.
+
+### Recuperación de llamadas remotas en vuelo
+
+Antes de enviar `runner_execute` o `runner_dependency`, el Worker guarda un registro de invocación en el checkpoint cifrado de la tarea. La clave idempotente se deriva de la tarea, rol, ronda, herramienta, argumentos y estado del workspace; los reintentos de transporte usan la misma clave. Cuando el modelo repite una llamada ya completada con el mismo workspace, se devuelve el resultado persistido sin volver a ejecutar el comando. Si el Worker cae después de enviar el trabajo pero antes de guardar el resultado, el registro `started` conserva la clave para reconciliar la llamada con el Runner API.
+
+El journal conserva como máximo las últimas 100 invocaciones por tarea. La garantía depende de que el Runner API mantenga su contrato de idempotencia; no reconstruye el estado interno de razonamiento del proveedor ni puede recuperar una respuesta de IA que nunca llegó a persistirse. Las pruebas de regresión verifican que una llamada completada se reproduce desde el checkpoint sin un segundo envío.
+
+
+## Mapa de integración entre sistemas
+
+La revisión de solapamientos entre los PR abiertos, los contratos entre Worker/Runner API, el catálogo de capacidades y el visor de navegador está documentada en [docs/INTEGRATION_MAP.md](docs/INTEGRATION_MAP.md). Ese mapa distingue rutas compartidas que requieren reconciliación de sistemas que deben seguir separados; no implica que los PR anteriores ya estén fusionados.
+
