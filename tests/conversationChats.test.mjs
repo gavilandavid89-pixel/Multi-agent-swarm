@@ -75,7 +75,13 @@ test('the web client keeps chats separate from task history and polls durable tu
     readFile(new URL('../apps/web/public/app.js', import.meta.url), 'utf8')
   ]);
   assert.match(html, /id="open-chats-menu"[^>]*>Chats<\/button>/);
-  assert.match(html, /id="open-history-menu"[^>]*>Historial de tareas<\/button>/);
+  assert.match(html, /id="task-history-toggle"[^>]*>◷<\/button>/);
+  assert.doesNotMatch(html, /id="open-history-menu"/);
+  assert.match(html, /id="new-chat-button"[^>]*>＋ Nueva conversación<\/button>/);
+  assert.match(html, /id="chat-thread-view" class="chat-thread hidden"/);
+  assert.match(app, /lastMessagePreview/);
+  assert.match(app, /showChatConversationView/);
+  assert.match(app, /showChatListView/);
   assert.match(app, /\/api\/chats\?/);
   assert.match(app, /\/turns\//);
   assert.match(app, /await loadChatMessages\(\)/);
