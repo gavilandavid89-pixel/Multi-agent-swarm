@@ -45,7 +45,7 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
   tool('agent_findings_list', 'Consulta hallazgos abiertos relevantes para tu rol, informados por otros agentes.', {}, []),
   tool('agent_feed_publish', 'Publica un avance, decisión, pregunta, bloqueo, resultado o traspaso visible para los demás agentes.', {
     type: { type: 'string', enum: ['progress', 'decision', 'question', 'blocker', 'result', 'handoff'] },
-    title: { type: 'string', maxLength: 160 }, body: { type: 'string', maxLength: 2000 },
+    title: { type: 'string', maxLength: 160 }, body: { type: 'string', maxLength: 3000 },
     taskId: { type: 'string', maxLength: 64 }
   }, ['type', 'title', 'body']),
   tool('agent_feed_list', 'Consulta publicaciones recientes de la red interna de agentes.', {
