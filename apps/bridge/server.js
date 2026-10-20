@@ -435,7 +435,7 @@ async function workerRequest(route, options = {}, mayWake = true) {
     try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
     if (!response.ok) {
       const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-      const isHtmlGatewayPage = contentType.includes('text/html') || /^\\s*<(?:!doctype html|html)\\b/i.test(rawBody);
+      const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
       const isColdStartGateway = isHtmlGatewayPage && [502, 503, 504].includes(response.status);
       if (mayWake && replaySafe && isColdStartGateway && attempt < retryDelays.length) {
         console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status, attempt: attempt + 1 }));
