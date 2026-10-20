@@ -1395,6 +1395,10 @@ $('chat-message-form').addEventListener('submit', async event => {
       await new Promise(resolve => setTimeout(resolve, 1800));
       const stateResult = await api(`/api/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turnId)}`);
       status = stateResult.turn?.status || status;
+      if ($('chats-status')) {
+        if (status === 'running') $('chats-status').textContent = 'La IA está respondiendo…';
+        else if (status === 'pending' && Date.now() - startedAt > 8000) $('chats-status').textContent = 'Mensaje guardado; el motor está despertando o esperando turno. Podés volver más tarde: se recuperará automáticamente.';
+      }
       await loadChatMessages();
     }
     await loadChats();
