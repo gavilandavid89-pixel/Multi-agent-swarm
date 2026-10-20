@@ -28,7 +28,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('landing-hero')?.classList.remove('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -592,6 +592,7 @@ async function showDetail(id) {
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
 function showChatHome() {
+  showChatListView();
   $('main-chat-home')?.classList.remove('hidden');
   $('app-content').classList.add('hidden');
   $('task-mode-toggle').textContent = '＋ Tarea';
@@ -600,7 +601,7 @@ function showChatHome() {
   $('files-drawer')?.setAttribute('aria-hidden', 'true');
   $('history-drawer')?.classList.add('hidden');
   $('history-drawer')?.setAttribute('aria-hidden', 'true');
-  $('open-history-menu')?.setAttribute('aria-expanded', 'false');
+  $('task-history-toggle')?.setAttribute('aria-expanded', 'false');
   stopTaskEventStream();
   clearInterval(state.pollHandle); state.pollHandle = null;
   clearInterval(state.listPollHandle); state.listPollHandle = null;
@@ -610,6 +611,7 @@ function showChatHome() {
 }
 function showTaskWorkspace() {
   $('main-chat-home')?.classList.add('hidden');
+  $('task-history-toggle')?.classList.remove('hidden');
   $('app-content').classList.remove('hidden');
   $('task-mode-toggle').textContent = '← Chats';
   $('files-menu-toggle')?.classList.remove('hidden');
@@ -1143,7 +1145,7 @@ function closeHistoryDrawer() {
   if (!drawer) return;
   drawer.classList.add('hidden');
   drawer.setAttribute('aria-hidden', 'true');
-  $('open-history-menu')?.setAttribute('aria-expanded', 'false');
+  $('task-history-toggle')?.setAttribute('aria-expanded', 'false');
   state.historyShown = false;
   $('history-list')?.classList.add('hidden');
   if ($('show-history')) $('show-history').innerHTML = 'Ver registros <span>→</span>';
@@ -1156,7 +1158,7 @@ function openHistoryDrawer() {
   $('files-drawer')?.setAttribute('aria-hidden', 'true');
   drawer.classList.remove('hidden');
   drawer.setAttribute('aria-hidden', 'false');
-  $('open-history-menu')?.setAttribute('aria-expanded', 'true');
+  $('task-history-toggle')?.setAttribute('aria-expanded', 'true');
   if (!state.historyShown) $('show-history')?.click();
 }
 $('copy-detail').addEventListener('click', async () => {
@@ -1225,18 +1227,45 @@ function chatStatusLabel(status) {
 function renderChatList() {
   const list = $('chats-list');
   if (!list) return;
-  if (!state.chats.length) {
-    list.innerHTML = '<div class="empty-state"><p>Todavía no hay chats.</p><span class="muted tiny">Creá uno para empezar.</span></div>';
+  const chats = [...state.chats].sort((a, b) => {
+    const timeA = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+    const timeB = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+    return timeB - timeA;
+  });
+  if (!chats.length) {
+    list.innerHTML = '<div class="empty-state chat-list-empty"><span class="empty-glyph">✳</span><p>Todavía no hay conversaciones.</p><span class="muted tiny">Tocá «Nueva conversación» para empezar.</span></div>';
     return;
   }
-  list.innerHTML = state.chats.map(chat => `<div class="chat-list-item ${chat.id === state.currentChatId ? 'selected' : ''}">
-    <button class="chat-list-open" type="button" data-chat-open="${escapeHtml(chat.id)}"><span class="chat-list-title">${escapeHtml(chat.title || 'Nuevo chat')}</span><span class="chat-list-meta">${escapeHtml(dateLabel(chat.updatedAt))}</span></button>
-    <button class="mini-button" type="button" data-chat-rename="${escapeHtml(chat.id)}" aria-label="Renombrar ${escapeHtml(chat.title || 'chat')}" title="Renombrar">✎</button>
-    <button class="mini-button" type="button" data-chat-archive="${escapeHtml(chat.id)}" aria-label="Archivar ${escapeHtml(chat.title || 'chat')}" title="Archivar">×</button>
-  </div>`).join('');
+  list.innerHTML = chats.map(chat => {
+    const preview = String(chat.lastMessagePreview || '').replace(/\\s+/g, ' ').trim();
+    const previewText = preview || 'Conversación nueva · todavía no hay mensajes';
+    return `<article class="chat-list-item ${chat.id === state.currentChatId ? 'selected' : ''}">
+      <button class="chat-list-open" type="button" data-chat-open="${escapeHtml(chat.id)}" aria-label="Abrir conversación ${escapeHtml(chat.title || 'Nuevo chat')}">
+        <span class="chat-list-title">${escapeHtml(chat.title || 'Nuevo chat')}</span>
+        <span class="chat-list-preview">${escapeHtml(previewText)}</span>
+        <span class="chat-list-meta">${escapeHtml(dateLabel(chat.updatedAt || chat.createdAt))}</span>
+      </button>
+      <div class="chat-list-actions">
+        <button class="mini-button" type="button" data-chat-rename="${escapeHtml(chat.id)}" aria-label="Renombrar ${escapeHtml(chat.title || 'chat')}" title="Renombrar">✎</button>
+        <button class="mini-button" type="button" data-chat-archive="${escapeHtml(chat.id)}" aria-label="Archivar ${escapeHtml(chat.title || 'chat')}" title="Archivar">×</button>
+      </div>
+    </article>`;
+  }).join('');
   list.querySelectorAll('[data-chat-open]').forEach(button => button.addEventListener('click', () => { void selectChat(button.dataset.chatOpen); }));
   list.querySelectorAll('[data-chat-rename]').forEach(button => button.addEventListener('click', () => { void renameChat(button.dataset.chatRename); }));
   list.querySelectorAll('[data-chat-archive]').forEach(button => button.addEventListener('click', () => { void archiveChat(button.dataset.chatArchive); }));
+}
+function showChatListView() {
+  $('main-chat-home')?.classList.remove('chat-detail-open');
+  $('chats-list')?.classList.remove('hidden');
+  $('chat-thread-view')?.classList.add('hidden');
+  $('chat-message-input')?.blur();
+}
+function showChatConversationView() {
+  $('main-chat-home')?.classList.add('chat-detail-open');
+  $('chats-list')?.classList.add('hidden');
+  $('chat-thread-view')?.classList.remove('hidden');
+  $('chat-thread-view')?.scrollIntoView({ block: 'nearest' });
 }
 async function loadChats() {
   try {
@@ -1313,6 +1342,7 @@ async function selectChat(chatId) {
     state.currentChatId = chatId;
     state.currentChat = data.chat;
     await loadChatMessages();
+    showChatConversationView();
     renderChatList();
     renderChatMessages();
     void recoverPendingChatTurns(chatId);
@@ -1328,8 +1358,7 @@ async function createNewChat() {
     const data = await api('/api/chats', { method: 'POST', body: JSON.stringify({}) });
     await loadChats();
     await selectChat(data.chat.id);
-    $('chat-message-input').focus();
-    if ($('chats-status')) $('chats-status').textContent = 'Chat creado.';
+    if ($('chats-status')) $('chats-status').textContent = 'Conversación creada. Escribí cuando quieras para empezar.';
   } catch (error) {
     if ($('chats-status')) $('chats-status').textContent = `No se pudo crear el chat: ${error.message}`;
   } finally { button.disabled = false; }
@@ -1362,10 +1391,11 @@ function closeChatsDrawer() {
   showTaskWorkspace();
   $('open-chats-menu')?.setAttribute('aria-expanded', 'false');
 }
-$('open-chats-menu').addEventListener('click', () => { $('account-menu-items').classList.add('hidden'); $('account-menu-toggle').setAttribute('aria-expanded', 'false'); openChatsDrawer(); });
+$('open-chats-menu').addEventListener('click', () => { $('account-menu-items').classList.add('hidden'); $('account-menu-toggle').setAttribute('aria-expanded', 'false'); showChatHome(); });
 $('close-chats-drawer').addEventListener('click', closeChatsDrawer);
 $('task-mode-toggle').addEventListener('click', () => { if ($('app-content').classList.contains('hidden')) showTaskWorkspace(); else showChatHome(); });
 $('new-chat-button').addEventListener('click', () => { void createNewChat(); });
+$('back-to-chats-button').addEventListener('click', () => { showChatListView(); void loadChats(); });
 $('refresh-chats-button').addEventListener('click', () => { void loadChats(); if (state.currentChatId) void loadChatMessages().catch(error => { $('chats-status').textContent = error.message; }); });
 $('rename-chat-button').addEventListener('click', () => { if (state.currentChatId) void renameChat(state.currentChatId); });
 $('archive-chat-button').addEventListener('click', () => { if (state.currentChatId) void archiveChat(state.currentChatId); });
@@ -1428,13 +1458,16 @@ if (artifactsPanel && $('files-drawer-slot')) $('files-drawer-slot').append(arti
 const historyPanel = document.querySelector('#dashboard-grid .history-panel') || document.querySelector('.history-panel');
 if (historyPanel && $('history-drawer-slot')) $('history-drawer-slot').append(historyPanel);
 $('account-menu-toggle').setAttribute('aria-expanded', 'false');
-$('open-history-menu').addEventListener('click', () => {
-  $('account-menu-items').classList.add('hidden');
-  $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+$('task-history-toggle').addEventListener('click', () => {
   showTaskWorkspace();
+  closeFilesDrawerIfOpen();
   openHistoryDrawer();
 });
 $('close-history-drawer').addEventListener('click', closeHistoryDrawer);
+function closeFilesDrawerIfOpen() {
+  $('files-drawer')?.classList.add('hidden');
+  $('files-drawer')?.setAttribute('aria-hidden', 'true');
+}
 $('account-menu-toggle').addEventListener('click', event => {
   event.preventDefault();
   event.stopPropagation();
