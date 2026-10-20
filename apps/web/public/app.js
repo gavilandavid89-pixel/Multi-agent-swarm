@@ -16,7 +16,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); $('home-screen')?.classList.remove('hidden'); $('task-workspace')?.classList.add('hidden'); $('home-username').textContent = state.user?.username || 'Usuario'; $('home-username')?.classList.remove('hidden'); $('home-profile-name').textContent = state.user?.username || 'Tu espacio'; const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -156,6 +156,10 @@ async function loadJobs({ append = false } = {}) {
   state.jobsTotal = total || state.jobs.length;
   // Watch every task currently present in the activity list, not only the open detail pane.
   state.jobs.forEach(observeJobStatus);
+  const chatList = $('chat-list');
+  if (chatList) {
+    chatList.innerHTML = state.jobs.length ? state.jobs.slice(0, 40).map(job => `<button class="chat-list-item ${job.id === state.currentDetailId ? 'active' : ''}" type="button" data-open-chat="${escapeHtml(job.id)}"><span class="chat-list-icon">◌</span><span class="chat-list-copy"><strong>${escapeHtml(job.title || 'Conversación de agentes')}</strong><small>${escapeHtml(statusNames[job.status] || job.status)} · ${escapeHtml(dateLabel(job.updatedAt))}</small></span></button>`).join('') : '<div class="chat-list-empty">Todavía no hay conversaciones. Tocá “Comenzar tarea” para abrir un chat con los agentes.</div>';
+  }
   const list = $('jobs-list');
   if (!state.jobs.length) {
     list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
@@ -553,6 +557,7 @@ async function updateSelectedDetail() {
   updateDetailView(data);
 }
 async function refresh() {
+  if (!state.currentDetailId || document.visibilityState === 'hidden' || $('task-workspace')?.classList.contains('hidden')) return;
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
@@ -570,6 +575,7 @@ async function showDetail(id) {
   }
   if (state.currentDetailId !== id) hideTaskNotice();
   state.currentDetailId = id;
+  $('home-screen')?.classList.add('hidden'); $('task-workspace')?.classList.remove('hidden');
   $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
@@ -587,10 +593,13 @@ async function enterApp() {
   startTaskEventStream();
   try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
-  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
+  if (!state.pollHandle) state.pollHandle = setInterval(() => {
+    if (document.visibilityState !== 'hidden' && state.currentDetailId && !$('task-workspace')?.classList.contains('hidden')) void refresh();
+  }, 3500);
   if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
+    if (document.visibilityState === 'hidden') return;
     try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
-  }, 12000);
+  }, 20000);
 }
 $('access-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1180,6 +1189,14 @@ $('agent-reply-form').addEventListener('submit', async event => {
   }
 });
 $('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+function returnHome() { $('task-workspace')?.classList.add('hidden'); $('home-screen')?.classList.remove('hidden'); $('detail-panel')?.classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); window.scrollTo({top:0,behavior:'auto'}); }
+$('begin-task-sidebar')?.addEventListener('click', () => { $('home-screen')?.classList.add('hidden'); $('task-workspace')?.classList.remove('hidden'); $('objective')?.focus({preventScroll:true}); });
+$('begin-task-main')?.addEventListener('click', () => { $('home-screen')?.classList.add('hidden'); $('task-workspace')?.classList.remove('hidden'); $('objective')?.focus({preventScroll:true}); });
+$('back-to-home')?.addEventListener('click', returnHome);
+$('new-chat-button')?.addEventListener('click', () => { $('home-screen')?.classList.add('hidden'); $('task-workspace')?.classList.remove('hidden'); $('objective')?.focus({preventScroll:true}); $('job-submit-status').textContent = 'Escribí el objetivo para abrir una conversación nueva con los agentes.'; });
+$('home-history-button')?.addEventListener('click', () => { $('account-menu-items')?.classList.add('hidden'); openHistoryDrawer(); });
+$('workspace-history-button')?.addEventListener('click', () => openHistoryDrawer());
+$('chat-list')?.addEventListener('click', event => { const button = event.target.closest('[data-open-chat]'); if (button?.dataset.openChat) void showDetail(button.dataset.openChat); });
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }

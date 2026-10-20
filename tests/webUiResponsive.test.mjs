@@ -133,3 +133,20 @@ test('floating preview and touch menus have independent window and scroll behavi
   assert.match(app, /Pantalla completa/);
   assert.match(app, /preview-window-launcher/);
 });
+
+test('home-first shell separates chat navigation from the full task workspace', () => {
+  const html = read('../apps/web/public/index.html');
+  const app = read('../apps/web/public/app.js');
+  const css = read('../apps/web/public/styles.css');
+  assert.match(html, /id="home-screen"/);
+  assert.match(html, /id="chat-list"/);
+  assert.match(html, /id="begin-task-main"/);
+  assert.match(html, /id="task-workspace"/);
+  assert.match(html, /id="home-username"/);
+  assert.match(app, /id="begin-task-sidebar"/);
+  assert.match(app, /id="back-to-home"/);
+  assert.match(app, /setInterval\(\(\) => \{[\s\S]*?\}, 3500\)/);
+  assert.match(app, /}, 20000\)/);
+  assert.match(css, /\.home-screen\s*\{[^}]*grid-template-columns/s);
+  assert.match(css, /body:not\(\.auth-gate\) \.hero\{display:none\}/);
+});
