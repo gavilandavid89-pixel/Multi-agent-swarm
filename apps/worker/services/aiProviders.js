@@ -297,6 +297,37 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
   };
 }
 
+function shrinkMessagesForTpm(messages, excessTokens) {
+  const copy = (Array.isArray(messages) ? messages : []).map(item => item && typeof item === 'object' ? { ...item } : item);
+  const lastUserIndex = copy.reduce((last, item, index) => item?.role === 'user' ? index : last, -1);
+  let remaining = Math.max(1200, Math.ceil((Math.max(0, Number(excessTokens) || 0) + 512) * 2.5));
+  let removedChars = 0;
+  const priority = item => item?.role === 'tool' ? 0 : item?.role === 'assistant' && !Array.isArray(item.tool_calls) ? 1 : item?.role === 'user' ? 2 : item?.role === 'system' ? 3 : 4;
+  const candidates = copy.map((item, index) => ({ item, index, priority: priority(item) }))
+    .filter(entry => typeof entry.item?.content === 'string')
+    .sort((a, b) => a.priority - b.priority || a.index - b.index);
+  for (const entry of candidates) {
+    if (remaining <= 0) break;
+    const item = entry.item;
+    const content = item.content;
+    const minimum = item.role === 'system' ? 1800
+      : item.role === 'user' && entry.index === lastUserIndex ? 2200
+      : item.role === 'tool' ? 240
+      : item.role === 'assistant' ? 500 : 800;
+    const removable = Math.max(0, content.length - minimum);
+    if (!removable) continue;
+    const remove = Math.min(removable, remaining);
+    const targetLength = content.length - remove;
+    const headLength = Math.max(120, Math.floor(targetLength * 0.72));
+    const tailLength = Math.max(0, targetLength - headLength);
+    item.content = content.slice(0, headLength) + '\n[contexto anterior recortado por límite TPM]\n' + (tailLength ? content.slice(-tailLength) : '');
+    const actualRemoved = content.length - item.content.length;
+    removedChars += Math.max(0, actualRemoved);
+    remaining -= Math.max(0, actualRemoved);
+  }
+  return { messages: copy, removedChars };
+}
+
 async function consultarOpenAICompatible({ model, messages, temperature = 0.3, maxTokens = 1200, reasoningEffort = 'low', responseFormat, onRetry = () => {}, continueOnLength = false, maxContinuations = 4, canContinue = () => true, onPartialOutput = () => {}, apiKey: suppliedApiKey, baseUrl = GROQ_BASE_URL, providerName = 'OpenAI-compatible', beforeProviderRequest, failoverAvailable = false, tools, onToolCall, maxToolRounds = 8, conversationStore = null }) {
   const requestedOutputTokens = Math.max(256, Number(maxTokens) || 1200);
   const estimatedInputTokens = estimateInputTokens(messages);
@@ -431,19 +462,31 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       const limit = tpm ? Number(tpm[1]) : 0;
       const requested = tpm ? Number(tpm[2]) : 0;
       const excess = requested > limit ? requested - limit : 0;
-      if (limit > 0 && excess > 0 && safeMaxTokens > 256 && sizeRetries < 4) {
-        const previousMaxTokens = safeMaxTokens;
-        safeMaxTokens = Math.max(256, safeMaxTokens - excess - 64);
-        if (safeMaxTokens < previousMaxTokens) {
+      if (limit > 0 && excess > 0 && sizeRetries < 6) {
+        if (safeMaxTokens > 256) {
+          const previousMaxTokens = safeMaxTokens;
+          safeMaxTokens = Math.max(256, safeMaxTokens - excess - 64);
+          if (safeMaxTokens < previousMaxTokens) {
+            sizeRetries++;
+            const reason = `Solicitud 413 por límite TPM; se reduce la salida de ${previousMaxTokens} a ${safeMaxTokens} tokens (intento ${sizeRetries}/6)`;
+            await onRetry({ retry: sizeRetries, wait: 0, reason });
+            console.warn('[worker][provider_request_shrunk]', JSON.stringify({ provider: providerName, model, limit, requested, previousMaxTokens, maxCompletionTokens: safeMaxTokens, retry: sizeRetries }));
+            continue;
+          }
+        }
+        const shrunk = shrinkMessagesForTpm(requestMessages, excess);
+        if (shrunk.removedChars > 0) {
+          requestMessages = shrunk.messages;
           sizeRetries++;
-          const reason = `Solicitud 413 por límite TPM; se reduce la salida de ${previousMaxTokens} a ${safeMaxTokens} tokens (intento ${sizeRetries}/4)`;
+          await saveConversation();
+          const reason = `Solicitud 413 por límite TPM; se recorta contexto antiguo en ${shrunk.removedChars} caracteres (intento ${sizeRetries}/6)`;
           await onRetry({ retry: sizeRetries, wait: 0, reason });
-          console.warn('[worker][provider_request_shrunk]', JSON.stringify({ provider: providerName, model, limit, requested, previousMaxTokens, maxCompletionTokens: safeMaxTokens, retry: sizeRetries }));
+          console.warn('[worker][provider_context_shrunk]', JSON.stringify({ provider: providerName, model, limit, requested, removedChars: shrunk.removedChars, retry: sizeRetries }));
           continue;
         }
       }
       const error = new Error(limit > 0
-        ? `El proveedor rechazó la solicitud por tamaño (HTTP 413; límite TPM ${limit}, solicitud ${requested}). Incluso reduciendo la salida no queda margen suficiente; dividí el trabajo o acortá el contexto.`
+        ? `El proveedor rechazó la solicitud por tamaño (HTTP 413; límite TPM ${limit}, solicitud ${requested}). No se pudo reducir más el contexto de forma segura; dividí el trabajo o acortá el contexto.`
         : 'El proveedor rechazó la solicitud por tamaño (HTTP 413). Dividí el trabajo en módulos más pequeños o acortá el contexto.');
       error.code = 'PROVIDER_INPUT_TOO_LARGE'; error.providerModel = model; error.providerStatus = 413;
       throw error;
