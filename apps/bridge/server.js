@@ -149,21 +149,26 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
     if (user.role === 'admin') {
-      try {
-        const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', body: JSON.stringify({ userId: user.id }) });
-        console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: user.id, imported: Number(migrated?.imported) || 0, skipped: Number(migrated?.skipped) || 0, alreadyMigrated: Boolean(migrated?.alreadyMigrated) }));
-      } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
-      try {
-        let offset = 0; let total = 0;
-        do {
-          const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
-          const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
-          total = Number(legacy?.total) || jobs.length;
-          for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [String(job.id), user.id, job.createdAt || null]);
-          offset += jobs.length;
-          if (!jobs.length) break;
-        } while (offset < total);
-      } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+      const adminUserId = user.id;
+      setImmediate(() => {
+        void (async () => {
+          try {
+            const migrated = await workerRequest('/internal/admin/import-legacy-apis', { method: 'POST', headers: { 'x-swarm-idempotency-key': randomUUID() }, body: JSON.stringify({ userId: adminUserId }) });
+            console.info('[bridge][legacy_api_migration]', JSON.stringify({ userId: adminUserId, imported: Number(migrated?.imported) || 0, skipped: Number(migrated?.skipped) || 0, alreadyMigrated: Boolean(migrated?.alreadyMigrated) }));
+          } catch { console.warn('[bridge][legacy_api_migration] deferred'); }
+          try {
+            let offset = 0; let total = 0;
+            do {
+              const legacy = await workerRequest(`/internal/jobs?limit=100&offset=${offset}`);
+              const jobs = Array.isArray(legacy) ? legacy : (Array.isArray(legacy?.jobs) ? legacy.jobs : []);
+              total = Number(legacy?.total) || jobs.length;
+              for (const job of jobs) if (job?.id) await pool.query('INSERT INTO user_job_ownership(job_id,user_id,created_at) VALUES($1,$2,COALESCE($3::timestamptz,now())) ON CONFLICT(job_id) DO NOTHING', [String(job.id), adminUserId, job.createdAt || null]);
+              offset += jobs.length;
+              if (!jobs.length) break;
+            } while (offset < total);
+          } catch { console.warn('[bridge][legacy_job_migration] deferred'); }
+        })().catch(() => console.warn('[bridge][legacy_migration] deferred'));
+      });
     }
     failedAuth.delete(`ip:${ip}`); failedAuth.delete(`user:${username}`);
     const token = await createSession(user.id);
@@ -344,18 +349,7 @@ app.post('/api/chats/:chatId/messages', async (req, res) => {
     const result = await createConversationTurn(req.user.id, req.params.chatId, message, String(idempotencyKey));
     if (result.missing) return res.status(404).json({ error: 'No se encontró un chat activo de esa cuenta.' });
     const turn = result.turn;
-    if (turn.status !== 'completed') {
-      try {
-        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
-          method: 'POST',
-          headers: { 'x-swarm-idempotency-key': turn.id },
-          body: JSON.stringify({ userId: req.user.id })
-        });
-      } catch (error) {
-        // The turn is already durable. The client can poll and the next status read will retry the wake-up.
-        console.warn('[bridge][chat_turn_wakeup_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
-      }
-    }
+    if (turn.status !== 'completed') dispatchChatTurn(req.user.id, req.params.chatId, turn.id);
     res.set('Cache-Control', 'no-store').status(202).json({ turn, duplicate: Boolean(result.duplicate) });
   } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'No se pudo guardar el mensaje.' }); }
 });
@@ -365,17 +359,7 @@ app.get('/api/chats/:chatId/turns/:turnId', async (req, res) => {
   try {
     const turn = await getConversationTurn(req.user.id, req.params.chatId, req.params.turnId);
     if (!turn) return res.status(404).json({ error: 'No se encontró ese turno.' });
-    if (turn.status === 'pending') {
-      try {
-        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
-          method: 'POST',
-          headers: { 'x-swarm-idempotency-key': turn.id },
-          body: JSON.stringify({ userId: req.user.id })
-        });
-      } catch (error) {
-        console.warn('[bridge][chat_turn_rewake_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
-      }
-    }
+    if (turn.status === 'pending') dispatchChatTurn(req.user.id, req.params.chatId, turn.id);
     res.set('Cache-Control', 'no-store').json({ turn });
   } catch { res.status(503).json({ error: 'No se pudo consultar el estado del mensaje.' }); }
 });
@@ -417,50 +401,71 @@ async function workerRequest(route, options = {}, mayWake = true) {
     error.status = 503;
     throw error;
   }
-  const startedAt = Date.now();
   const method = String(options.method || 'GET').toUpperCase();
   const idempotencyKey = options.headers?.['x-swarm-idempotency-key'] || options.headers?.['X-Swarm-Idempotency-Key'];
   const replaySafe = ['GET', 'HEAD', 'OPTIONS'].includes(method) || Boolean(idempotencyKey);
-  let response;
-  try {
-    response = await fetch(`${WORKER_BASE_URL}${route}`, {
-      ...options,
-      signal: AbortSignal.timeout(15000),
-      headers: { 'content-type': 'application/json', 'x-swarm-bridge-secret': WORKER_SHARED_SECRET, ...(options.headers || {}) }
-    });
-  } catch (cause) {
-    const detail = cause?.name === 'TimeoutError' || cause?.name === 'AbortError'
-      ? 'timeout después de 15 segundos'
-      : String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 300);
-    console.error('[bridge][worker_network_error]', JSON.stringify({ route, durationMs: Date.now() - startedAt, detail }));
-    if (mayWake && replaySafe) {
-      console.warn('[bridge][worker_network_recovery]', JSON.stringify({ route, method, idempotentPost: method === 'POST' && Boolean(idempotencyKey) }));
-      await ensureWorkerAwake();
-      return workerRequest(route, options, false);
+  const retryDelays = [1000, 2500, 5000, 8000];
+  for (let attempt = 0; ; attempt++) {
+    const startedAt = Date.now();
+    let response;
+    try {
+      response = await fetch(`${WORKER_BASE_URL}${route}`, {
+        ...options,
+        signal: AbortSignal.timeout(15000),
+        headers: { 'content-type': 'application/json', 'x-swarm-bridge-secret': WORKER_SHARED_SECRET, ...(options.headers || {}) }
+      });
+    } catch (cause) {
+      const detail = cause?.name === 'TimeoutError' || cause?.name === 'AbortError'
+        ? 'timeout después de 15 segundos'
+        : String(cause?.cause?.code || cause?.message || cause || 'error de red').slice(0, 300);
+      if (mayWake && replaySafe && attempt < retryDelays.length) {
+        console.warn('[bridge][worker_network_recovery]', JSON.stringify({ route, method, attempt: attempt + 1, detail }));
+        workerReadyUntil = 0;
+        await ensureWorkerAwake();
+        await sleep(retryDelays[attempt]);
+        continue;
+      }
+      console.error('[bridge][worker_network_error]', JSON.stringify({ route, durationMs: Date.now() - startedAt, detail }));
+      const error = new Error(`No se pudo conectar con el motor externo (${detail}). Revisá que swarm-worker esté activo y que WORKER_BASE_URL sea correcto.`);
+      error.status = 502;
+      throw error;
     }
-    const error = new Error(`No se pudo conectar con el motor externo (${detail}). Revisá que swarm-worker esté activo y que WORKER_BASE_URL sea correcto.`);
-    error.status = 502;
-    throw error;
-  }
-  const rawBody = await response.text().catch(() => '');
-  let data = {};
-  try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
-  if (!response.ok) {
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
-    const isHtmlGatewayPage = contentType.includes('text/html') || /^\s*<(?:!doctype html|html)\b/i.test(rawBody);
-    if (mayWake && replaySafe && isHtmlGatewayPage && [502, 503, 504].includes(response.status)) {
-      console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status }));
-      await ensureWorkerAwake();
-      return workerRequest(route, options, false);
+    const rawBody = await response.text().catch(() => '');
+    let data = {};
+    try { data = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+    if (!response.ok) {
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+      const isHtmlGatewayPage = contentType.includes('text/html') || /^\\s*<(?:!doctype html|html)\\b/i.test(rawBody);
+      const isColdStartGateway = isHtmlGatewayPage && [502, 503, 504].includes(response.status);
+      if (mayWake && replaySafe && isColdStartGateway && attempt < retryDelays.length) {
+        console.warn('[bridge][worker_cold_start]', JSON.stringify({ route, status: response.status, attempt: attempt + 1 }));
+        workerReadyUntil = 0;
+        await ensureWorkerAwake();
+        await sleep(retryDelays[attempt]);
+        continue;
+      }
+      const detail = String(data?.error || rawBody || response.statusText || 'el motor no envió detalles').slice(0, 1200);
+      console.error('[bridge][worker_http_error]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt, detail }));
+      const error = new Error(`El motor externo respondió HTTP ${response.status}: ${detail}`);
+      error.status = response.status >= 500 ? 502 : response.status;
+      throw error;
     }
-    const detail = String(data?.error || rawBody || response.statusText || 'el motor no envió detalles').slice(0, 1200);
-    console.error('[bridge][worker_http_error]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt, detail }));
-    const error = new Error(`El motor externo respondió HTTP ${response.status}: ${detail}`);
-    error.status = response.status >= 500 ? 502 : response.status;
-    throw error;
+    console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
+    return data;
   }
-  console.info('[bridge][worker_ok]', JSON.stringify({ route, status: response.status, durationMs: Date.now() - startedAt }));
-  return data;
+}
+const activeChatTurnDispatches = new Set();
+function dispatchChatTurn(userId, chatId, turnId) {
+  const key = String(turnId);
+  if (activeChatTurnDispatches.has(key)) return;
+  activeChatTurnDispatches.add(key);
+  void workerRequest(`/internal/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turnId)}/run`, {
+    method: 'POST',
+    headers: { 'x-swarm-idempotency-key': key },
+    body: JSON.stringify({ userId })
+  }).catch(error => {
+    console.warn('[bridge][chat_turn_wakeup_deferred]', JSON.stringify({ turnId: key, reason: error?.status || error?.name || 'network' }));
+  }).finally(() => activeChatTurnDispatches.delete(key));
 }
 app.get('/api/access-check', (req, res) => res.json({ ok: true, user: req.user }));
 app.get('/api/history', async (req, res) => { if (req.user.role !== 'admin') return res.json({ history: [], isolated: true }); try { res.json(await workerRequest('/internal/history')); } catch (error) { res.status(error.status || 502).json({ error: error.message }); } });
