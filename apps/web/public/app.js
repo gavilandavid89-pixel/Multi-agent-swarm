@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0 };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0, chats: [], currentChatId: null, currentChat: null, chatMessages: [] };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -585,7 +585,7 @@ async function enterApp() {
   $('access-status').textContent = '';
   showApp();
   startTaskEventStream();
-  try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
+  try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses(), loadChats()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
   if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
   if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
@@ -1180,6 +1180,180 @@ $('agent-reply-form').addEventListener('submit', async event => {
   }
 });
 $('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+
+function chatStatusLabel(status) {
+  return ({ pending: 'En cola · se recuperará al reconectar', running: 'La IA está respondiendo…', completed: '', failed: 'No se pudo completar. Podés enviar otro mensaje para reintentar.' })[status] ?? '';
+}
+function renderChatList() {
+  const list = $('chats-list');
+  if (!list) return;
+  if (!state.chats.length) {
+    list.innerHTML = '<div class="empty-state"><p>Todavía no hay chats.</p><span class="muted tiny">Creá uno para empezar.</span></div>';
+    return;
+  }
+  list.innerHTML = state.chats.map(chat => `<div class="chat-list-item ${chat.id === state.currentChatId ? 'selected' : ''}">
+    <button class="chat-list-open" type="button" data-chat-open="${escapeHtml(chat.id)}"><span class="chat-list-title">${escapeHtml(chat.title || 'Nuevo chat')}</span><span class="chat-list-meta">${escapeHtml(dateLabel(chat.updatedAt))}</span></button>
+    <button class="mini-button" type="button" data-chat-rename="${escapeHtml(chat.id)}" aria-label="Renombrar ${escapeHtml(chat.title || 'chat')}" title="Renombrar">✎</button>
+    <button class="mini-button" type="button" data-chat-archive="${escapeHtml(chat.id)}" aria-label="Archivar ${escapeHtml(chat.title || 'chat')}" title="Archivar">×</button>
+  </div>`).join('');
+  list.querySelectorAll('[data-chat-open]').forEach(button => button.addEventListener('click', () => { void selectChat(button.dataset.chatOpen); }));
+  list.querySelectorAll('[data-chat-rename]').forEach(button => button.addEventListener('click', () => { void renameChat(button.dataset.chatRename); }));
+  list.querySelectorAll('[data-chat-archive]').forEach(button => button.addEventListener('click', () => { void archiveChat(button.dataset.chatArchive); }));
+}
+async function loadChats() {
+  try {
+    const data = await api('/api/chats?limit=100&offset=0&archived=false');
+    state.chats = data.chats || [];
+    renderChatList();
+    if (state.currentChatId && !state.chats.some(chat => chat.id === state.currentChatId)) {
+      state.currentChatId = null; state.currentChat = null; state.chatMessages = [];
+      renderChatMessages();
+    }
+  } catch (error) {
+    if ($('chats-status')) $('chats-status').textContent = `No se pudieron cargar los chats: ${error.message}`;
+  }
+}
+function renderChatMessages() {
+  const target = $('chat-messages');
+  if (!target) return;
+  const wasNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 100;
+  if (!state.currentChatId) {
+    target.innerHTML = '<div class="empty-state"><p>Creá un chat nuevo o elegí uno de la lista.</p></div>';
+  } else if (!state.chatMessages.length) {
+    target.innerHTML = '<div class="empty-state"><p>Este chat está listo.</p><span class="muted tiny">Escribí el primer mensaje abajo.</span></div>';
+  } else {
+    target.innerHTML = state.chatMessages.map(message => {
+      const status = message.role === 'user' ? chatStatusLabel(message.metadata?.turnStatus) : '';
+      return `<article class="chat-message ${message.role === 'user' ? 'user' : 'assistant'}"><span class="chat-message-role">${message.role === 'user' ? 'Vos' : 'Swarm · asistente'}</span><p class="chat-message-content">${escapeHtml(message.content)}</p>${status ? `<span class="chat-turn-status">${escapeHtml(status)}</span>` : ''}</article>`;
+    }).join('');
+  }
+  if (wasNearBottom) target.scrollTop = target.scrollHeight;
+  const enabled = Boolean(state.currentChatId);
+  $('chat-message-input').disabled = !enabled;
+  $('chat-message-send').disabled = !enabled;
+  $('rename-chat-button').disabled = !enabled;
+  $('archive-chat-button').disabled = !enabled;
+  $('selected-chat-title').textContent = state.currentChat?.title || 'Elegí un chat';
+}
+async function loadChatMessages() {
+  if (!state.currentChatId) return;
+  const chatId = state.currentChatId;
+  const data = await api(`/api/chats/${encodeURIComponent(chatId)}/messages?limit=100`);
+  if (state.currentChatId !== chatId) return;
+  state.chatMessages = data.messages || [];
+  renderChatMessages();
+}
+async function selectChat(chatId) {
+  try {
+    const data = await api(`/api/chats/${encodeURIComponent(chatId)}`);
+    state.currentChatId = chatId;
+    state.currentChat = data.chat;
+    await loadChatMessages();
+    renderChatList();
+    renderChatMessages();
+    if ($('chats-status')) $('chats-status').textContent = 'Chat guardado en la nube. Los mensajes se recuperan al reconectar.';
+  } catch (error) {
+    if ($('chats-status')) $('chats-status').textContent = `No se pudo abrir el chat: ${error.message}`;
+  }
+}
+async function createNewChat() {
+  const button = $('new-chat-button');
+  button.disabled = true;
+  try {
+    const data = await api('/api/chats', { method: 'POST', body: JSON.stringify({}) });
+    await loadChats();
+    await selectChat(data.chat.id);
+    $('chat-message-input').focus();
+    if ($('chats-status')) $('chats-status').textContent = 'Chat creado.';
+  } catch (error) {
+    if ($('chats-status')) $('chats-status').textContent = `No se pudo crear el chat: ${error.message}`;
+  } finally { button.disabled = false; }
+}
+async function renameChat(chatId) {
+  const chat = state.chats.find(item => item.id === chatId);
+  const title = window.prompt('Nuevo nombre del chat:', chat?.title || 'Nuevo chat');
+  if (title === null) return;
+  try {
+    const data = await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+    if (state.currentChatId === chatId) state.currentChat = data.chat;
+    await loadChats(); renderChatMessages();
+    if ($('chats-status')) $('chats-status').textContent = 'Nombre actualizado.';
+  } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo renombrar: ${error.message}`; }
+}
+async function archiveChat(chatId) {
+  if (!window.confirm('¿Archivar este chat? No se borrarán sus mensajes.')) return;
+  try {
+    await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) });
+    if (state.currentChatId === chatId) { state.currentChatId = null; state.currentChat = null; state.chatMessages = []; renderChatMessages(); }
+    await loadChats();
+    if ($('chats-status')) $('chats-status').textContent = 'Chat archivado. No se borró.';
+  } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo archivar: ${error.message}`; }
+}
+function openChatsDrawer() {
+  $('files-drawer')?.classList.add('hidden');
+  $('history-drawer')?.classList.add('hidden');
+  const drawer = $('chats-drawer');
+  drawer.classList.remove('hidden');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('open-chats-menu')?.setAttribute('aria-expanded', 'true');
+  void loadChats();
+  if (state.currentChatId) void loadChatMessages().catch(() => {});
+}
+function closeChatsDrawer() {
+  const drawer = $('chats-drawer');
+  drawer.classList.add('hidden');
+  drawer.setAttribute('aria-hidden', 'true');
+  $('open-chats-menu')?.setAttribute('aria-expanded', 'false');
+}
+$('open-chats-menu').addEventListener('click', () => { $('account-menu-items').classList.add('hidden'); $('account-menu-toggle').setAttribute('aria-expanded', 'false'); openChatsDrawer(); });
+$('close-chats-drawer').addEventListener('click', closeChatsDrawer);
+$('new-chat-button').addEventListener('click', () => { void createNewChat(); });
+$('refresh-chats-button').addEventListener('click', () => { void loadChats(); if (state.currentChatId) void loadChatMessages().catch(error => { $('chats-status').textContent = error.message; }); });
+$('rename-chat-button').addEventListener('click', () => { if (state.currentChatId) void renameChat(state.currentChatId); });
+$('archive-chat-button').addEventListener('click', () => { if (state.currentChatId) void archiveChat(state.currentChatId); });
+$('chat-message-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const chatId = state.currentChatId;
+  const input = $('chat-message-input');
+  const message = input.value.trim();
+  if (!chatId || !message) return;
+  const button = $('chat-message-send');
+  const idempotencyKey = crypto.randomUUID();
+  button.disabled = true; input.disabled = true; button.textContent = 'Enviando…';
+  if ($('chats-status')) $('chats-status').textContent = 'Guardando el mensaje y conectando con la IA…';
+  try {
+    const created = await api(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: 'POST',
+      headers: { 'idempotency-key': idempotencyKey },
+      body: JSON.stringify({ message })
+    });
+    input.value = '';
+    await loadChatMessages();
+    const turnId = created.turn?.id;
+    if (!turnId) throw new Error('El servidor no devolvió el identificador del turno.');
+    const startedAt = Date.now();
+    let status = created.turn.status || 'pending';
+    while (state.currentChatId === chatId && Date.now() - startedAt < 240000 && !['completed','failed'].includes(status)) {
+      await new Promise(resolve => setTimeout(resolve, 1800));
+      const stateResult = await api(`/api/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turnId)}`);
+      status = stateResult.turn?.status || status;
+      await loadChatMessages();
+    }
+    await loadChats();
+    if (status === 'completed') {
+      if ($('chats-status')) $('chats-status').textContent = 'Respuesta guardada. Podés seguir conversando.';
+    } else if (status === 'failed') {
+      const turnState = await api(`/api/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turnId)}`);
+      if ($('chats-status')) $('chats-status').textContent = `La IA no pudo responder: ${turnState.turn?.lastError || 'fallo temporal'}. Enviá otro mensaje para reintentar.`;
+    } else if ($('chats-status')) $('chats-status').textContent = 'El turno sigue guardado y puede continuar en segundo plano. Podés cerrar y volver al chat.';
+  } catch (error) {
+    if ($('chats-status')) $('chats-status').textContent = `No se pudo enviar el mensaje: ${error.message}. Si quedó guardado, actualizá el chat para recuperar el estado.`;
+    await loadChatMessages().catch(() => {});
+  } finally {
+    button.disabled = !state.currentChatId; input.disabled = !state.currentChatId; button.textContent = 'Enviar ↗';
+  }
+});
+
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }
