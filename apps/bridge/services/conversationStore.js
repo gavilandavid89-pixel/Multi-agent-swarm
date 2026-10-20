@@ -57,7 +57,9 @@ export async function listConversations(userId, { archived = false, limit = 25, 
   const { rows } = await pool.query(
     `SELECT c.id, c.title, c.created_at AS "createdAt", c.updated_at AS "updatedAt",
             c.archived_at AS "archivedAt", c.last_message_at AS "lastMessageAt",
-            (SELECT count(*)::int FROM conversation_messages m WHERE m.conversation_id=c.id) AS "messageCount"
+            (SELECT count(*)::int FROM conversation_messages m WHERE m.conversation_id=c.id) AS "messageCount",
+            (SELECT left(m.content, 240) FROM conversation_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) AS "lastMessagePreview",
+            (SELECT m.role FROM conversation_messages m WHERE m.conversation_id=c.id ORDER BY m.id DESC LIMIT 1) AS "lastMessageRole"
        FROM conversations c
       WHERE c.user_id=$1 AND (($2::boolean AND c.archived_at IS NOT NULL) OR (NOT $2::boolean AND c.archived_at IS NULL))
       ORDER BY c.updated_at DESC, c.id DESC

@@ -27,8 +27,14 @@ if (!appSource.includes("if (resetScroll && !document.body.classList.contains('a
     !appSource.includes("window.addEventListener('resize', () => scheduleViewportSync(),")) {
   throw new Error('Mobile keyboard/viewport resizing must not force scroll-to-top; only orientation changes may reset the page position.');
 }
-if (!appSource.includes("$('open-history-menu').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
-  throw new Error('Task history must be reachable from the three-dot menu and moved to its drawer.');
+if (!appSource.includes("$('task-history-toggle').addEventListener('click'") || !appSource.includes("append(historyPanel)")) {
+  throw new Error('Task history must be reachable only from the task workspace and moved to its drawer.');
+}
+if (appSource.includes("$('open-history-menu').addEventListener('click'")) {
+  throw new Error('Task history must not be placed in the global three-dot menu.');
+}
+if (!appSource.includes('function showChatListView()') || !appSource.includes('function showChatConversationView()')) {
+  throw new Error('Independent chats need distinct list and conversation views.');
 }
 if (!appSource.includes("const taskTitle = job.title") || !appSource.includes("job.title || `Tarea ${job.id.slice(0,8)}`")) {
   throw new Error('Task titles must appear automatically in the conversation and activity/history lists.');
@@ -53,8 +59,11 @@ if (!styleSource.includes('touch-action:pan-y') || !styleSource.includes('.agent
 const sourceHtml = readFileSync(path.join(publicDir, 'index.html'), 'utf8')
   .replace(/<script src="\/app\.js[^"]*" defer><\/script>\s*/g, '')
   .replace(/<script src="\/invite-gate\.js[^"]*" defer><\/script>\s*/g, '');
-if (!sourceHtml.includes('id="open-history-menu"') || !sourceHtml.includes('id="history-drawer"')) {
-  throw new Error('The three-dot menu needs a history entry and matching drawer.');
+if (!sourceHtml.includes('id="task-history-toggle"') || sourceHtml.includes('id="open-history-menu"') || !sourceHtml.includes('id="history-drawer"')) {
+  throw new Error('Task history must have a task-only entry and matching drawer, not a global menu entry.');
+}
+if (!sourceHtml.includes('id="new-chat-button"') || !sourceHtml.includes('id="chat-thread-view" class="chat-thread hidden"')) {
+  throw new Error('The home screen must list conversations without exposing the message composer until a conversation is opened.');
 }
 const injected = `
 <pre id="layout-result" hidden></pre>
@@ -64,6 +73,7 @@ const injected = `
   document.getElementById('api-settings-panel').classList.add('hidden');
   document.getElementById('app-content').classList.remove('hidden');
   document.getElementById('files-menu-toggle').classList.remove('hidden');
+  document.getElementById('task-history-toggle').classList.remove('hidden');
   document.getElementById('account-menu').classList.remove('hidden');
   document.getElementById('account-menu-items').classList.remove('hidden');
   document.getElementById('welcome-chat').classList.add('hidden');
@@ -87,7 +97,10 @@ const injected = `
       accountToggleBottom: Math.round(document.getElementById('account-menu-toggle').getBoundingClientRect().bottom),
       filesButtonTop: Math.round(document.getElementById('files-menu-toggle').getBoundingClientRect().top),
       filesButtonBottom: Math.round(document.getElementById('files-menu-toggle').getBoundingClientRect().bottom),
-      historyMenuPresent: Boolean(document.getElementById('open-history-menu')),
+      historyMenuPresent: Boolean(document.getElementById('task-history-toggle')),
+      historyButtonTop: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().top),
+      historyButtonBottom: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().bottom),
+      historyInsideAccountMenu: Boolean(document.getElementById('account-menu-items').contains(document.getElementById('task-history-toggle'))),
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootScrollHeight: document.documentElement.scrollHeight,
       bodyScrollHeight: document.body.scrollHeight,
@@ -237,7 +250,9 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.shellTop < -1 || report.topbarTop < 0 || report.topbarBottom > height + 2) issues.push(`top bar is outside viewport (${report.topbarTop}–${report.topbarBottom}px)`);
     if (report.accountToggleTop < 0 || report.accountToggleBottom > height + 2) issues.push(`three-dot menu is outside viewport (${report.accountToggleTop}–${report.accountToggleBottom}px)`);
     if (report.filesButtonTop < 0 || report.filesButtonBottom > height + 2) issues.push(`files button is outside viewport (${report.filesButtonTop}–${report.filesButtonBottom}px)`);
-    if (!report.historyMenuPresent) issues.push('three-dot menu has no task-history entry');
+    if (!report.historyMenuPresent) issues.push('task workspace has no history control');
+    if (report.historyInsideAccountMenu) issues.push('task history must not be inside the global three-dot menu');
+    if (report.historyButtonTop < 0 || report.historyButtonBottom > height + 2) issues.push(`task history control is outside viewport (${report.historyButtonTop}–${report.historyButtonBottom}px)`);
     if (report.bodyOverflowY !== 'hidden') issues.push(`body overflow-y is ${report.bodyOverflowY}`);
     if (report.rootScrollHeight > height + 2) issues.push(`document scroll height ${report.rootScrollHeight} > viewport ${height}`);
     if (report.bodyScrollHeight > height + 2) issues.push(`body scroll height ${report.bodyScrollHeight} > viewport ${height}`);
