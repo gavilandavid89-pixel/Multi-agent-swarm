@@ -1,0 +1,27 @@
+name: Auditoría de variables Render (solo lectura)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+      - name: Ejecutar auditoría sanitizada
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: python3 scripts/auditar_render_env_swarm.py
+      - name: Publicar informe sanitizado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swarm-render-env-audit
+          path: swarm-render-env-audit.md
+          if-no-files-found: warn
+          retention-days: 7
