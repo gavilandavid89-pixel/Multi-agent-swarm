@@ -1112,3 +1112,7 @@ body.swarm-chat-fullscreen #chats-drawer .chat-thread-head .back-to-chats-button
   body.swarm-task-mode:not(.swarm-home-scroll) #submit-job { min-height: 38px !important; }
   body.swarm-chat-fullscreen #chats-drawer .chat-thread { padding-top: 44px !important; }
 }
+
+/* Keep the floating controls above the full-screen conversation stacking layer. */
+body.swarm-chat-fullscreen .shell,
+body.swarm-task-mode:not(.swarm-home-scroll) .shell { z-index: 10000 !important; }
