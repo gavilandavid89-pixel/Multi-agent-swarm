@@ -1,5 +1,17 @@
 const $ = id => document.getElementById(id);
 const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0, chats: [], currentChatId: null, currentChat: null, chatMessages: [] };
+function mountChatHome() {
+  const drawer = $('chats-drawer');
+  const slot = $('main-chat-slot');
+  if (!drawer || !slot || drawer.dataset.mainHomeMounted === 'true') return;
+  drawer.classList.remove('files-drawer', 'chats-drawer', 'hidden');
+  drawer.classList.add('main-chat-panel');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('close-chats-drawer')?.classList.add('hidden');
+  drawer.dataset.mainHomeMounted = 'true';
+  slot.append(drawer);
+}
+mountChatHome();
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -15,8 +27,8 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('chats-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -579,18 +591,44 @@ async function showDetail(id) {
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
+function showChatHome() {
+  $('main-chat-home')?.classList.remove('hidden');
+  $('app-content').classList.add('hidden');
+  $('task-mode-toggle').textContent = '＋ Tarea';
+  $('files-menu-toggle')?.classList.add('hidden');
+  $('files-drawer')?.classList.add('hidden');
+  $('files-drawer')?.setAttribute('aria-hidden', 'true');
+  $('history-drawer')?.classList.add('hidden');
+  $('history-drawer')?.setAttribute('aria-hidden', 'true');
+  $('open-history-menu')?.setAttribute('aria-expanded', 'false');
+  stopTaskEventStream();
+  clearInterval(state.pollHandle); state.pollHandle = null;
+  clearInterval(state.listPollHandle); state.listPollHandle = null;
+  state.taskWorkspaceStarted = false;
+  setConnection(true, 'Chats listos');
+  void loadChats();
+}
+function showTaskWorkspace() {
+  $('main-chat-home')?.classList.add('hidden');
+  $('app-content').classList.remove('hidden');
+  $('task-mode-toggle').textContent = '← Chats';
+  $('files-menu-toggle')?.classList.remove('hidden');
+  if (state.taskWorkspaceStarted) return;
+  state.taskWorkspaceStarted = true;
+  startTaskEventStream();
+  void Promise.allSettled([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]).then(() => refresh());
+  if (!state.pollHandle) state.pollHandle = setInterval(() => { void refresh(); }, 1800);
+  if (!state.listPollHandle) state.listPollHandle = setInterval(() => {
+    void Promise.allSettled([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]);
+  }, 12000);
+}
 async function enterApp() {
   const access = await api('/api/access-check');
   state.user = access.user || state.user;
   $('access-status').textContent = '';
   showApp();
-  startTaskEventStream();
-  try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses(), loadChats()]); await refresh(); }
-  catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
-  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
-  if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
-    try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
-  }, 12000);
+  setConnection(true, 'Chats listos');
+  await loadChats();
 }
 $('access-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1315,23 +1353,16 @@ async function archiveChat(chatId) {
   } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo archivar: ${error.message}`; }
 }
 function openChatsDrawer() {
-  $('files-drawer')?.classList.add('hidden');
-  $('history-drawer')?.classList.add('hidden');
-  const drawer = $('chats-drawer');
-  drawer.classList.remove('hidden');
-  drawer.setAttribute('aria-hidden', 'false');
+  showChatHome();
   $('open-chats-menu')?.setAttribute('aria-expanded', 'true');
-  void loadChats();
-  if (state.currentChatId) void loadChatMessages().catch(() => {});
 }
 function closeChatsDrawer() {
-  const drawer = $('chats-drawer');
-  drawer.classList.add('hidden');
-  drawer.setAttribute('aria-hidden', 'true');
+  showTaskWorkspace();
   $('open-chats-menu')?.setAttribute('aria-expanded', 'false');
 }
 $('open-chats-menu').addEventListener('click', () => { $('account-menu-items').classList.add('hidden'); $('account-menu-toggle').setAttribute('aria-expanded', 'false'); openChatsDrawer(); });
 $('close-chats-drawer').addEventListener('click', closeChatsDrawer);
+$('task-mode-toggle').addEventListener('click', () => { if ($('app-content').classList.contains('hidden')) showTaskWorkspace(); else showChatHome(); });
 $('new-chat-button').addEventListener('click', () => { void createNewChat(); });
 $('refresh-chats-button').addEventListener('click', () => { void loadChats(); if (state.currentChatId) void loadChatMessages().catch(error => { $('chats-status').textContent = error.message; }); });
 $('rename-chat-button').addEventListener('click', () => { if (state.currentChatId) void renameChat(state.currentChatId); });
@@ -1394,6 +1425,7 @@ $('account-menu-toggle').setAttribute('aria-expanded', 'false');
 $('open-history-menu').addEventListener('click', () => {
   $('account-menu-items').classList.add('hidden');
   $('account-menu-toggle').setAttribute('aria-expanded', 'false');
+  showTaskWorkspace();
   openHistoryDrawer();
 });
 $('close-history-drawer').addEventListener('click', closeHistoryDrawer);
@@ -1429,6 +1461,7 @@ document.addEventListener('keydown', event => {
 });
 $('open-technical-diagnostic').addEventListener('click', () => {
   $('account-menu-items').classList.add('hidden');
+  showTaskWorkspace();
   if (!state.currentDetailId) { $('job-submit-status').textContent = 'Abrí una tarea para consultar su diagnóstico técnico.'; return; }
   const diagnostic = document.querySelector('.diagnostic');
   if (diagnostic) { diagnostic.open = true; diagnostic.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
