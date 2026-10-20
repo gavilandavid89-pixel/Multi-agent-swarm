@@ -338,7 +338,7 @@ app.get('/api/chats/:chatId/messages', async (req, res) => {
   if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
   const limit = Math.max(1, parsePageInteger(req.query.limit, 50, 100));
   const beforeId = req.query.beforeId === undefined ? null : String(req.query.beforeId);
-  if (beforeId !== null && !/^\\d{1,18}$/.test(beforeId)) return res.status(400).json({ error: 'Cursor de mensajes inválido.' });
+  if (beforeId !== null && !/^\d{1,18}$/.test(beforeId)) return res.status(400).json({ error: 'Cursor de mensajes inválido.' });
   try {
     const chat = await getConversation(req.user.id, req.params.chatId);
     if (!chat) return res.status(404).json({ error: 'No se encontró ese chat.' });
