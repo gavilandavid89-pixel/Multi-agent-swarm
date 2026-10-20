@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { pool } from './accountStore.js';
 
 const MAX_TITLE_LENGTH = 120;
@@ -152,16 +153,17 @@ export async function createConversationTurn(userId, conversationId, message, id
       await client.query('COMMIT');
       return { turn: existing.rows[0], duplicate: true };
     }
+    const turnId = randomUUID();
     const userMessage = await client.query(
       `INSERT INTO conversation_messages(conversation_id, role, content, metadata, idempotency_key)
        VALUES($1, 'user', $2, $3::jsonb, $4) RETURNING id`,
-      [conversationId, content, JSON.stringify({ turnStatus: 'pending' }), idempotencyKey]
+      [conversationId, content, JSON.stringify({ turnId, turnStatus: 'pending' }), idempotencyKey]
     );
     const turnResult = await client.query(
-      `INSERT INTO conversation_turns(conversation_id, user_id, idempotency_key, user_message_id)
-       VALUES($1, $2, $3, $4)
+      `INSERT INTO conversation_turns(id, conversation_id, user_id, idempotency_key, user_message_id)
+       VALUES($1, $2, $3, $4, $5)
        RETURNING id, status, user_message_id AS "userMessageId", assistant_message_id AS "assistantMessageId"`,
-      [conversationId, userId, idempotencyKey, userMessage.rows[0].id]
+      [turnId, conversationId, userId, idempotencyKey, userMessage.rows[0].id]
     );
     await client.query(
       `UPDATE conversations SET updated_at=now(), last_message_at=now(),
