@@ -101,3 +101,11 @@ export async function processConversationTurn(turnId) {
 }
 
 export async function closeConversationTurnStore() { await pool.end(); }
+
+export async function hasConversationTurn(turnId, conversationId, userId) {
+  const { rows } = await pool.query(
+    'SELECT id FROM conversation_turns WHERE id=$1 AND conversation_id=$2 AND user_id=$3',
+    [turnId, conversationId, userId]
+  );
+  return Boolean(rows[0]);
+}
