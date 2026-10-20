@@ -82,7 +82,8 @@ if (!sourceHtml.includes('id="new-chat-button"') || !sourceHtml.includes('id="ch
 const injected = `
 <pre id="layout-result" hidden></pre>
 <script>
-  document.body.classList.remove('auth-gate');
+  document.body.classList.remove('auth-gate', 'swarm-home-scroll');
+  document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
   document.getElementById('access-panel').classList.add('hidden');
   document.getElementById('api-settings-panel').classList.add('hidden');
   document.getElementById('app-content').classList.remove('hidden');
@@ -274,14 +275,14 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.conversationHeight < 80) issues.push(`conversation is too short: ${report.conversationHeight}px`);
     if (!report.conversationScrollable) issues.push('conversation did not become its own scroll region');
     if (!report.composerVisible) issues.push(`composer is outside viewport (${report.composerTop}–${report.composerBottom}px)`);
-    if (report.composerPosition === 'fixed' || report.composerPosition === 'sticky') issues.push(`composer must stay in normal flow, got position ${report.composerPosition}`);
+    if (report.composerPosition !== 'fixed') issues.push(`full-screen composer must stay anchored to the viewport, got position ${report.composerPosition}`);
     if (report.objectiveResize !== 'none') issues.push(`message input must not be manually resizable, got resize ${report.objectiveResize}`);
     if (report.objectiveHeight > 125) issues.push(`message input is too tall at rest: ${report.objectiveHeight}px`);
     if (!report.menuTogglePresent || !report.menuItemsPresent) issues.push('account three-dot menu controls are missing');
     if (report.filesButtonPosition === 'fixed') issues.push('files button must not float over the conversation');
-    if (report.filesDrawerPosition === 'fixed') issues.push('files drawer must be anchored to the app shell, not the viewport');
+    if (report.filesDrawerPosition !== 'fixed') issues.push('task files drawer must overlay the full-screen chat viewport');
     if (issues.length) throw new Error(`${orientation} layout failed: ${issues.join('; ')}. Report: ${JSON.stringify(report)}`);
-    console.log(`PASS ${orientation}: ${width}x${height}; page locked, conversation scrolls independently, composer visible.`);
+    console.log(`PASS ${orientation}: ${width}x${height}; full-screen task chat scrolls independently with floating controls and composer.`);
     const rotationSizes = [[width, height], [height, width], [width, height], [height, width], [width, height]];
     for (let cycle = 0; cycle < rotationSizes.length; cycle++) {
       const [cycleWidth, cycleHeight] = rotationSizes[cycle];
@@ -307,7 +308,7 @@ async function runViewport(url, profile, width, height, orientation) {
       if (rotated.scrollY !== 0) rotationIssues.push(`page retained scrollY=${rotated.scrollY}`);
       if (rotationIssues.length) throw new Error(`Rotation ${cycle + 1} failed: ${rotationIssues.join('; ')}. Report: ${JSON.stringify(rotated)}`);
     }
-    console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; three-dot menu and files remain visible.`);
+    console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; task history, files and composer remain reachable.`);
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {
