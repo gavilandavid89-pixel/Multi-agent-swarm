@@ -777,7 +777,14 @@ body.swarm-task-mode:not(.swarm-home-scroll) .shell {
   overflow: hidden !important;
 }
 body.swarm-chat-fullscreen .topbar,
-body.swarm-task-mode:not(.swarm-home-scroll) .topbar { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) .topbar {
+  display: flex !important; position: static !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; overflow: visible !important; background: transparent !important; box-shadow: none !important;
+}
+body.swarm-chat-fullscreen .brand,
+body.swarm-task-mode:not(.swarm-home-scroll) .brand { display: none !important; }
+body.swarm-chat-fullscreen footer,
+body.swarm-task-mode:not(.swarm-home-scroll) footer { display: none !important; }
 body.swarm-chat-fullscreen .connection,
 body.swarm-task-mode:not(.swarm-home-scroll) .connection {
   position: fixed !important;
@@ -930,7 +937,7 @@ body.swarm-task-mode:not(.swarm-home-scroll) #submit-job {
   padding: 10px 12px !important;
   white-space: nowrap;
 }
-body.swarm-task-mode:not(.swarm-home-scroll) #welcome-chat {
+body.swarm-task-mode:not(.swarm-home-scroll) #welcome-chat:not(.hidden) {
   display: flex !important;
   flex: 1 1 auto !important;
   flex-direction: column;
@@ -940,7 +947,7 @@ body.swarm-task-mode:not(.swarm-home-scroll) #welcome-chat {
   padding: 54px 22px 104px !important;
   text-align: center;
 }
-body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel {
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel:not(.hidden) {
   position: fixed !important;
   inset: 0 !important;
   z-index: 3 !important;
