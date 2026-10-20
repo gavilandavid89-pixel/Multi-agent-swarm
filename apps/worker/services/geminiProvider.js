@@ -60,7 +60,7 @@ function toGeminiContents(messages) {
         let args = {};
         try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
         const thoughtSignature = String(call?.thought_signature || call?.thoughtSignature || call?.function?.thought_signature || call?.function?.thoughtSignature || '');
-        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || ''), ...(thoughtSignature ? { thoughtSignature } : {}) } };
+        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || '') }, ...(thoughtSignature ? { thoughtSignature } : {}) };
       });
       if (item.content) parts.unshift({ text: String(item.content) });
     } else if (item.role === 'tool') {
@@ -240,7 +240,8 @@ export async function consultarGemini({
         const calls = translated.toolCalls.slice(0, 8);
         requestMessages = [...requestMessages, { role: 'assistant', content, tool_calls: calls.map(call => ({
           id: String(call.id || randomUUID()), type: 'function',
-          function: { name: String(call.name || ''), arguments: JSON.stringify(call.arguments ?? call.input ?? {}) }
+          function: { name: String(call.name || ''), arguments: JSON.stringify(call.arguments ?? call.input ?? {}) },
+          ...(call.thoughtSignature ? { thought_signature: String(call.thoughtSignature) } : {})
         })) }];
         toolRounds++;
         await saveConversation();
