@@ -58,7 +58,7 @@ function normalizeFinishReason(reason) {
   return String(reason);
 }
 
-function canonical(content, { provider = 'unknown', model = null, status = 'success', usage = {}, finishReason = null, toolCalls = [], warnings = [] } = {}) {
+function canonical(content, { provider = 'unknown', model = null, status = 'success', usage = {}, finishReason = null, toolCalls = [], warnings = [], providerData = null } = {}) {
   return {
     schemaVersion: 1,
     status,
@@ -66,6 +66,7 @@ function canonical(content, { provider = 'unknown', model = null, status = 'succ
     model: typeof model === 'string' && model ? model : null,
     content: String(content ?? ''),
     toolCalls,
+    ...(providerData ? { providerData } : {}),
     usage: normalizeUsage(usage),
     finishReason: normalizeFinishReason(finishReason),
     warnings
@@ -117,6 +118,7 @@ function fromGemini(data, options) {
     usage: data.usageMetadata || {},
     finishReason: blocked ? 'content_filter' : candidate?.finishReason,
     toolCalls,
+    providerData: candidate?.content?.parts || null,
     warnings: blocked ? ['GEMINI_PROMPT_BLOCKED'] : []
   });
 }
