@@ -8,6 +8,20 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const publicDir = path.join(root, 'apps/web/public');
 const chrome = process.env.CHROME_BIN || 'chromium';
 const appSource = readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+const cSource = readFileSync(path.join(publicDir, 'styles.css'), 'utf8');
+if (!appSource.includes("document.body.classList.add('swarm-home-scroll')") ||
+    !appSource.includes("document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat')")) {
+  throw new Error('Home must keep global touch scrolling, while task chat opens as a full-screen surface.');
+}
+if (!appSource.includes("if (state.currentDetailId) {") ||
+    !appSource.includes("Continuando la tarea abierta con su historial y archivos…") ||
+    !appSource.includes("/api/jobs/\${encodeURIComponent(state.currentDetailId)}/reply")) {
+  throw new Error('Sending from an open task must continue that same task instead of creating a new job.');
+}
+if (!cSource.includes('body.swarm-home-scroll') || !cSource.includes('overflow-y: auto !important') ||
+    !cSource.includes('body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel:not(.hidden)')) {
+  throw new Error('Responsive layout must support global home scrolling and a full-screen task conversation.');
+}
 const menuClickHandlers = appSource.split("$('account-menu-toggle').addEventListener('click'").length - 1;
 if (menuClickHandlers !== 1) throw new Error(`Expected exactly one account-menu click handler, found ${menuClickHandlers}.`);
 const menuHandlerStart = appSource.indexOf("$('account-menu-toggle').addEventListener('click'");
