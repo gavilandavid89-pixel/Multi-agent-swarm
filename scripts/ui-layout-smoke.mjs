@@ -116,6 +116,8 @@ const injected = `
       historyButtonTop: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().top),
       historyButtonBottom: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().bottom),
       historyInsideAccountMenu: Boolean(document.getElementById('account-menu-items').contains(document.getElementById('task-history-toggle'))),
+      historyHitTarget: (() => { const b = document.getElementById('task-history-toggle'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(e && (e === b || b.contains(e))); })(),
+      filesHitTarget: (() => { const b = document.getElementById('files-menu-toggle'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(e && (e === b || b.contains(e))); })(),
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootScrollHeight: document.documentElement.scrollHeight,
       bodyScrollHeight: document.body.scrollHeight,
@@ -267,6 +269,8 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.filesButtonTop < 0 || report.filesButtonBottom > height + 2) issues.push(`files button is outside viewport (${report.filesButtonTop}–${report.filesButtonBottom}px)`);
     if (!report.historyMenuPresent) issues.push('task workspace has no history control');
     if (report.historyInsideAccountMenu) issues.push('task history must not be inside the global three-dot menu');
+    if (!report.historyHitTarget) issues.push('task history control is covered by another layer');
+    if (!report.filesHitTarget) issues.push('files control is covered by another layer');
     if (report.historyButtonTop < 0 || report.historyButtonBottom > height + 2) issues.push(`task history control is outside viewport (${report.historyButtonTop}–${report.historyButtonBottom}px)`);
     if (report.bodyOverflowY !== 'hidden') issues.push(`body overflow-y is ${report.bodyOverflowY}`);
     if (report.rootScrollHeight > height + 2) issues.push(`document scroll height ${report.rootScrollHeight} > viewport ${height}`);
@@ -309,6 +313,34 @@ async function runViewport(url, profile, width, height, orientation) {
       if (rotationIssues.length) throw new Error(`Rotation ${cycle + 1} failed: ${rotationIssues.join('; ')}. Report: ${JSON.stringify(rotated)}`);
     }
     console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; task history, files and composer remain reachable.`);
+    const homeCheck = await devtools.send('Runtime.evaluate', {
+      expression: \`(() => {
+        document.body.classList.remove('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
+        document.body.classList.add('swarm-home-scroll');
+        document.getElementById('app-content').classList.add('hidden');
+        document.getElementById('main-chat-home').classList.remove('hidden', 'chat-detail-open');
+        const drawer = document.getElementById('chats-drawer');
+        drawer.classList.remove('hidden', 'files-drawer', 'chats-drawer');
+        drawer.classList.add('main-chat-panel');
+        document.getElementById('main-chat-slot').append(drawer);
+        const list = document.getElementById('chats-list');
+        list.classList.remove('hidden');
+        list.innerHTML = Array.from({length: 36}, (_, i) =>
+          '<article class="chat-list-item"><button class="chat-list-open"><span class="chat-list-title">Conversación ' + i + '</span><span class="chat-list-preview">Último mensaje de prueba para verificar el desplazamiento global al girar el teléfono.</span><span class="chat-list-meta">Hace un momento</span></button></article>'
+        ).join('');
+        window.scrollTo(0, 500);
+        return { overflowY: getComputedStyle(document.body).overflowY, rootHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewportHeight: window.innerHeight, scrollY: window.scrollY };
+      })()\`,
+      returnByValue: true
+    }, sessionId);
+    await delay(80);
+    const home = homeCheck.result?.result?.value || {};
+    const homeIssues = [];
+    if (home.overflowY !== 'auto') homeIssues.push('home body overflow-y is ' + home.overflowY);
+    if (home.rootHeight <= home.viewportHeight + 20) homeIssues.push('home content does not extend beyond the viewport');
+    if (home.scrollY < 40) homeIssues.push('home list did not scroll globally');
+    if (homeIssues.length) throw new Error(\`Global home scroll failed in \${orientation}: \${homeIssues.join('; ')}. Report: \${JSON.stringify(home)}\`);
+    console.log(\`PASS global home scroll \${orientation}: \${home.viewportHeight}px viewport, document \${home.rootHeight}px, scrollY=\${home.scrollY}.\`);
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {
