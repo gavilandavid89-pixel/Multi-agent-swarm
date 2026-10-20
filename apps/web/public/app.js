@@ -576,6 +576,7 @@ async function refresh() {
   try { await refreshPromise; } finally { refreshPromise = null; }
 }
 async function showDetail(id) {
+  document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
   if (state.currentDetailId !== id) {
     $('artifact-preview-frame').src = 'about:blank';
     $('artifact-preview').classList.add('hidden');
@@ -592,6 +593,8 @@ async function showDetail(id) {
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
 function showChatHome() {
+  document.body.classList.remove('swarm-task-mode', 'swarm-task-chat', 'swarm-chat-fullscreen');
+  document.body.classList.add('swarm-home-scroll');
   showChatListView();
   $('main-chat-home')?.classList.remove('hidden');
   $('app-content').classList.add('hidden');
@@ -611,6 +614,8 @@ function showChatHome() {
   void loadChats();
 }
 function showTaskWorkspace() {
+  document.body.classList.remove('swarm-home-scroll');
+  document.body.classList.add('swarm-task-mode');
   $('main-chat-home')?.classList.add('hidden');
   $('task-history-toggle')?.classList.remove('hidden');
   $('app-content').classList.remove('hidden');
@@ -1092,12 +1097,15 @@ $('job-form').addEventListener('submit', async event => {
   const target = $('chat-target')?.value || 'global';
   button.disabled = true; button.textContent = 'Enviando…';
   try {
-    if (target !== 'global') {
-      if (!state.currentDetailId) throw new Error('Primero iniciá o abrí una tarea global; después podés hablar directamente con un agente.');
-      const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: target, message }) });
+    if (state.currentDetailId) {
+      const taskAgent = target === 'global' ? 'Coordinador de coherencia' : target;
+      $('job-submit-status').textContent = 'Continuando la tarea abierta con su historial y archivos…';
+      const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: taskAgent, message }) });
       $('objective').value = ''; resizeObjectiveInput();
-      $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || target}; la respuesta aparecerá en esta conversación.`;
+      $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || taskAgent} dentro de la tarea actual.`;
       await updateSelectedDetail();
+    } else if (target !== 'global') {
+      throw new Error('Abrí una tarea antes de enviar un mensaje dirigido a un agente.');
     } else {
       $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
       const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
@@ -1220,7 +1228,7 @@ $('agent-reply-form').addEventListener('submit', async event => {
     button.disabled = false; button.textContent = 'Enviar al agente ↗';
   }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; document.body.classList.remove('swarm-task-chat', 'swarm-chat-fullscreen'); });
 
 function chatStatusLabel(status) {
   return ({ pending: 'En cola · se recuperará al reconectar', running: 'La IA está respondiendo…', completed: '', failed: 'No se pudo completar. Podés enviar otro mensaje para reintentar.' })[status] ?? '';
@@ -1257,12 +1265,14 @@ function renderChatList() {
   list.querySelectorAll('[data-chat-archive]').forEach(button => button.addEventListener('click', () => { void archiveChat(button.dataset.chatArchive); }));
 }
 function showChatListView() {
+  document.body.classList.remove('swarm-chat-fullscreen');
   $('main-chat-home')?.classList.remove('chat-detail-open');
   $('chats-list')?.classList.remove('hidden');
   $('chat-thread-view')?.classList.add('hidden');
   $('chat-message-input')?.blur();
 }
 function showChatConversationView() {
+  document.body.classList.add('swarm-chat-fullscreen');
   $('main-chat-home')?.classList.add('chat-detail-open');
   $('chats-list')?.classList.add('hidden');
   $('chat-thread-view')?.classList.remove('hidden');
