@@ -28,7 +28,7 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('landing-hero')?.classList.remove('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function showApp() { document.body.classList.remove('auth-gate', 'swarm-task-mode', 'swarm-task-chat', 'swarm-chat-fullscreen'); document.body.classList.add('swarm-home-scroll'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -576,6 +576,7 @@ async function refresh() {
   try { await refreshPromise; } finally { refreshPromise = null; }
 }
 async function showDetail(id) {
+  document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
   if (state.currentDetailId !== id) {
     $('artifact-preview-frame').src = 'about:blank';
     $('artifact-preview').classList.add('hidden');
@@ -592,6 +593,8 @@ async function showDetail(id) {
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
 function showChatHome() {
+  document.body.classList.remove('swarm-task-mode', 'swarm-task-chat', 'swarm-chat-fullscreen');
+  document.body.classList.add('swarm-home-scroll');
   showChatListView();
   $('main-chat-home')?.classList.remove('hidden');
   $('app-content').classList.add('hidden');
@@ -611,6 +614,8 @@ function showChatHome() {
   void loadChats();
 }
 function showTaskWorkspace() {
+  document.body.classList.remove('swarm-home-scroll');
+  document.body.classList.add('swarm-task-mode');
   $('main-chat-home')?.classList.add('hidden');
   $('task-history-toggle')?.classList.remove('hidden');
   $('app-content').classList.remove('hidden');
@@ -1092,12 +1097,15 @@ $('job-form').addEventListener('submit', async event => {
   const target = $('chat-target')?.value || 'global';
   button.disabled = true; button.textContent = 'Enviando…';
   try {
-    if (target !== 'global') {
-      if (!state.currentDetailId) throw new Error('Primero iniciá o abrí una tarea global; después podés hablar directamente con un agente.');
-      const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: target, message }) });
+    if (state.currentDetailId) {
+      const taskAgent = target === 'global' ? 'Coordinador de coherencia' : target;
+      $('job-submit-status').textContent = 'Continuando la tarea abierta con su historial y archivos…';
+      const result = await api(`/api/jobs/${encodeURIComponent(state.currentDetailId)}/reply`, { method: 'POST', body: JSON.stringify({ agent: taskAgent, message }) });
       $('objective').value = ''; resizeObjectiveInput();
-      $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || target}; la respuesta aparecerá en esta conversación.`;
+      $('job-submit-status').textContent = `Mensaje enviado a ${result.agent || taskAgent} dentro de la tarea actual.`;
       await updateSelectedDetail();
+    } else if (target !== 'global') {
+      throw new Error('Abrí una tarea antes de enviar un mensaje dirigido a un agente.');
     } else {
       $('job-submit-status').textContent = 'Enviando la orden global al equipo…';
       const tokenBudget = Number($('new-task-budget')?.value) || 1000000;
@@ -1220,7 +1228,7 @@ $('agent-reply-form').addEventListener('submit', async event => {
     button.disabled = false; button.textContent = 'Enviar al agente ↗';
   }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; document.body.classList.remove('swarm-task-chat', 'swarm-chat-fullscreen'); });
 
 function chatStatusLabel(status) {
   return ({ pending: 'En cola · se recuperará al reconectar', running: 'La IA está respondiendo…', completed: '', failed: 'No se pudo completar. Podés enviar otro mensaje para reintentar.' })[status] ?? '';
@@ -1257,16 +1265,17 @@ function renderChatList() {
   list.querySelectorAll('[data-chat-archive]').forEach(button => button.addEventListener('click', () => { void archiveChat(button.dataset.chatArchive); }));
 }
 function showChatListView() {
+  document.body.classList.remove('swarm-chat-fullscreen');
   $('main-chat-home')?.classList.remove('chat-detail-open');
   $('chats-list')?.classList.remove('hidden');
   $('chat-thread-view')?.classList.add('hidden');
   $('chat-message-input')?.blur();
 }
 function showChatConversationView() {
+  document.body.classList.add('swarm-chat-fullscreen');
   $('main-chat-home')?.classList.add('chat-detail-open');
   $('chats-list')?.classList.add('hidden');
   $('chat-thread-view')?.classList.remove('hidden');
-  $('chat-thread-view')?.scrollIntoView({ block: 'nearest' });
 }
 async function loadChats() {
   try {

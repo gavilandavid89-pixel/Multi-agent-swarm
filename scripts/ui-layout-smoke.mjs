@@ -8,6 +8,20 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const publicDir = path.join(root, 'apps/web/public');
 const chrome = process.env.CHROME_BIN || 'chromium';
 const appSource = readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+const cSource = readFileSync(path.join(publicDir, 'styles.css'), 'utf8');
+if (!appSource.includes("document.body.classList.add('swarm-home-scroll')") ||
+    !appSource.includes("document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat')")) {
+  throw new Error('Home must keep global touch scrolling, while task chat opens as a full-screen surface.');
+}
+if (!appSource.includes("if (state.currentDetailId) {") ||
+    !appSource.includes("Continuando la tarea abierta con su historial y archivos…") ||
+    !appSource.includes("state.currentDetailId)}/reply")) {
+  throw new Error('Sending from an open task must continue that same task instead of creating a new job.');
+}
+if (!cSource.includes('body.swarm-home-scroll') || !cSource.includes('overflow-y: auto !important') ||
+    !cSource.includes('body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel:not(.hidden)')) {
+  throw new Error('Responsive layout must support global home scrolling and a full-screen task conversation.');
+}
 const menuClickHandlers = appSource.split("$('account-menu-toggle').addEventListener('click'").length - 1;
 if (menuClickHandlers !== 1) throw new Error(`Expected exactly one account-menu click handler, found ${menuClickHandlers}.`);
 const menuHandlerStart = appSource.indexOf("$('account-menu-toggle').addEventListener('click'");
@@ -68,7 +82,8 @@ if (!sourceHtml.includes('id="new-chat-button"') || !sourceHtml.includes('id="ch
 const injected = `
 <pre id="layout-result" hidden></pre>
 <script>
-  document.body.classList.remove('auth-gate');
+  document.body.classList.remove('auth-gate', 'swarm-home-scroll');
+  document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
   document.getElementById('access-panel').classList.add('hidden');
   document.getElementById('api-settings-panel').classList.add('hidden');
   document.getElementById('app-content').classList.remove('hidden');
@@ -101,6 +116,8 @@ const injected = `
       historyButtonTop: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().top),
       historyButtonBottom: Math.round(document.getElementById('task-history-toggle').getBoundingClientRect().bottom),
       historyInsideAccountMenu: Boolean(document.getElementById('account-menu-items').contains(document.getElementById('task-history-toggle'))),
+      historyHitTarget: (() => { const b = document.getElementById('task-history-toggle'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(e && (e === b || b.contains(e))); })(),
+      filesHitTarget: (() => { const b = document.getElementById('files-menu-toggle'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(e && (e === b || b.contains(e))); })(),
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootScrollHeight: document.documentElement.scrollHeight,
       bodyScrollHeight: document.body.scrollHeight,
@@ -252,6 +269,8 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.filesButtonTop < 0 || report.filesButtonBottom > height + 2) issues.push(`files button is outside viewport (${report.filesButtonTop}–${report.filesButtonBottom}px)`);
     if (!report.historyMenuPresent) issues.push('task workspace has no history control');
     if (report.historyInsideAccountMenu) issues.push('task history must not be inside the global three-dot menu');
+    if (!report.historyHitTarget) issues.push('task history control is covered by another layer');
+    if (!report.filesHitTarget) issues.push('files control is covered by another layer');
     if (report.historyButtonTop < 0 || report.historyButtonBottom > height + 2) issues.push(`task history control is outside viewport (${report.historyButtonTop}–${report.historyButtonBottom}px)`);
     if (report.bodyOverflowY !== 'hidden') issues.push(`body overflow-y is ${report.bodyOverflowY}`);
     if (report.rootScrollHeight > height + 2) issues.push(`document scroll height ${report.rootScrollHeight} > viewport ${height}`);
@@ -260,14 +279,14 @@ async function runViewport(url, profile, width, height, orientation) {
     if (report.conversationHeight < 80) issues.push(`conversation is too short: ${report.conversationHeight}px`);
     if (!report.conversationScrollable) issues.push('conversation did not become its own scroll region');
     if (!report.composerVisible) issues.push(`composer is outside viewport (${report.composerTop}–${report.composerBottom}px)`);
-    if (report.composerPosition === 'fixed' || report.composerPosition === 'sticky') issues.push(`composer must stay in normal flow, got position ${report.composerPosition}`);
+    if (report.composerPosition !== 'fixed') issues.push(`full-screen composer must stay anchored to the viewport, got position ${report.composerPosition}`);
     if (report.objectiveResize !== 'none') issues.push(`message input must not be manually resizable, got resize ${report.objectiveResize}`);
     if (report.objectiveHeight > 125) issues.push(`message input is too tall at rest: ${report.objectiveHeight}px`);
     if (!report.menuTogglePresent || !report.menuItemsPresent) issues.push('account three-dot menu controls are missing');
     if (report.filesButtonPosition === 'fixed') issues.push('files button must not float over the conversation');
-    if (report.filesDrawerPosition === 'fixed') issues.push('files drawer must be anchored to the app shell, not the viewport');
+    if (report.filesDrawerPosition !== 'fixed') issues.push('task files drawer must overlay the full-screen chat viewport');
     if (issues.length) throw new Error(`${orientation} layout failed: ${issues.join('; ')}. Report: ${JSON.stringify(report)}`);
-    console.log(`PASS ${orientation}: ${width}x${height}; page locked, conversation scrolls independently, composer visible.`);
+    console.log(`PASS ${orientation}: ${width}x${height}; full-screen task chat scrolls independently with floating controls and composer.`);
     const rotationSizes = [[width, height], [height, width], [width, height], [height, width], [width, height]];
     for (let cycle = 0; cycle < rotationSizes.length; cycle++) {
       const [cycleWidth, cycleHeight] = rotationSizes[cycle];
@@ -293,7 +312,35 @@ async function runViewport(url, profile, width, height, orientation) {
       if (rotated.scrollY !== 0) rotationIssues.push(`page retained scrollY=${rotated.scrollY}`);
       if (rotationIssues.length) throw new Error(`Rotation ${cycle + 1} failed: ${rotationIssues.join('; ')}. Report: ${JSON.stringify(rotated)}`);
     }
-    console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; three-dot menu and files remain visible.`);
+    console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; task history, files and composer remain reachable.`);
+    const homeCheck = await devtools.send('Runtime.evaluate', {
+      expression: `(() => {
+        document.body.classList.remove('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
+        document.body.classList.add('swarm-home-scroll');
+        document.getElementById('app-content').classList.add('hidden');
+        document.getElementById('main-chat-home').classList.remove('hidden', 'chat-detail-open');
+        const drawer = document.getElementById('chats-drawer');
+        drawer.classList.remove('hidden', 'files-drawer', 'chats-drawer');
+        drawer.classList.add('main-chat-panel');
+        document.getElementById('main-chat-slot').append(drawer);
+        const list = document.getElementById('chats-list');
+        list.classList.remove('hidden');
+        list.innerHTML = Array.from({length: 36}, (_, i) =>
+          '<article class="chat-list-item"><button class="chat-list-open"><span class="chat-list-title">Conversación ' + i + '</span><span class="chat-list-preview">Último mensaje de prueba para verificar el desplazamiento global al girar el teléfono.</span><span class="chat-list-meta">Hace un momento</span></button></article>'
+        ).join('');
+        window.scrollTo(0, 500);
+        return { overflowY: getComputedStyle(document.body).overflowY, rootHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewportHeight: window.innerHeight, scrollY: window.scrollY };
+      })()`,
+      returnByValue: true
+    }, sessionId);
+    await delay(80);
+    const home = homeCheck.result?.value || {};
+    const homeIssues = [];
+    if (home.overflowY !== 'auto') homeIssues.push('home body overflow-y is ' + home.overflowY);
+    if (home.rootHeight <= home.viewportHeight + 20) homeIssues.push('home content does not extend beyond the viewport');
+    if (home.scrollY < 40) homeIssues.push('home list did not scroll globally');
+    if (homeIssues.length) throw new Error(`Global home scroll failed in ${orientation}: ${homeIssues.join('; ')}. Report: ${JSON.stringify(home)}`);
+    console.log(`PASS global home scroll ${orientation}: ${home.viewportHeight}px viewport, document ${home.rootHeight}px, scrollY=${home.scrollY}.`);
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {

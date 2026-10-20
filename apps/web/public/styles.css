@@ -706,3 +706,413 @@ body:not(.auth-gate) #task-history-toggle { font-size:17px; }
   body:not(.auth-gate) #chats-drawer .chat-message-form .button { width:auto; }
   body:not(.auth-gate) #account-menu-items { right:0; max-height:calc(var(--swarm-viewport-height,100dvh) - 68px); overflow-y:auto; touch-action:pan-y; -webkit-overflow-scrolling:touch; }
 }
+
+
+/* Full-screen chat surfaces: the conversation owns the viewport, controls float above it. */
+body.swarm-home-scroll,
+body.swarm-home-scroll html {
+  position: static !important;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 100%;
+  max-height: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+body.swarm-home-scroll .shell {
+  width: 100%;
+  max-width: 900px;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(22px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));
+}
+body.swarm-home-scroll #main-chat-home {
+  position: relative !important;
+  inset: auto !important;
+  width: 100%;
+  height: auto !important;
+  max-height: none !important;
+  min-height: calc(100dvh - 24px);
+  overflow: visible !important;
+  padding: 8px 0 24px;
+}
+body.swarm-home-scroll #chats-drawer.main-chat-panel {
+  overflow: visible !important;
+  min-height: min(70dvh, 760px);
+}
+body.swarm-home-scroll #chats-drawer .chat-workspace,
+body.swarm-home-scroll #chats-drawer .chats-list {
+  overflow: visible !important;
+  max-height: none !important;
+}
+body.swarm-home-scroll #chats-drawer .chat-list-item { flex-shrink: 0; }
+
+/* In an opened chat or task, remove the brand/header chrome entirely. */
+body.swarm-chat-fullscreen,
+body.swarm-task-mode:not(.swarm-home-scroll) {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: var(--swarm-viewport-height,100dvh) !important;
+  min-height: 0 !important;
+  max-height: var(--swarm-viewport-height,100dvh) !important;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+body.swarm-chat-fullscreen .shell,
+body.swarm-task-mode:not(.swarm-home-scroll) .shell {
+  position: relative;
+  width: 100% !important;
+  max-width: none !important;
+  height: var(--swarm-viewport-height,100dvh) !important;
+  min-height: 0 !important;
+  max-height: var(--swarm-viewport-height,100dvh) !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+body.swarm-chat-fullscreen .topbar,
+body.swarm-task-mode:not(.swarm-home-scroll) .topbar {
+  display: flex !important; position: static !important; height: 0 !important; min-height: 0 !important; max-height: 0 !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; overflow: visible !important; background: transparent !important; box-shadow: none !important;
+}
+body.swarm-chat-fullscreen .brand,
+body.swarm-task-mode:not(.swarm-home-scroll) .brand { display: none !important; }
+body.swarm-chat-fullscreen footer,
+body.swarm-task-mode:not(.swarm-home-scroll) footer { display: none !important; }
+body.swarm-chat-fullscreen .connection,
+body.swarm-task-mode:not(.swarm-home-scroll) .connection {
+  position: fixed !important;
+  top: max(5px,env(safe-area-inset-top)) !important;
+  right: max(6px,env(safe-area-inset-right)) !important;
+  z-index: 10020 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px !important;
+  width: auto !important;
+  max-width: calc(100vw - 12px);
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+body.swarm-chat-fullscreen .connection > *,
+body.swarm-task-mode:not(.swarm-home-scroll) .connection > * { pointer-events: auto; }
+body.swarm-chat-fullscreen #connection-dot,
+body.swarm-chat-fullscreen #connection-label,
+body.swarm-task-mode:not(.swarm-home-scroll) #connection-dot,
+body.swarm-task-mode:not(.swarm-home-scroll) #connection-label { display: none !important; }
+body.swarm-chat-fullscreen #task-mode-toggle,
+body.swarm-task-mode:not(.swarm-home-scroll) #task-mode-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 44px;
+  padding: 8px 12px;
+  margin: 0;
+  border-radius: 14px;
+  font-size: 12px;
+  touch-action: manipulation;
+  backdrop-filter: blur(14px);
+}
+body.swarm-chat-fullscreen #account-menu,
+body.swarm-task-mode:not(.swarm-home-scroll) #account-menu { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) #task-history-toggle,
+body.swarm-task-mode:not(.swarm-home-scroll) #files-menu-toggle {
+  position: static !important;
+  inset: auto !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px !important;
+  min-height: 42px !important;
+  width: 42px !important;
+  height: 42px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 14px !important;
+  background: rgba(26,18,41,.78) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--text) !important;
+  box-shadow: 0 4px 18px #0004;
+  backdrop-filter: blur(14px);
+  z-index: 10021 !important;
+  touch-action: manipulation;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #history-drawer,
+body.swarm-task-mode:not(.swarm-home-scroll) #files-drawer {
+  position: fixed !important;
+  left: max(8px,env(safe-area-inset-left)) !important;
+  right: max(8px,env(safe-area-inset-right)) !important;
+  bottom: max(8px,env(safe-area-inset-bottom)) !important;
+  top: 54px !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  overflow: auto !important;
+  z-index: 10010 !important;
+  border-radius: 16px !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #app-content {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100vw !important;
+  height: var(--swarm-viewport-height,100dvh) !important;
+  max-height: var(--swarm-viewport-height,100dvh) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #app-content > .zip-preview-panel,
+body.swarm-task-mode:not(.swarm-home-scroll) #app-content > .dashboard-grid { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) #app-content > .composer {
+  position: fixed !important;
+  left: max(8px,env(safe-area-inset-left)) !important;
+  right: max(8px,env(safe-area-inset-right)) !important;
+  bottom: max(6px,env(safe-area-inset-bottom)) !important;
+  z-index: 10005 !important;
+  display: block !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 6px !important;
+  border: 1px solid rgba(203,169,255,.14) !important;
+  border-radius: 18px !important;
+  background: rgba(16,11,27,.88) !important;
+  box-shadow: 0 8px 30px #0006;
+  backdrop-filter: blur(16px);
+  overflow: visible !important;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) .chat-composer-heading,
+body.swarm-task-mode:not(.swarm-home-scroll) #job-submit-status { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) .global-chat-form {
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 8px !important;
+  margin: 0 !important;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #objective {
+  flex: 1 1 auto !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  max-height: 120px !important;
+  margin: 0 !important;
+  padding: 11px 12px !important;
+  border-radius: 14px !important;
+  resize: none !important;
+  font-size: 15px !important;
+  line-height: 1.4 !important;
+  touch-action: pan-y;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) .chat-composer-controls {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: flex-end !important;
+  gap: 0 !important;
+  margin: 0 !important;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #chat-target,
+body.swarm-task-mode:not(.swarm-home-scroll) .budget-select-label,
+body.swarm-task-mode:not(.swarm-home-scroll) .chat-composer-controls > span { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) #submit-job {
+  min-height: 44px !important;
+  min-width: 48px !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  white-space: nowrap;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #welcome-chat:not(.hidden) {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 54px 22px 104px !important;
+  text-align: center;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel:not(.hidden) {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 3 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  width: 100vw !important;
+  height: var(--swarm-viewport-height,100dvh) !important;
+  margin: 0 !important;
+  padding: 0 8px 98px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .section-head,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .task-status,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .progress-track,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .token-budget,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > #detail-hint,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .improvement-vote-panel,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > #agent-memory-panel,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .agent-reply-panel,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > #artifacts-panel,
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > .diagnostic { display: none !important; }
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > #conversation {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: max(52px,calc(env(safe-area-inset-top) + 48px)) 2px 8px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+body.swarm-task-mode:not(.swarm-home-scroll) #detail-panel > #jump-to-latest {
+  position: fixed !important;
+  right: 14px !important;
+  bottom: 78px !important;
+  z-index: 10006 !important;
+}
+body.swarm-chat-fullscreen #main-chat-home {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100vw !important;
+  height: var(--swarm-viewport-height,100dvh) !important;
+  max-height: var(--swarm-viewport-height,100dvh) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: var(--bg);
+}
+body.swarm-chat-fullscreen #main-chat-home .main-chat-heading,
+body.swarm-chat-fullscreen #chats-drawer .files-drawer-head,
+body.swarm-chat-fullscreen #chats-drawer .chats-toolbar,
+body.swarm-chat-fullscreen #chats-drawer #chats-status,
+body.swarm-chat-fullscreen #chats-drawer .chat-home-footnote { display: none !important; }
+body.swarm-chat-fullscreen #chats-drawer.main-chat-panel {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-workspace {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-thread {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  flex-direction: column !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: none !important;
+  padding: 48px 8px 8px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-thread-head {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-thread-head h4 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-thread-actions { display: none !important; }
+body.swarm-chat-fullscreen #chats-drawer .chat-messages {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 8px 2px 12px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-message-form {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 0 max(4px,env(safe-area-inset-bottom));
+  border: 0 !important;
+  background: transparent !important;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-message-form textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 120px;
+  resize: none;
+  padding: 11px 12px;
+  touch-action: pan-y;
+}
+body.swarm-chat-fullscreen #chats-drawer .chat-message-form button { min-height: 44px; }
+body.swarm-chat-fullscreen #chats-drawer #chats-list { display: none !important; }
+body.swarm-chat-fullscreen #chats-drawer .chat-thread-head .back-to-chats-button { min-height: 40px; }
+@media (orientation: landscape) and (max-height: 520px) {
+  body.swarm-home-scroll .shell { padding-top: 8px; }
+  body.swarm-home-scroll #main-chat-home .main-chat-heading { padding-bottom: 8px; }
+  body.swarm-home-scroll #main-chat-home .main-chat-heading h1 { font-size: 25px; }
+  body.swarm-task-mode:not(.swarm-home-scroll) #objective { min-height: 38px !important; max-height: 72px !important; }
+  body.swarm-task-mode:not(.swarm-home-scroll) #submit-job { min-height: 38px !important; }
+  body.swarm-chat-fullscreen #chats-drawer .chat-thread { padding-top: 44px !important; }
+}
+
+/* Keep the floating controls above the full-screen conversation stacking layer. */
+body.swarm-chat-fullscreen .shell,
+body.swarm-task-mode:not(.swarm-home-scroll) .shell { z-index: 10000 !important; }
