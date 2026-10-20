@@ -27,7 +27,7 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
   return data;
 }
-function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('landing-hero')?.classList.remove('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
+function showAccess() { document.body.classList.add('auth-gate'); stopTaskEventStream(); clearInterval(state.pollHandle); state.pollHandle = null; clearInterval(state.listPollHandle); state.listPollHandle = null; state.taskWorkspaceStarted = false; $('main-chat-home')?.classList.add('hidden'); $('landing-hero')?.classList.remove('hidden'); $('task-mode-toggle')?.classList.add('hidden'); $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('history-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
 function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('landing-hero')?.classList.add('hidden'); $('main-chat-home')?.classList.remove('hidden'); $('app-content').classList.add('hidden'); $('task-mode-toggle')?.classList.remove('hidden'); $('task-mode-toggle').textContent = '＋ Tarea'; $('task-history-toggle')?.classList.add('hidden'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -596,6 +596,7 @@ function showChatHome() {
   $('main-chat-home')?.classList.remove('hidden');
   $('app-content').classList.add('hidden');
   $('task-mode-toggle').textContent = '＋ Tarea';
+  $('task-history-toggle')?.classList.add('hidden');
   $('files-menu-toggle')?.classList.add('hidden');
   $('files-drawer')?.classList.add('hidden');
   $('files-drawer')?.setAttribute('aria-hidden', 'true');
@@ -1237,7 +1238,7 @@ function renderChatList() {
     return;
   }
   list.innerHTML = chats.map(chat => {
-    const preview = String(chat.lastMessagePreview || '').replace(/\\s+/g, ' ').trim();
+    const preview = String(chat.lastMessagePreview || '').replace(/\s+/g, ' ').trim();
     const previewText = preview || 'Conversación nueva · todavía no hay mensajes';
     return `<article class="chat-list-item ${chat.id === state.currentChatId ? 'selected' : ''}">
       <button class="chat-list-open" type="button" data-chat-open="${escapeHtml(chat.id)}" aria-label="Abrir conversación ${escapeHtml(chat.title || 'Nuevo chat')}">
@@ -1378,7 +1379,7 @@ async function archiveChat(chatId) {
   if (!window.confirm('¿Archivar este chat? No se borrarán sus mensajes.')) return;
   try {
     await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) });
-    if (state.currentChatId === chatId) { state.currentChatId = null; state.currentChat = null; state.chatMessages = []; renderChatMessages(); }
+    if (state.currentChatId === chatId) { state.currentChatId = null; state.currentChat = null; state.chatMessages = []; renderChatMessages(); showChatListView(); }
     await loadChats();
     if ($('chats-status')) $('chats-status').textContent = 'Chat archivado. No se borró.';
   } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo archivar: ${error.message}`; }
