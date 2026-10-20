@@ -672,3 +672,30 @@ body:not(.auth-gate) .panel{backdrop-filter:none}
  body:not(.auth-gate).swarm-task-view #detail-panel>.composer #chat-target{max-width:100%;flex:1 1 100%}
  body:not(.auth-gate) #welcome-chat{min-height:60dvh;padding:20px 12px}
 }
+
+@media(max-width:760px){
+ body:not(.auth-gate) .shell{margin:0;padding:151px 6px 6px;width:100%}
+ .chat-sidebar{left:6px;right:6px;top:6px;bottom:auto;width:auto;height:138px;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:38px 20px minmax(0,1fr);gap:4px;padding:7px 8px;border-radius:14px;overflow:visible}
+ .sidebar-profile{grid-column:1;grid-row:1;gap:7px;padding:0;border:0;min-width:0}
+ .sidebar-avatar{width:29px;height:29px;flex-basis:29px}
+ .sidebar-user-copy strong{font-size:10px}.sidebar-user-copy span{display:none}
+ #sidebar-account-slot .account-menu-items{top:36px;right:0}
+ .begin-task-button{grid-column:2;grid-row:1;width:auto;min-height:32px;white-space:nowrap;padding:7px 9px;font-size:10px}
+ .sidebar-section-title{grid-column:1 / -1;grid-row:2;padding:0 2px;font-size:9px}
+ .chat-list{grid-column:1 / -1;grid-row:3;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:5px;min-height:0}
+ .chat-list-item{flex:0 0 190px;width:190px;min-height:0;padding:5px 7px}
+ .chat-list-copy strong{font-size:10px}.chat-list-copy small{font-size:8px}
+ .sidebar-bottom{display:none}
+ body:not(.auth-gate) .topbar{padding:0 0 6px;min-height:30px}
+ body:not(.auth-gate).swarm-task-view .shell{margin:0;padding:151px 5px 5px}
+ body:not(.auth-gate).swarm-task-view .topbar{display:none}
+ body:not(.auth-gate).swarm-task-view #detail-panel{height:calc(var(--swarm-viewport-height,100dvh) - 158px);max-height:calc(var(--swarm-viewport-height,100dvh) - 158px);min-height:220px;padding:8px 7px;gap:5px}
+ body:not(.auth-gate).swarm-task-view #detail-panel>.section-head h2{font-size:13px}
+ body:not(.auth-gate).swarm-task-view #detail-panel .live-label{display:none}
+ body:not(.auth-gate).swarm-task-view #detail-panel .detail-actions .button{font-size:9px;padding:5px 6px}
+ body:not(.auth-gate).swarm-task-view #detail-panel #copy-detail{display:none}
+ body:not(.auth-gate).swarm-task-view #detail-panel>.composer #objective{min-height:42px;max-height:18dvh;padding:9px 10px}
+ body:not(.auth-gate).swarm-task-view #detail-panel>.composer .chat-composer-controls{gap:5px}
+ body:not(.auth-gate).swarm-task-view #detail-panel>.composer #chat-target{flex:1 1 100%;max-width:none;min-height:34px}
+ body:not(.auth-gate).swarm-task-view #detail-panel>.composer #submit-job{min-height:34px}
+}
