@@ -28,7 +28,7 @@ export async function initConversationStore() {
 }
 
 function normalizeTitle(value) {
-  const title = typeof value === 'string' ? value.trim().replace(/\\s+/g, ' ') : '';
+  const title = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
   if (!title || title.length > MAX_TITLE_LENGTH) {
     throw Object.assign(new Error('El título debe tener entre 1 y 120 caracteres.'), { status: 400 });
   }
