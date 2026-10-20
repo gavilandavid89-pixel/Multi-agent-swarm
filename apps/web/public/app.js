@@ -1224,10 +1224,10 @@ $('agent-reply-form').addEventListener('submit', async event => {
 $('begin-task-button')?.addEventListener('click', () => {
   document.body.classList.remove('swarm-task-view');
   document.body.classList.add('composer-open');
-  const composer = document.querySelector('.composer');
-  if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
   const zipTools = $('zip-preview-panel');
   if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
+  const composer = document.querySelector('.composer');
+  if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
   $('detail-panel').classList.add('hidden');
   $('welcome-chat')?.classList.remove('hidden');
   state.currentDetailId = null;
