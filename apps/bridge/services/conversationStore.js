@@ -50,7 +50,7 @@ export async function listConversations(userId, { archived = false, limit = 25, 
 }
 
 export async function createConversation(userId, title = 'Nuevo chat') {
-  const safeTitle = normalizeTitle(title || 'Nuevo chat');
+  const safeTitle = normalizeTitle(title);
   const { rows } = await pool.query(
     `INSERT INTO conversations(user_id, title) VALUES($1, $2)
      RETURNING id, title, created_at AS "createdAt", updated_at AS "updatedAt",
