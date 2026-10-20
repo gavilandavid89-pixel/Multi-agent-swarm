@@ -589,6 +589,7 @@ async function showDetail(id) {
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
+  state.conversationSignature = '';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
   $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
