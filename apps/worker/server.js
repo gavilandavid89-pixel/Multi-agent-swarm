@@ -4,7 +4,7 @@ import express from 'express';
 import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
-import { processConversationTurn, recoverableConversationTurns, closeConversationTurnStore } from './services/conversationTurns.js';
+import { processConversationTurn, recoverableConversationTurns, closeConversationTurnStore, hasConversationTurn } from './services/conversationTurns.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { getRetryRecoveryMode } from './services/retryRecovery.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
@@ -118,15 +118,10 @@ app.post('/internal/chats/:chatId/turns/:turnId/run', async (req, res) => {
   const { chatId, turnId } = req.params;
   if (!/^[0-9a-f-]{36}$/i.test(chatId) || !/^[0-9a-f-]{36}$/i.test(turnId)) return res.status(400).json({ error: 'Identificador de chat o turno inválido.' });
   try {
-    // The Bridge already authorized the user and persisted the turn; the Worker rechecks the durable ownership link.
-    const { default: pg } = await import('pg');
-    const url = process.env.SWARM_DATABASE_URL || '';
-    const poolCheck = new pg.Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 5000, ssl: (() => { try { return ['localhost','127.0.0.1','::1'].includes(new URL(url).hostname) ? false : { rejectUnauthorized: true }; } catch { return { rejectUnauthorized: true }; })() });
-    let found;
-    try {
-      found = await poolCheck.query('SELECT id FROM conversation_turns WHERE id=$1 AND conversation_id=$2 AND user_id=$3', [turnId, chatId, req.body?.userId]);
-    } finally { await poolCheck.end(); }
-    if (!found?.rows?.length) return res.status(404).json({ error: 'No se encontró ese turno.' });
+    // Recheck the durable ownership link; a valid UUID is not proof of access.
+    if (typeof req.body?.userId !== 'string' || !await hasConversationTurn(turnId, chatId, req.body.userId)) {
+      return res.status(404).json({ error: 'No se encontró ese turno.' });
+    }
     enqueueConversationTurn(turnId);
     res.status(202).json({ accepted: true, turnId, status: 'pending' });
   } catch (error) {
