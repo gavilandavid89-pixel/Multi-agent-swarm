@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#292b2e">
   <title>Swarm · Chat de agentes</title>
-  <link rel="stylesheet" href="/styles.css?v=main-chat-home-1">
+  <link rel="stylesheet" href="/styles.css?v=touch-chat-navigation-2">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -12,7 +12,7 @@
     <div id="task-notice" class="task-notice hidden" role="status" aria-live="polite"><span id="task-notice-text"></span><button id="task-notice-close" type="button" aria-label="Cerrar aviso">×</button></div>
     <header class="topbar">
       <a class="brand" href="/"><span class="brand-mark">✳</span><span>swarm<span class="brand-dot">.</span></span></a>
-      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span><button id="task-mode-toggle" class="button button-secondary hidden" type="button">＋ Tarea</button><button id="files-menu-toggle" class="floating-files-button hidden" type="button" aria-label="Abrir archivos generados" title="Archivos generados">▤</button><div id="account-menu" class="account-menu hidden"><button id="account-menu-toggle" class="icon-button" type="button" aria-label="Abrir menú de cuenta" aria-haspopup="true" aria-controls="account-menu-items" aria-expanded="false">⋮</button><div id="account-menu-items" class="account-menu-items hidden"><button id="open-chats-menu" type="button" aria-controls="chats-drawer" aria-expanded="false">Chats</button><button id="open-history-menu" type="button" aria-controls="history-drawer" aria-expanded="false">Historial de tareas</button><button id="open-account-key" type="button" aria-expanded="false">Mi cuenta y claves</button><div id="account-key-panel" class="account-key-panel hidden"><label for="account-code-value">Identificador de cuenta · 6 dígitos</label><input id="account-code-value" readonly value="······" aria-label="Identificador de cuenta"><button id="copy-account-code" class="mini-button" type="button">Copiar código de cuenta</button><label for="account-key-value">Clave de acceso · 15 dígitos</label><div class="account-key-field"><input id="account-key-value" type="password" readonly value="•••••••••••••••" autocomplete="off" aria-label="Clave de acceso"><button id="toggle-account-key" class="icon-button" type="button" aria-label="Mostrar clave" title="Mostrar u ocultar clave">◉</button></div><button id="copy-account-key" class="mini-button" type="button">Copiar clave</button><p id="account-key-status" class="muted tiny" role="status" aria-live="polite">Tu clave solo se muestra dentro de tu sesión.</p></div><button id="open-api-settings" type="button">API 🔐</button><button id="open-technical-diagnostic" type="button">Diagnóstico Técnico</button><button id="logout-button" type="button">Cerrar sesión</button></div></div></div>
+      <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-label">Conectando al puente</span><button id="task-mode-toggle" class="button button-secondary hidden" type="button">＋ Tarea</button><button id="task-history-toggle" class="floating-files-button hidden" type="button" aria-label="Abrir historial de tareas" title="Historial de tareas">◷</button><button id="files-menu-toggle" class="floating-files-button hidden" type="button" aria-label="Abrir archivos generados" title="Archivos generados">▤</button><div id="account-menu" class="account-menu hidden"><button id="account-menu-toggle" class="icon-button" type="button" aria-label="Abrir menú de cuenta" aria-haspopup="true" aria-controls="account-menu-items" aria-expanded="false">⋮</button><div id="account-menu-items" class="account-menu-items hidden"><button id="open-chats-menu" type="button" aria-controls="chats-drawer" aria-expanded="false">Chats</button><button id="open-account-key" type="button" aria-expanded="false">Mi cuenta y claves</button><div id="account-key-panel" class="account-key-panel hidden"><label for="account-code-value">Identificador de cuenta · 6 dígitos</label><input id="account-code-value" readonly value="······" aria-label="Identificador de cuenta"><button id="copy-account-code" class="mini-button" type="button">Copiar código de cuenta</button><label for="account-key-value">Clave de acceso · 15 dígitos</label><div class="account-key-field"><input id="account-key-value" type="password" readonly value="•••••••••••••••" autocomplete="off" aria-label="Clave de acceso"><button id="toggle-account-key" class="icon-button" type="button" aria-label="Mostrar clave" title="Mostrar u ocultar clave">◉</button></div><button id="copy-account-key" class="mini-button" type="button">Copiar clave</button><p id="account-key-status" class="muted tiny" role="status" aria-live="polite">Tu clave solo se muestra dentro de tu sesión.</p></div><button id="open-api-settings" type="button">API 🔐</button><button id="open-technical-diagnostic" type="button">Diagnóstico Técnico</button><button id="logout-button" type="button">Cerrar sesión</button></div></div></div>
     </header>
     <section id="landing-hero" class="hero">
       <p class="eyebrow">CENTRO DE MANDO · MULTIAGENTE</p>
@@ -113,8 +113,8 @@
     <section id="main-chat-home" class="main-chat-home hidden" aria-label="Chats independientes">
       <div class="main-chat-heading">
         <p class="eyebrow">CONVERSACIONES INDEPENDIENTES · MULTIAGENTE</p>
-        <h1>Tu espacio para hablar<br><span>con agentes.</span></h1>
-        <p class="subtitle">Tus chats viven aquí, separados de las tareas. Los mensajes se guardan y pueden recuperarse si se interrumpe la conexión.</p>
+        <h1>Tus <span>conversaciones.</span></h1>
+        <p class="subtitle">Abrí una conversación anterior o empezá una nueva. Cada chat conserva su título, último mensaje y actividad reciente.</p>
       </div>
       <div id="main-chat-slot"></div>
     </section>
@@ -122,23 +122,23 @@
 
     <aside id="chats-drawer" class="files-drawer chats-drawer hidden" aria-label="Chats independientes" aria-hidden="true">
       <div class="files-drawer-head"><div><p class="panel-kicker">CONVERSACIONES</p><h3>Chats</h3></div><button id="close-chats-drawer" class="icon-button" type="button" aria-label="Cerrar chats">×</button></div>
-      <div class="chats-toolbar"><button id="new-chat-button" class="button button-primary" type="button">＋ Nuevo chat</button><button id="refresh-chats-button" class="button button-secondary" type="button">Actualizar</button></div>
+      <div class="chats-toolbar"><button id="new-chat-button" class="button button-primary" type="button">＋ Nueva conversación</button><button id="refresh-chats-button" class="button button-secondary" type="button">Actualizar</button></div>
       <p id="chats-status" class="muted tiny" role="status" aria-live="polite">Tus conversaciones se guardan automáticamente.</p>
       <div class="chat-workspace">
-        <nav id="chats-list" class="chats-list" aria-label="Lista de chats"><p class="muted tiny">Cargando chats…</p></nav>
-        <section class="chat-thread" aria-label="Conversación seleccionada">
-          <div class="chat-thread-head"><h4 id="selected-chat-title">Elegí un chat</h4><div class="chat-thread-actions"><button id="rename-chat-button" class="mini-button" type="button" disabled>Renombrar</button><button id="archive-chat-button" class="mini-button" type="button" disabled>Archivar</button></div></div>
+        <nav id="chats-list" class="chats-list" aria-label="Lista de conversaciones"><p class="muted tiny">Cargando conversaciones…</p></nav>
+        <section id="chat-thread-view" class="chat-thread hidden" aria-label="Conversación seleccionada">
+          <div class="chat-thread-head"><button id="back-to-chats-button" class="mini-button back-to-chats-button" type="button">← Conversaciones</button><h4 id="selected-chat-title">Elegí un chat</h4><div class="chat-thread-actions"><button id="rename-chat-button" class="mini-button" type="button" disabled>Renombrar</button><button id="archive-chat-button" class="mini-button" type="button" disabled>Archivar</button></div></div>
           <div id="chat-messages" class="chat-messages" aria-live="polite"><div class="empty-state"><p>Creá un chat nuevo o elegí uno de la lista.</p></div></div>
           <form id="chat-message-form" class="chat-message-form"><label class="sr-only" for="chat-message-input">Mensaje para el chat</label><textarea id="chat-message-input" rows="2" maxlength="6000" placeholder="Escribí un mensaje…" required disabled></textarea><button id="chat-message-send" class="button button-primary" type="submit" disabled>Enviar ↗</button></form>
         </section>
       </div>
-      <p class="muted tiny">Estos chats son independientes del historial de tareas y no crean tareas del comité automáticamente.</p>
+      <p class="muted tiny chat-home-footnote">Los chats son independientes de las tareas. Para crear una tarea, usá «＋ Tarea».</p>
     </aside>
     <aside id="history-drawer" class="files-drawer history-drawer hidden" aria-label="Historial de tareas" aria-hidden="true"><div class="files-drawer-head"><div><p class="panel-kicker">MEMORIA</p><h3>Historial de tareas</h3></div><button id="close-history-drawer" class="icon-button" type="button" aria-label="Cerrar historial">×</button></div><div id="history-drawer-slot"></div></aside>
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
   <script src="/global-event-bus.js?v=server-events-1" defer></script>
-  <script src="/app.js?v=main-chat-home-1" defer></script>
+  <script src="/app.js?v=touch-chat-navigation-2" defer></script>
   <script src="/invite-gate.js?v=invite-gate-3" defer></script>
 </body>
 </html>
