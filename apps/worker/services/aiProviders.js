@@ -288,7 +288,7 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     return portable;
   });
   return {
-    url: `${String(baseUrl).replace(/\\/+$/, '')}/chat/completions`,
+    url: `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`,
     options: {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
