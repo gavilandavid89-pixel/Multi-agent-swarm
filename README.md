@@ -13,6 +13,12 @@
 - `apps/worker/services/codeChecks.js`: comprobaciones deterministas de sintaxis, rutas locales y JSON; en producción, el validador intenta abrir las entregas HTML en Chromium bajo Xvfb, con resolución DNS y proxy HTTP(S) bloqueados y un límite de 15 segundos; si el contenedor no permite ejecutar el sandbox de Chromium, lo informa y mantiene activas las comprobaciones deterministas.
 - `render.yaml`: definición inicial de los servicios separados en Render.
 
+## Arquitectura de chats independientes
+
+La separación entre chats y tareas está documentada en [docs/CHAT_ARCHITECTURE.md](docs/CHAT_ARCHITECTURE.md). La base de datos de cuentas incorpora el modelo de conversaciones y mensajes y el Bridge expone endpoints autenticados para crear, listar, renombrar, archivar/restaurar chats y leer mensajes paginados. Esta base **no significa que el envío de mensajes a las IA ni la interfaz de chats ya estén implementados**: la integración de turnos con el Worker y la UI deben añadirse y probarse como una etapa posterior.
+
+Los chats tienen propietario propio y no reutilizan el parámetro `:id` de los endpoints de tareas, ya que el Bridge valida ese parámetro mediante la tabla de propiedad de tareas.
+
 ## Desarrollo local
 
 Requiere Node.js 22.x (coincide con el runtime de Render y CI).
