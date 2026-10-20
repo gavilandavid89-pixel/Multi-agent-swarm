@@ -1235,6 +1235,30 @@ function renderChatMessages() {
   $('archive-chat-button').disabled = !enabled;
   $('selected-chat-title').textContent = state.currentChat?.title || 'Elegí un chat';
 }
+
+async function recoverPendingChatTurns(chatId) {
+  const deadline = Date.now() + 180000;
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  while (state.currentChatId === chatId && Date.now() < deadline) {
+    const pending = state.chatMessages.filter(message =>
+      message.role === 'user' && ['pending','running'].includes(message.metadata?.turnStatus) && message.metadata?.turnId
+    );
+    if (!pending.length) return;
+    for (const message of pending) {
+      if (state.currentChatId !== chatId) return;
+      try {
+        await api(`/api/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(message.metadata.turnId)}`);
+      } catch (error) {
+        if ($('chats-status')) $('chats-status').textContent = `Intentando recuperar un turno guardado: ${error.message}`;
+      }
+    }
+    await delay(1800);
+    try { await loadChatMessages(); } catch {}
+  }
+  if (state.currentChatId === chatId && $('chats-status')) {
+    $('chats-status').textContent = 'El turno sigue guardado. Actualizá el chat en unos instantes para consultar su estado.';
+  }
+}
 async function loadChatMessages() {
   if (!state.currentChatId) return;
   const chatId = state.currentChatId;
@@ -1251,6 +1275,7 @@ async function selectChat(chatId) {
     await loadChatMessages();
     renderChatList();
     renderChatMessages();
+    void recoverPendingChatTurns(chatId);
     if ($('chats-status')) $('chats-status').textContent = 'Chat guardado en la nube. Los mensajes se recuperan al reconectar.';
   } catch (error) {
     if ($('chats-status')) $('chats-status').textContent = `No se pudo abrir el chat: ${error.message}`;
