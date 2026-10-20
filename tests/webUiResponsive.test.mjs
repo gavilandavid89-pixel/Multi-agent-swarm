@@ -104,6 +104,9 @@ test('authenticated workspace locks the page and scrolls only chat content on po
   const html = read('../apps/web/public/index.html');
   assert.match(css, /body:not\(\.auth-gate\)\s*\{[^}]*overflow:hidden/s);
   assert.match(css, /body:not\(\.auth-gate\)\s+#conversation\s*\{[^}]*overflow-y:auto/s);
+  assert.match(css, /body:not\(\.auth-gate\)\s+#main-chat-home\s*\{[^}]*overflow-y:auto/s);
+  assert.match(css, /#chats-drawer \.chat-list-preview/);
+  assert.match(css, /touch-action:manipulation/);
   assert.match(css, /@media\(orientation:landscape\) and \(max-height:520px\)/);
   assert.match(css, /@media\(max-width:700px\)/);
   assert.match(html, /viewport-fit=cover/);
