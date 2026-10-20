@@ -79,4 +79,5 @@ test('the web client keeps chats separate from task history and polls durable tu
   assert.match(app, /\/api\/chats\?/);
   assert.match(app, /\/turns\//);
   assert.match(app, /await loadChatMessages\(\)/);
+  assert.match(app, /recoverPendingChatTurns\\(chatId\\)/);
 });
