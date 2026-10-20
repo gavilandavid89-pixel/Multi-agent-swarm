@@ -6,14 +6,14 @@ Separar el historial de conversaciones del historial de tareas del comité. Un c
 
 ## Estado de esta entrega
 
-Esta rama añade la base de persistencia y la API de metadatos de chats. Todavía **no** implementa el envío de mensajes a los agentes ni la interfaz de chats; esos pasos deben integrarse con el motor del Worker y probarse por separado antes de anunciar la función como completa.
+Esta rama integra persistencia, API, interfaz independiente y envío de turnos al Worker. La implementación está en validación automática; no debe considerarse lista para producción hasta que terminen CI y las pruebas de integración.
 
 ## Componentes y responsabilidades
 
 - **Frontend (apps/web/public)**: menú principal, lista de chats y vista de mensajes. No decide la propiedad de los datos ni guarda secretos.
 - **Bridge (apps/bridge)**: autentica sesiones, verifica la propiedad de cada chat y expone la API pública.
 - **conversationStore.js**: persistencia PostgreSQL de conversaciones y mensajes.
-- **Worker (apps/worker)**: en una fase posterior, ejecutará el turno de IA mediante un contrato interno autenticado. El cliente no debe poder elegir herramientas privilegiadas, roles internos, secretos, modelos sin autorización ni política de ejecución.
+- **Worker (apps/worker)**: procesa turnos de chat mediante una ruta interna autenticada, mantiene estado persistente y recupera turnos interrumpidos al arrancar. El cliente no puede elegir herramientas privilegiadas, roles internos ni secretos.
 - **Tareas (user_job_ownership)**: conservan su propio historial y permisos; los endpoints de tareas no se reutilizan para identificar chats.
 
 ## Modelo de datos
@@ -25,7 +25,7 @@ Esta rama añade la base de persistencia y la API de metadatos de chats. Todaví
 - title: entre 1 y 120 caracteres.
 - created_at, updated_at: orden y actividad.
 - archived_at: archivado reversible, no borrado.
-- last_message_at: marca de actividad para actualizar cuando se integre el envío de mensajes.
+- last_message_at: marca de actividad, actualizada al guardar mensajes.
 
 ### conversation_messages
 
@@ -37,7 +37,7 @@ Esta rama añade la base de persistencia y la API de metadatos de chats. Todaví
 - idempotency_key: índice único parcial por conversación para que los reintentos no dupliquen un mensaje.
 - created_at: orden cronológico.
 
-La creación del esquema es idempotente: usa CREATE TABLE/INDEX IF NOT EXISTS y no elimina ni transforma datos existentes.
+La tabla `conversation_turns` registra idempotencia, estado, contador de intentos, errores recuperables y referencias a mensajes de usuario/asistente. La creación del esquema es idempotente: usa CREATE TABLE/INDEX IF NOT EXISTS y no elimina ni transforma datos existentes.
 
 ## API autenticada disponible en esta rama
 
@@ -48,11 +48,11 @@ Todas estas rutas requieren la sesión Bearer existente. La autorización se apl
 - GET /api/chats/:chatId: obtiene metadatos de un chat propio.
 - PATCH /api/chats/:chatId con title: renombra un chat activo.
 - PATCH /api/chats/:chatId con archived: archiva o restaura.
-- GET /api/chats/:chatId/messages?limit=50&beforeId=123: lee mensajes paginados, solo si el chat pertenece a la cuenta.
+- GET /api/chats/:chatId/messages?limit=50&beforeId=123: lee mensajes paginados, solo si el chat pertenece a la cuenta.\n- POST /api/chats/:chatId/messages con `message` y `Idempotency-Key`: persiste el mensaje y encola un turno.\n- GET /api/chats/:chatId/turns/:turnId: consulta el estado durable; los turnos pendientes vuelven a intentar despertar al Worker.
 
 Los endpoints de chat usan el parámetro :chatId, no :id: el Bridge ya tiene un app.param('id') que comprueba la propiedad de tareas. Reutilizar :id aquí activaría la validación equivocada.
 
-## Contrato que debe respetar la integración de mensajes
+## Contrato de turnos implementado
 
 1. Verificar propietario y estado del chat antes de enviar un turno.
 2. Persistir el mensaje del usuario con una clave de idempotencia antes de ejecutar el turno, para que reintentos de red no creen mensajes duplicados.
