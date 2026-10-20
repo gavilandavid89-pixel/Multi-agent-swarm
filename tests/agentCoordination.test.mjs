@@ -130,6 +130,15 @@ test('dispatcher exposes shared network tools with strict schemas and role-scope
 });
 
 
+test('agent feed schema accepts longer model output while storage remains bounded', async () => {
+  const { AGENT_TOOL_DEFINITIONS } = await import('../apps/worker/services/agentToolDispatcher.js');
+  const { validateAgentPost } = await import('../apps/worker/services/agentCoordination.js');
+  const definition = AGENT_TOOL_DEFINITIONS.find(item => item.function.name === 'agent_feed_publish');
+  assert.equal(definition.function.parameters.properties.body.maxLength, 3000);
+  const post = validateAgentPost({ type: 'decision', title: 'Decision', body: 'x'.repeat(2600) }, 'arbitro');
+  assert.equal(post.body.length, 2000);
+});
+
 test('task owners classify status and checkpoint metadata never overrides it', async () => {
   const { agentStageTaskId, upsertAgentTask } = await import('../apps/worker/services/agentCoordination.js');
   const firstId = agentStageTaskId('arquitecto', 'Arquitecto', 'Arquitectura');
