@@ -157,7 +157,7 @@ async function monitorAllJobStatuses() {
   const data = await api('/api/jobs?limit=100&offset=0&status=all');
   for (const job of (data.jobs || [])) observeJobStatus(job);
 }
-async function loadJobs({ append = false } = {}) {
+async function loadJobs({ append = false, refreshHead = false } = {}) {
   const pageSize = 25;
   const filter = state.jobsFilter === 'all' ? '' : `&status=${encodeURIComponent(state.jobsFilter)}`;
   let incoming = [];
@@ -167,13 +167,22 @@ async function loadJobs({ append = false } = {}) {
     const data = await api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`);
     incoming = data.jobs || []; total = data.total || 0;
     state.jobs = [...state.jobs, ...incoming];
+  } else if (refreshHead) {
+    // Poll only the newest page; keep already-loaded older chats without repeatedly
+    // downloading every page (which caused visible stutter as the account grew).
+    const data = await api(`/api/jobs?limit=${pageSize}&offset=0${filter}`);
+    incoming = data.jobs || [];
+    total = data.total || 0;
+    const headIds = new Set(incoming.map(job => job.id));
+    const older = state.jobs.filter(job => !headIds.has(job.id));
+    state.jobs = [...incoming, ...older].slice(0, 100);
   } else {
     const offsets = [];
-    const desired = Math.max(pageSize, state.jobs.length);
+    const desired = Math.min(100, Math.max(pageSize, state.jobs.length));
     for (let offset = 0; offset < desired; offset += pageSize) offsets.push(offset);
     if (!offsets.length) offsets.push(0);
     const pages = await Promise.all(offsets.map(offset => api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`)));
-    state.jobs = pages.flatMap(page => page.jobs || []);
+    state.jobs = pages.flatMap(page => page.jobs || []).slice(0, 100);
     total = pages[0]?.total || 0;
   }
   state.jobsTotal = total || state.jobs.length;
@@ -622,7 +631,7 @@ async function enterApp() {
   if (!state.pollHandle) state.pollHandle = setInterval(() => { if (!document.hidden && state.currentDetailId) refresh(); }, 4500);
   if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
     if (document.hidden) return;
-    try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
+    try { await Promise.all([loadJobs({ refreshHead: true }), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
   }, 20000);
 }
 $('access-form').addEventListener('submit', async event => {
