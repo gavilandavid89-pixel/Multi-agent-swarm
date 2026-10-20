@@ -491,7 +491,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       error.code = 'PROVIDER_INPUT_TOO_LARGE'; error.providerModel = model; error.providerStatus = 413;
       throw error;
     }
-    const jsonFormatRejected = response.status === 400 && /json_validate_failed|failed to generate json/i.test(body);
+    const jsonFormatRejected = response.status === 400 && /json_validate_failed|failed to generate json|tool call validation failed[\\s\\S]*?attempted to call tool ['\"]?JSON/i.test(body);
     const incompleteJsonGeneration = jsonFormatRejected && /max completion tokens reached before generating a valid document/i.test(body);
     if (jsonFormatRejected && responseFormat && jsonFormatFallbacks < 1 && (!incompleteJsonGeneration || safeMaxTokens >= maxSafeOutputTokens || formatRetries >= 2)) {
       jsonFormatFallbacks++;
