@@ -59,7 +59,8 @@ function toGeminiContents(messages) {
       parts = item.tool_calls.map(call => {
         let args = {};
         try { args = JSON.parse(String(call?.function?.arguments || '{}')); } catch {}
-        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || '') } };
+        const thoughtSignature = String(call?.thought_signature || call?.thoughtSignature || call?.function?.thought_signature || call?.function?.thoughtSignature || '');
+        return { functionCall: { name: String(call?.function?.name || ''), args, id: String(call.id || ''), ...(thoughtSignature ? { thoughtSignature } : {}) } };
       });
       if (item.content) parts.unshift({ text: String(item.content) });
     } else if (item.role === 'tool') {
