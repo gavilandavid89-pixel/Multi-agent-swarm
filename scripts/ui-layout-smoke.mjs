@@ -314,7 +314,7 @@ async function runViewport(url, profile, width, height, orientation) {
     }
     console.log(`PASS rotation cycle ${orientation}: ${rotationSizes.length} viewport changes; task history, files and composer remain reachable.`);
     const homeCheck = await devtools.send('Runtime.evaluate', {
-      expression: \`(() => {
+      expression: `(() => {
         document.body.classList.remove('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
         document.body.classList.add('swarm-home-scroll');
         document.getElementById('app-content').classList.add('hidden');
@@ -330,7 +330,7 @@ async function runViewport(url, profile, width, height, orientation) {
         ).join('');
         window.scrollTo(0, 500);
         return { overflowY: getComputedStyle(document.body).overflowY, rootHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewportHeight: window.innerHeight, scrollY: window.scrollY };
-      })()\`,
+      })()`,
       returnByValue: true
     }, sessionId);
     await delay(80);
@@ -339,8 +339,8 @@ async function runViewport(url, profile, width, height, orientation) {
     if (home.overflowY !== 'auto') homeIssues.push('home body overflow-y is ' + home.overflowY);
     if (home.rootHeight <= home.viewportHeight + 20) homeIssues.push('home content does not extend beyond the viewport');
     if (home.scrollY < 40) homeIssues.push('home list did not scroll globally');
-    if (homeIssues.length) throw new Error(\`Global home scroll failed in \${orientation}: \${homeIssues.join('; ')}. Report: \${JSON.stringify(home)}\`);
-    console.log(\`PASS global home scroll \${orientation}: \${home.viewportHeight}px viewport, document \${home.rootHeight}px, scrollY=\${home.scrollY}.\`);
+    if (homeIssues.length) throw new Error(`Global home scroll failed in ${orientation}: ${homeIssues.join('; ')}. Report: ${JSON.stringify(home)}`);
+    console.log(`PASS global home scroll ${orientation}: ${home.viewportHeight}px viewport, document ${home.rootHeight}px, scrollY=${home.scrollY}.`);
   } finally {
     try { devtools?.socket.close(); } catch {}
     if (child.exitCode === null) {
