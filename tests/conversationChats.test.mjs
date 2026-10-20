@@ -46,6 +46,7 @@ test('chat persistence enforces account ownership and idempotent retries', async
   const foreignMessages = await listConversationMessages(userB, chat.id, { limit: 20 });
   assert.equal(ownMessages.length, 1, 'retry must not duplicate the user message');
   assert.equal(ownMessages[0].content, 'Mensaje de prueba');
+  assert.equal(ownMessages[0].metadata.turnId, created.turn.id, 'persist the turn reference for reconnect recovery');
   assert.deepEqual(foreignMessages, []);
 });
 
