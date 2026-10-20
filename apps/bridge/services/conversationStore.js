@@ -24,7 +24,7 @@ export async function initConversationStore() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS conversation_messages_idempotency_idx ON conversation_messages(conversation_id, idempotency_key) WHERE idempotency_key IS NOT NULL');
-  await pool.query('CREATE INDEX IF NOT EXISTS conversation_messages_order_idx ON conversation_messages(conversation_id, created_at, id)');
+  await pool.query('CREATE INDEX IF NOT EXISTS conversation_messages_order_idx ON conversation_messages(conversation_id, id)');
 }
 
 function normalizeTitle(value) {
