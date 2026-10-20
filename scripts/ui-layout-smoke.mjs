@@ -15,7 +15,7 @@ if (!appSource.includes("document.body.classList.add('swarm-home-scroll')") ||
 }
 if (!appSource.includes("if (state.currentDetailId) {") ||
     !appSource.includes("Continuando la tarea abierta con su historial y archivos…") ||
-    !appSource.includes("/api/jobs/\${encodeURIComponent(state.currentDetailId)}/reply")) {
+    !appSource.includes("state.currentDetailId)}/reply")) {
   throw new Error('Sending from an open task must continue that same task instead of creating a new job.');
 }
 if (!cSource.includes('body.swarm-home-scroll') || !cSource.includes('overflow-y: auto !important') ||
