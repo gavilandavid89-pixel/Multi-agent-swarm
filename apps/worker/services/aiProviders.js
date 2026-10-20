@@ -279,12 +279,20 @@ function buildProviderRequest({ model, messages, temperature, maxTokens, reasoni
     const body = { model, max_tokens: maxTokens, temperature, messages: converted, ...(systemText.length ? { system: systemText.join('\n\n') } : {}), ...(nativeTools.length ? { tools: nativeTools, tool_choice: { type: 'auto' } } : {}) };
     return { url: endpoint, options: { method: 'POST', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) } };
   }
+  // Gemini-only checkpoint metadata must never leak into OpenAI-compatible provider payloads.
+  // Keep it in the persisted conversation so a later Gemini turn can replay the exact parts.
+  const providerMessages = (Array.isArray(messages) ? messages : []).map(item => {
+    if (!item || typeof item !== 'object' || !Object.hasOwn(item, 'geminiParts')) return item;
+    const portable = { ...item };
+    delete portable.geminiParts;
+    return portable;
+  });
   return {
-    url: `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`,
+    url: `${String(baseUrl).replace(/\\/+$/, '')}/chat/completions`,
     options: {
       method: 'POST',
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: toolChoice || 'auto' } : {}) })
+      body: JSON.stringify({ model, messages: providerMessages, temperature, ...(providerName === 'Groq' ? { max_completion_tokens: maxTokens, reasoning_effort: reasoningEffort, include_reasoning: false } : { max_tokens: maxTokens }), ...(responseFormat ? { response_format: responseFormat } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: toolChoice || 'auto' } : {}) })
     }
   };
 }
