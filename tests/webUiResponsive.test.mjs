@@ -133,3 +133,11 @@ test('floating preview and touch menus have independent window and scroll behavi
   assert.match(app, /Pantalla completa/);
   assert.match(app, /preview-window-launcher/);
 });
+
+test('live UI avoids redundant DOM reconciliation during unchanged background polls', () => {
+  const app = read('../apps/web/public/app.js');
+  assert.match(app, /state\.jobsListSignature/);
+  assert.match(app, /state\.conversationSignature/);
+  assert.match(app, /if \(signature === state\.conversationSignature\) return/);
+  assert.match(app, /if \(document\.hidden\) return/);
+});

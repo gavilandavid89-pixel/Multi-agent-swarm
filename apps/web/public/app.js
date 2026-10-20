@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0 };
+const state = { accessKey: sessionStorage.getItem('swarm-session-token') || '', user: null, accountKey: null, accountKeyVisible: false, apiFields: [], jobs: [], jobsTotal: 0, jobsFilter: 'all', historyShown: false, pollHandle: null, listPollHandle: null, currentDetailId: null, lastDetailSignature: '', conversationSignature: '', jobsListSignature: '', uploadedZipPreview: null, currentTokenBudget: 1000000, jobStatuses: new Map(), agentDocuments: {}, artifactsSignature: '', previewedArtifactIndex: null, previewedArtifactJobId: null, previewedArtifactVersion: '', previewRefreshPending: '', eventStreamController: null, eventStreamGeneration: 0 };
 const statusNames = { queued: 'En cola', running: 'En curso', completed: 'Completado', failed: 'Error', needs_review: 'Revisión humana' };
 const agentIcons = { Vos: '◉', Arquitecto: '⌂', Escéptico: '◈', Árbitro: '⚖', 'Coordinador de coherencia': '⌘', Desarrollador: '⌘', Validador: '✓', 'Validador determinista': '⌁', sistema: '✳' };
 let refreshPromise = null;
@@ -157,20 +157,33 @@ async function loadJobs({ append = false } = {}) {
   // Watch every task currently present in the activity list, not only the open detail pane.
   state.jobs.forEach(observeJobStatus);
   const list = $('jobs-list');
-  if (!state.jobs.length) {
-    list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
-  } else {
-    list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+  const listSignature = JSON.stringify({
+    filter: state.jobsFilter,
+    selected: state.currentDetailId,
+    jobs: state.jobs.map(job => [job.id, job.title || '', job.stage || '', dateLabel(job.updatedAt), job.status])
+  });
+  // Avoid destroying/rebuilding the entire activity list on every background poll.
+  if (listSignature !== state.jobsListSignature) {
+    state.jobsListSignature = listSignature;
+    if (!state.jobs.length) {
+      list.innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>No hay tareas en esta categoría.</p><span class="muted tiny">Probá otro filtro o creá una tarea.</span></div>';
+    } else {
+      list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
+    }
+    list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.detail)));
+    list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); await loadJobs(); } catch (error) { alert(error.message); } }));
   }
   $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
   $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
-  list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.detail)));
-  list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); await loadJobs(); } catch (error) { alert(error.message); } }));
 }
 function renderConversation(data) {
   const conversation = $('conversation');
   const historyEntries = (Array.isArray(data.history) ? data.history : []).filter(entry => !(entry?.type === 'activity' && /termin[oó] su an[aá]lisis y comparti[oó] su respuesta|termin[oó] la revisi[oó]n; resultado de la auditor[ií]a a continuaci[oó]n/i.test(String(entry.content || ''))));
   const entries = data.objective ? [{ at: data.createdAt || '', agent: 'Vos', type: 'message', content: data.objective }, ...historyEntries] : historyEntries;
+  const signature = JSON.stringify([state.currentDetailId, entries.map(entry => [entry.at || '', entry.agent || 'sistema', entry.type || 'message', entry.content || ''])]);
+  // The detail endpoint is polled frequently; skip layout reads and DOM reconciliation when nothing changed.
+  if (signature === state.conversationSignature) return;
+  state.conversationSignature = signature;
   const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 48;
   const anchor = nearBottom ? null : [...conversation.querySelectorAll('[data-message-key]')].find(node => node.getBoundingClientRect().bottom > conversation.getBoundingClientRect().top + 2);
   const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
@@ -553,6 +566,8 @@ async function updateSelectedDetail() {
   updateDetailView(data);
 }
 async function refresh() {
+  // Background polling should not compete with animations or touch scrolling in hidden tabs.
+  if (document.hidden) return;
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
@@ -574,6 +589,7 @@ async function showDetail(id) {
   $('detail-panel').classList.remove('hidden');
   $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
+  state.conversationSignature = '';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
   $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
@@ -587,10 +603,11 @@ async function enterApp() {
   startTaskEventStream();
   try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
-  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
+  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 2200);
   if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
+    if (document.hidden) return;
     try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
-  }, 12000);
+  }, 15000);
 }
 $('access-form').addEventListener('submit', async event => {
   event.preventDefault();
