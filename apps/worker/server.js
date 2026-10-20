@@ -4,6 +4,7 @@ import express from 'express';
 import { initStore, createJob, createContinuationJob, getJob, getPayload, historySummary, listJobs, recoverableJobs, recoverableBudgetContinuations, updateJob, closeStore, checkStore, listArtifacts, getArtifact } from './services/store.js';
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
+import { processConversationTurn, recoverableConversationTurns, closeConversationTurnStore, hasConversationTurn } from './services/conversationTurns.js';
 import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
 import { getRetryRecoveryMode } from './services/retryRecovery.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
@@ -17,7 +18,7 @@ const MAX_CONCURRENCY = Number.isFinite(concurrencyRaw) ? Math.min(8, Math.max(1
 if (SHARED_SECRET.length < 32 || /replace-with|your-/i.test(SHARED_SECRET)) throw new Error('WORKER_SHARED_SECRET debe ser un secreto aleatorio de al menos 32 caracteres.');
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
-const queue = new Set(); const active = new Set(); let shuttingDown = false; let storeClosing = false; let server;
+const queue = new Set(); const active = new Set(); const chatQueue = new Set(); const chatActive = new Set(); let shuttingDown = false; let storeClosing = false; let server;
 const shutdownGraceMs = Math.max(1000, Math.min(60000, Number.parseInt(process.env.SHUTDOWN_GRACE_MS || '15000', 10) || 15000));
 app.get('/healthz', (_req, res) => res.json({ ok: true, role: 'worker', queue: queue.size, processing: active.size, capacity: MAX_CONCURRENCY }));
 app.get('/readyz', async (_req, res) => {
@@ -57,6 +58,28 @@ async function runJobWithAccountProviders(id) {
   });
 }
 function enqueue(id) { if (!id || queue.has(id) || active.has(id) || shuttingDown) return; queue.add(id); pump(); }
+
+function enqueueConversationTurn(id) {
+  if (!id || chatQueue.has(id) || chatActive.has(id) || shuttingDown) return;
+  chatQueue.add(id);
+  pumpConversationTurns();
+}
+function pumpConversationTurns() {
+  if (shuttingDown) return;
+  while (chatActive.size < MAX_CONCURRENCY && chatQueue.size > 0) {
+    const id = chatQueue.values().next().value;
+    chatQueue.delete(id);
+    if (chatActive.has(id)) continue;
+    chatActive.add(id);
+    void processConversationTurn(id)
+      .catch(error => console.error('[worker][chat_turn_failed]', JSON.stringify({ turnId: id, reason: String(error?.message || error).slice(0, 300) })))
+      .finally(() => {
+        chatActive.delete(id);
+        if (shuttingDown) maybeExit();
+        else pumpConversationTurns();
+      });
+  }
+}
 function pump() {
   if (shuttingDown) return;
   while (active.size < MAX_CONCURRENCY && queue.size > 0) {
@@ -89,6 +112,22 @@ app.get('/internal/jobs', async (req, res, next) => {
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit || '25', 10) || 25));
   const offset = Math.max(0, Number.parseInt(req.query.offset || '0', 10) || 0);
   try { res.json(await listJobs({ limit, offset, status: requestedStatus === 'all' ? '' : requestedStatus })); } catch (error) { next(error); }
+});
+
+app.post('/internal/chats/:chatId/turns/:turnId/run', async (req, res) => {
+  const { chatId, turnId } = req.params;
+  if (!/^[0-9a-f-]{36}$/i.test(chatId) || !/^[0-9a-f-]{36}$/i.test(turnId)) return res.status(400).json({ error: 'Identificador de chat o turno inválido.' });
+  try {
+    // Recheck the durable ownership link; a valid UUID is not proof of access.
+    if (typeof req.body?.userId !== 'string' || !await hasConversationTurn(turnId, chatId, req.body.userId)) {
+      return res.status(404).json({ error: 'No se encontró ese turno.' });
+    }
+    enqueueConversationTurn(turnId);
+    res.status(202).json({ accepted: true, turnId, status: 'pending' });
+  } catch (error) {
+    console.error('[worker][chat_turn_enqueue_failed]', error?.message || error);
+    res.status(503).json({ error: 'No se pudo poner el mensaje en cola.' });
+  }
 });
 app.post('/internal/jobs', async (req, res) => {
   const idempotencyKey = req.get('x-swarm-idempotency-key') || '';
@@ -214,11 +253,11 @@ app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   res.json({ job: record.publicJob, history: record.payload.transcript || [], result: record.payload.result || null, objective: record.payload.objective || '', proposal: record.payload.proposal || '', critique: record.payload.critique || '', strategy: record.payload.strategy || '', coherence: record.payload.coherence || '', coherenceReview: record.payload.coherenceReview || null, delivery: record.payload.delivery || '', validation: record.payload.validation || null, syntax: record.payload.syntax || null, validationLevel: record.payload.validationLevel || null, tokenUsage, tokenBudget, tokensUsed, tokensRemaining: Math.max(0, tokenBudget - tokensUsed), lastCheckpoint: record.payload.lastCheckpoint || null, retryAt: record.payload.retryAt || null, providerBlock: record.payload.providerBlock || null, continuationOf: record.payload.continuationOf || null, continuationNumber: Number(record.payload.continuationNumber) || 1, tokenBatchHistory, priorTokensUsed, lifetimeTokensUsed: priorTokensUsed + tokensUsed, continuationAvailable: canContinueBudgetTask(record.publicJob, record.payload), continuedByJobId: record.payload.continuedByJobId || null, improvementVotes: Array.isArray(record.payload.improvementVotes) ? record.payload.improvementVotes : [], agentDocuments: record.payload.agentDocuments || {}, sharedDocument: record.payload.sharedDocument || '', memoryUpdatedAt: record.payload.memoryUpdatedAt || null, memoryLastCheckpoint: record.payload.memoryLastCheckpoint || null, artifacts: await listArtifacts(req.params.id) });
 } catch (error) { next(error); } });
 app.use((error, _req, res, _next) => { console.error('[worker] solicitud inválida', error?.message || error); res.status(400).json({ error: 'Solicitud inválida.' }); });
-function maybeExit() { if (shuttingDown && active.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void Promise.allSettled([closeStore(), closeUserProvidersStore()]).then(results => { for (const result of results) if (result.status === 'rejected') console.error('[worker] error cerrando PostgreSQL', result.reason?.message || result.reason); }).finally(() => process.exit(0)); } }
+function maybeExit() { if (shuttingDown && active.size === 0 && chatActive.size === 0 && !storeClosing) { storeClosing = true; try { server?.close(); } catch {} void Promise.allSettled([closeStore(), closeUserProvidersStore(), closeConversationTurnStore()]).then(results => { for (const result of results) if (result.status === 'rejected') console.error('[worker] error cerrando PostgreSQL', result.reason?.message || result.reason); }).finally(() => process.exit(0)); } }
 function shutdown() {
   if (shuttingDown) return; shuttingDown = true;
   console.log('[worker] apagado solicitado; el trabajo activo tiene una ventana para guardar checkpoints.');
-  server?.close(() => { if (active.size === 0) maybeExit(); });
+  server?.close(() => { if (active.size === 0 && chatActive.size === 0) maybeExit(); });
   const timer = setTimeout(() => { console.warn('[worker] terminó la ventana de apagado; los trabajos no finalizados se recuperarán desde checkpoints.'); process.exit(0); }, shutdownGraceMs);
   timer.unref(); maybeExit();
 }
@@ -230,6 +269,8 @@ async function start() {
     const provider = process.env.GEMINI_API_KEY ? 'Gemini' : (process.env.GROQ_API_KEY ? 'Groq' : 'ninguno');
     const configuredModel = process.env.GEMINI_API_KEY ? (process.env.GEMINI_MODEL_CODING || 'gemini-3.8-flash') : (process.env.GROQ_MODEL_CODING || 'openai/gpt-oss-120b');
     console.info('[worker][ai_provider_config]', JSON.stringify({ provider, model: configuredModel, geminiKeyConfigured: Boolean(process.env.GEMINI_API_KEY), groqKeyConfigured: Boolean(process.env.GROQ_API_KEY) }));
+    try { for (const turn of await recoverableConversationTurns()) enqueueConversationTurn(turn.id); }
+    catch (error) { console.error('[worker] no se pudieron recuperar los chats', error?.message || error); }
     try {
       for (const job of await recoverableJobs()) {
         const delay = job.retryAt ? Math.max(0, Date.parse(job.retryAt) - Date.now()) : 0;

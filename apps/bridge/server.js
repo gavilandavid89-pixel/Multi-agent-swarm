@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
+import { initConversationStore, listConversations, createConversation, getConversation, renameConversation, setConversationArchived, listConversationMessages, createConversationTurn, getConversationTurn } from './services/conversationStore.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -278,6 +279,120 @@ app.patch('/api/admin/users/:userId/status', async (req, res) => {
   try { res.json({ user: await setManagedUserDisabled(req.params.userId, req.body.disabled) }); }
   catch (error) { res.status(error.status || 503).json({ error: error.message || 'No se pudo actualizar la cuenta.' }); }
 });
+
+function parsePageInteger(value, fallback, max) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? Math.min(max, parsed) : fallback;
+}
+function validConversationId(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '')); }
+
+app.get('/api/chats', async (req, res) => {
+  const limit = Math.max(1, parsePageInteger(req.query.limit, 25, 100));
+  const offset = parsePageInteger(req.query.offset, 0, 1000000);
+  const archivedRaw = String(req.query.archived || 'false');
+  if (!['true', 'false'].includes(archivedRaw)) return res.status(400).json({ error: 'El filtro de archivo no es válido.' });
+  try {
+    const chats = await listConversations(req.user.id, { archived: archivedRaw === 'true', limit, offset });
+    res.set('Cache-Control', 'no-store').json({ chats, limit, offset, hasMore: chats.length === limit });
+  } catch { res.status(503).json({ error: 'No se pudieron cargar los chats.' }); }
+});
+
+app.post('/api/chats', async (req, res) => {
+  const title = req.body?.title === undefined ? 'Nuevo chat' : req.body.title;
+  if (typeof title !== 'string') return res.status(400).json({ error: 'El título del chat debe ser texto.' });
+  try {
+    const chat = await createConversation(req.user.id, title);
+    res.set('Cache-Control', 'no-store').status(201).json({ chat });
+  } catch (error) { res.status(error.status || 503).json({ error: error.status === 400 ? error.message : 'No se pudo crear el chat.' }); }
+});
+
+app.get('/api/chats/:chatId', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  try {
+    const chat = await getConversation(req.user.id, req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'No se encontró ese chat.' });
+    res.set('Cache-Control', 'no-store').json({ chat });
+  } catch { res.status(503).json({ error: 'No se pudo cargar el chat.' }); }
+});
+
+app.patch('/api/chats/:chatId', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  const hasTitle = Object.prototype.hasOwnProperty.call(req.body || {}, 'title');
+  const hasArchived = Object.prototype.hasOwnProperty.call(req.body || {}, 'archived');
+  if (hasTitle === hasArchived || (hasTitle && typeof req.body.title !== 'string') || (hasArchived && typeof req.body.archived !== 'boolean')) {
+    return res.status(400).json({ error: 'Indicá un título o el estado de archivo válido.' });
+  }
+  try {
+    const chat = hasTitle
+      ? await renameConversation(req.user.id, req.params.chatId, req.body.title)
+      : await setConversationArchived(req.user.id, req.params.chatId, req.body.archived);
+    if (!chat) {
+      const exists = await getConversation(req.user.id, req.params.chatId);
+      return res.status(exists ? 409 : 404).json({ error: exists ? 'No se puede renombrar un chat archivado.' : 'No se encontró ese chat.' });
+    }
+    res.set('Cache-Control', 'no-store').json({ chat });
+  } catch (error) { res.status(error.status || 503).json({ error: error.status === 400 ? error.message : 'No se pudo actualizar el chat.' }); }
+});
+
+
+app.post('/api/chats/:chatId/messages', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  const message = typeof req.body?.message === 'string' ? req.body.message : '';
+  const idempotencyKey = req.get('idempotency-key') || req.body?.idempotencyKey || randomUUID();
+  if (!/^[0-9a-f-]{36}$/i.test(String(idempotencyKey))) return res.status(400).json({ error: 'Clave de idempotencia inválida.' });
+  try {
+    const result = await createConversationTurn(req.user.id, req.params.chatId, message, String(idempotencyKey));
+    if (result.missing) return res.status(404).json({ error: 'No se encontró un chat activo de esa cuenta.' });
+    const turn = result.turn;
+    if (turn.status !== 'completed') {
+      try {
+        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
+          method: 'POST',
+          headers: { 'x-swarm-idempotency-key': turn.id },
+          body: JSON.stringify({ userId: req.user.id })
+        });
+      } catch (error) {
+        // The turn is already durable. The client can poll and the next status read will retry the wake-up.
+        console.warn('[bridge][chat_turn_wakeup_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
+      }
+    }
+    res.set('Cache-Control', 'no-store').status(202).json({ turn, duplicate: Boolean(result.duplicate) });
+  } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'No se pudo guardar el mensaje.' }); }
+});
+
+app.get('/api/chats/:chatId/turns/:turnId', async (req, res) => {
+  if (!validConversationId(req.params.chatId) || !validConversationId(req.params.turnId)) return res.status(400).json({ error: 'Identificador de chat o turno inválido.' });
+  try {
+    const turn = await getConversationTurn(req.user.id, req.params.chatId, req.params.turnId);
+    if (!turn) return res.status(404).json({ error: 'No se encontró ese turno.' });
+    if (turn.status === 'pending') {
+      try {
+        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
+          method: 'POST',
+          headers: { 'x-swarm-idempotency-key': turn.id },
+          body: JSON.stringify({ userId: req.user.id })
+        });
+      } catch (error) {
+        console.warn('[bridge][chat_turn_rewake_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
+      }
+    }
+    res.set('Cache-Control', 'no-store').json({ turn });
+  } catch { res.status(503).json({ error: 'No se pudo consultar el estado del mensaje.' }); }
+});
+
+app.get('/api/chats/:chatId/messages', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  const limit = Math.max(1, parsePageInteger(req.query.limit, 50, 100));
+  const beforeId = req.query.beforeId === undefined ? null : String(req.query.beforeId);
+  if (beforeId !== null && !/^\d{1,18}$/.test(beforeId)) return res.status(400).json({ error: 'Cursor de mensajes inválido.' });
+  try {
+    const chat = await getConversation(req.user.id, req.params.chatId);
+    if (!chat) return res.status(404).json({ error: 'No se encontró ese chat.' });
+    const messages = await listConversationMessages(req.user.id, req.params.chatId, { limit, beforeId });
+    res.set('Cache-Control', 'no-store').json({ messages, limit, hasMore: messages.length === limit });
+  } catch { res.status(503).json({ error: 'No se pudieron cargar los mensajes.' }); }
+});
+
 app.param('id', async (req, res, next, id) => {
   try {
     const owned = await pool.query('SELECT 1 FROM user_job_ownership WHERE job_id=$1 AND user_id=$2', [String(id), req.user.id]);
@@ -775,4 +890,5 @@ function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 await initAccountStore();
+await initConversationStore();
 server = app.listen(PORT, '0.0.0.0', () => console.log(`[bridge] escuchando en 0.0.0.0:${PORT}`));
