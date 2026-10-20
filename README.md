@@ -15,7 +15,7 @@
 
 ## Arquitectura de chats independientes
 
-La separación entre chats y tareas está documentada en [docs/CHAT_ARCHITECTURE.md](docs/CHAT_ARCHITECTURE.md). La base de datos de cuentas incorpora el modelo de conversaciones y mensajes y el Bridge expone endpoints autenticados para crear, listar, renombrar, archivar/restaurar chats y leer mensajes paginados. Esta base **no significa que el envío de mensajes a las IA ni la interfaz de chats ya estén implementados**: la integración de turnos con el Worker y la UI deben añadirse y probarse como una etapa posterior.
+La separación entre chats y tareas está documentada en [docs/CHAT_ARCHITECTURE.md](docs/CHAT_ARCHITECTURE.md). La base de datos de cuentas guarda conversaciones, mensajes y turnos idempotentes; el Bridge expone endpoints autenticados y el Worker procesa respuestas de IA y recupera turnos interrumpidos. La interfaz tiene una entrada **Chats** separada de **Historial de tareas**, con creación, selección, renombrado, archivo y recuperación del estado al reconectar. Esta rama sigue pendiente de CI antes de considerarse lista para producción.
 
 Los chats tienen propietario propio y no reutilizan el parámetro `:id` de los endpoints de tareas, ya que el Bridge valida ese parámetro mediante la tabla de propiedad de tareas.
 
