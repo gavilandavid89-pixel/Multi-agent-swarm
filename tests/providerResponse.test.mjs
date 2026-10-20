@@ -95,3 +95,13 @@ test('adapta Responses API y conserva estado incompleto como truncamiento', () =
   assert.equal(result.finishReason, 'length');
   assert.equal(result.usage.totalTokens, 5);
 });
+
+
+test('preserva la thought signature de Gemini al traducir llamadas a herramientas', () => {
+  const signature = 'sig-gemini-roundtrip-test';
+  const native = { candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'agent_tasks_list', args: { status: 'open' }, id: 'call-1' }, thoughtSignature: signature }] }, finishReason: 'TOOL_CALLS' }] };
+  const normalized = normalizeProviderResponse(native);
+  assert.equal(normalized.toolCalls[0].thoughtSignature, signature);
+  const compatible = normalizeOpenAICompatibleResponse(native);
+  assert.equal(compatible.choices[0].message.tool_calls[0].thought_signature, signature);
+});

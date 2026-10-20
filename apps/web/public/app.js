@@ -278,10 +278,10 @@ function renderArtifacts(files, jobId, jobStatus, validation, syntax) {
       state.previewedArtifactJobId = jobId;
       state.previewedArtifactVersion = signature;
       preview.classList.remove('hidden');
-      preview.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+      window.SwarmPreviewWindow?.open();
     } catch (error) {
       $('artifact-preview-status').textContent = `No se pudo abrir la vista previa: ${error.message}`;
-      preview.classList.remove('hidden');
+      window.SwarmPreviewWindow?.open();
     } finally { button.disabled = false; button.textContent = original; }
   }));
   }
@@ -1255,6 +1255,39 @@ $('files-preview-button').addEventListener('click', () => {
   if (!preview) { $('files-drawer-status').textContent = 'Todavía no hay un HTML listo para previsualizar.'; return; }
   preview.click();
 });
+
+function initFloatingArtifactPreview() {
+  const preview = $('artifact-preview');
+  if (!preview || preview.dataset.floatingReady === 'true') return;
+  preview.dataset.floatingReady = 'true'; document.body.append(preview);
+  preview.classList.add('preview-window'); preview.setAttribute('role', 'dialog'); preview.setAttribute('aria-label', 'Vista previa del artefacto');
+  const header = preview.querySelector('.section-head'), close = $('close-artifact-preview');
+  if (!header || !close) return;
+  const controls = document.createElement('div'); controls.className = 'preview-window-controls';
+  const minimize = document.createElement('button'); minimize.type = 'button'; minimize.className = 'icon-button'; minimize.textContent = '−';
+  minimize.setAttribute('aria-label', 'Minimizar vista previa'); minimize.title = 'Minimizar';
+  const maximize = document.createElement('button'); maximize.type = 'button'; maximize.className = 'icon-button'; maximize.textContent = '⛶';
+  maximize.setAttribute('aria-label', 'Pantalla completa'); maximize.title = 'Pantalla completa';
+  close.textContent = '×'; close.setAttribute('aria-label', 'Cerrar vista previa'); close.title = 'Cerrar';
+  controls.append(minimize, maximize, close); header.append(controls);
+  const launcher = document.createElement('button'); launcher.type = 'button'; launcher.className = 'preview-window-launcher hidden';
+  launcher.textContent = '▣ Vista previa'; launcher.setAttribute('aria-label', 'Restaurar vista previa'); launcher.title = 'Arrastrá para mover · tocá para restaurar'; document.body.append(launcher);
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const placeDefault = () => { preview.style.left = Math.max(8, Math.round((window.innerWidth - Math.min(900, window.innerWidth - 24))/2))+'px'; preview.style.top = Math.max(8, Math.round(window.innerHeight*.06))+'px'; preview.style.right='auto'; preview.style.bottom='auto'; };
+  const openWindow = () => { preview.classList.remove('hidden','preview-minimized'); launcher.classList.add('hidden'); if(!preview.dataset.positioned) placeDefault(); preview.dataset.positioned='true'; };
+  minimize.addEventListener('click', () => { preview.classList.add('preview-minimized'); launcher.classList.remove('hidden'); launcher.style.left=preview.style.left||'16px'; launcher.style.top=preview.style.top||'16px'; launcher.style.right='auto'; launcher.style.bottom='auto'; });
+  maximize.addEventListener('click', () => { const max=preview.classList.toggle('preview-maximized'); maximize.textContent=max?'❐':'⛶'; maximize.title=max?'Restaurar tamaño':'Pantalla completa'; maximize.setAttribute('aria-label',max?'Restaurar tamaño':'Pantalla completa'); if(max){preview.dataset.restoreLeft=preview.style.left||'';preview.dataset.restoreTop=preview.style.top||'';preview.style.left='';preview.style.top='';preview.style.right='';preview.style.bottom='';}else{preview.style.left=preview.dataset.restoreLeft||'';preview.style.top=preview.dataset.restoreTop||'';preview.style.right='auto';preview.style.bottom='auto';} });
+  close.addEventListener('click', () => { preview.classList.remove('preview-maximized','preview-minimized'); launcher.classList.add('hidden'); preview.style.left='';preview.style.top='';preview.style.right='';preview.style.bottom='';preview.dataset.positioned='';maximize.textContent='⛶'; });
+  const drag=(el,handle,onEnd=()=>{})=>{let sx=0,sy=0,ox=0,oy=0,moved=false,pid=null;
+    handle.addEventListener('pointerdown',e=>{if(e.target.closest('button')||(el===preview&&preview.classList.contains('preview-maximized')))return;pid=e.pointerId;sx=e.clientX;sy=e.clientY;const r=el.getBoundingClientRect();ox=r.left;oy=r.top;moved=false;handle.setPointerCapture?.(pid);e.preventDefault();});
+    handle.addEventListener('pointermove',e=>{if(pid!==e.pointerId)return;const dx=e.clientX-sx,dy=e.clientY-sy;if(Math.abs(dx)+Math.abs(dy)>5)moved=true;if(!moved)return;const r=el.getBoundingClientRect();el.style.left=clamp(ox+dx,0,Math.max(0,window.innerWidth-Math.min(72,r.width)))+'px';el.style.top=clamp(oy+dy,0,Math.max(0,window.innerHeight-Math.min(48,r.height)))+'px';el.style.right='auto';el.style.bottom='auto';});
+    const end=e=>{if(pid!==e.pointerId)return;pid=null;onEnd(moved);};handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);};
+  drag(preview,header);let launcherMoved=false;drag(launcher,launcher,m=>{launcherMoved=m;});
+  launcher.addEventListener('click',e=>{if(launcherMoved){launcherMoved=false;e.preventDefault();return;}openWindow();});
+  window.addEventListener('resize',()=>{if(preview.classList.contains('hidden')||preview.classList.contains('preview-minimized')||preview.classList.contains('preview-maximized'))return;const r=preview.getBoundingClientRect();preview.style.left=clamp(r.left,0,Math.max(0,window.innerWidth-80))+'px';preview.style.top=clamp(r.top,0,Math.max(0,window.innerHeight-60))+'px';},{passive:true});
+  window.SwarmPreviewWindow={open:openWindow,minimize:()=>minimize.click(),close:()=>close.click()};
+}
+
 function syncViewportAfterChange({ resetScroll = false } = {}) {
   const viewport = window.visualViewport;
   const viewportHeight = viewport?.height || window.innerHeight;
@@ -1287,4 +1320,5 @@ window.addEventListener('resize', () => scheduleViewportSync(), { passive: true 
 window.addEventListener('orientationchange', () => scheduleViewportSync(true), { passive: true });
 window.visualViewport?.addEventListener('resize', () => scheduleViewportSync(), { passive: true });
 syncViewportAfterChange();
+initFloatingArtifactPreview();
 boot();

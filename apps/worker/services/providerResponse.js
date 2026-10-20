@@ -105,7 +105,8 @@ function fromGemini(data, options) {
   const toolCalls = parts.filter(part => part?.functionCall && typeof part.functionCall.name === 'string').map(part => ({
     id: String(part.functionCall.id || ''),
     name: String(part.functionCall.name),
-    arguments: part.functionCall.args ?? {}
+    arguments: part.functionCall.args ?? {},
+    thoughtSignature: String(part.thoughtSignature || part.thought_signature || '')
   }));
   const blocked = !candidate && Boolean(data.promptFeedback?.blockReason);
   return canonical(content, {
@@ -205,7 +206,8 @@ export function normalizeOpenAICompatibleResponse(data) {
           function: {
             name: String(call.name || ''),
             arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? call.input ?? {})
-          }
+          },
+          ...(call.thoughtSignature ? { thought_signature: call.thoughtSignature } : {})
         })) } : {}),
         ...(normalized.status === 'blocked' ? { refusal: normalized.content || 'Respuesta bloqueada por el proveedor.' } : {})
       },
