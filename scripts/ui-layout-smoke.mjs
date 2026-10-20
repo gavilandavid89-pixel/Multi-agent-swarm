@@ -334,7 +334,7 @@ async function runViewport(url, profile, width, height, orientation) {
       returnByValue: true
     }, sessionId);
     await delay(80);
-    const home = homeCheck.result?.result?.value || {};
+    const home = homeCheck.result?.value || {};
     const homeIssues = [];
     if (home.overflowY !== 'auto') homeIssues.push('home body overflow-y is ' + home.overflowY);
     if (home.rootHeight <= home.viewportHeight + 20) homeIssues.push('home content does not extend beyond the viewport');
