@@ -137,7 +137,13 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     updateTask: async (task, sourceRole) => {
       const record = await getPayload(jobId);
       if (!record) throw new Error('La tarea dejó de existir al actualizar el tablero.');
-      const update = upsertAgentTask(record.payload, task, sourceRole);
+      const existingTask = Array.isArray(record.payload.agentTasks)
+        ? record.payload.agentTasks.find(item => item?.taskId === task.taskId) : null;
+      const normalizedTask = {
+        ...task,
+        title: String(task.title || existingTask?.title || task.summary || task.taskId || 'Tarea sin título').slice(0, 160)
+      };
+      const update = upsertAgentTask(record.payload, normalizedTask, sourceRole);
       const postType = update.task.status === 'blocked' ? 'blocker'
         : update.task.status === 'done' ? 'result'
         : update.task.status === 'in_review' ? 'handoff' : 'progress';
