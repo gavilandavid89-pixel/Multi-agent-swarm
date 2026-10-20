@@ -3,7 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
-import { initConversationStore, listConversations, createConversation, getConversation, renameConversation, setConversationArchived, listConversationMessages } from './services/conversationStore.js';
+import { initConversationStore, listConversations, createConversation, getConversation, renameConversation, setConversationArchived, listConversationMessages, createConversationTurn, getConversationTurn } from './services/conversationStore.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -332,6 +332,52 @@ app.patch('/api/chats/:chatId', async (req, res) => {
     }
     res.set('Cache-Control', 'no-store').json({ chat });
   } catch (error) { res.status(error.status || 503).json({ error: error.status === 400 ? error.message : 'No se pudo actualizar el chat.' }); }
+});
+
+
+app.post('/api/chats/:chatId/messages', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  const message = typeof req.body?.message === 'string' ? req.body.message : '';
+  const idempotencyKey = req.get('idempotency-key') || req.body?.idempotencyKey || randomUUID();
+  if (!/^[0-9a-f-]{36}$/i.test(String(idempotencyKey))) return res.status(400).json({ error: 'Clave de idempotencia inválida.' });
+  try {
+    const result = await createConversationTurn(req.user.id, req.params.chatId, message, String(idempotencyKey));
+    if (result.missing) return res.status(404).json({ error: 'No se encontró un chat activo de esa cuenta.' });
+    const turn = result.turn;
+    if (turn.status !== 'completed') {
+      try {
+        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
+          method: 'POST',
+          headers: { 'x-swarm-idempotency-key': turn.id },
+          body: JSON.stringify({ userId: req.user.id })
+        });
+      } catch (error) {
+        // The turn is already durable. The client can poll and the next status read will retry the wake-up.
+        console.warn('[bridge][chat_turn_wakeup_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
+      }
+    }
+    res.set('Cache-Control', 'no-store').status(202).json({ turn, duplicate: Boolean(result.duplicate) });
+  } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'No se pudo guardar el mensaje.' }); }
+});
+
+app.get('/api/chats/:chatId/turns/:turnId', async (req, res) => {
+  if (!validConversationId(req.params.chatId) || !validConversationId(req.params.turnId)) return res.status(400).json({ error: 'Identificador de chat o turno inválido.' });
+  try {
+    const turn = await getConversationTurn(req.user.id, req.params.chatId, req.params.turnId);
+    if (!turn) return res.status(404).json({ error: 'No se encontró ese turno.' });
+    if (turn.status === 'pending') {
+      try {
+        await workerRequest(`/internal/chats/${encodeURIComponent(req.params.chatId)}/turns/${encodeURIComponent(turn.id)}/run`, {
+          method: 'POST',
+          headers: { 'x-swarm-idempotency-key': turn.id },
+          body: JSON.stringify({ userId: req.user.id })
+        });
+      } catch (error) {
+        console.warn('[bridge][chat_turn_rewake_deferred]', JSON.stringify({ turnId: turn.id, reason: error?.status || error?.name || 'network' }));
+      }
+    }
+    res.set('Cache-Control', 'no-store').json({ turn });
+  } catch { res.status(503).json({ error: 'No se pudo consultar el estado del mensaje.' }); }
 });
 
 app.get('/api/chats/:chatId/messages', async (req, res) => {
