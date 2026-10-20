@@ -4,20 +4,20 @@ import { withUserProviders } from './userProviders.js';
 
 const { Pool } = pg;
 const connectionString = process.env.SWARM_DATABASE_URL || '';
-if (!connectionString) throw new Error('Falta SWARM_DATABASE_URL para los chats persistentes del Worker.');
 const verifiedConnectionString = connectionString.replace(/([?&])sslmode=require(?=(&|$))/i, '$1sslmode=verify-full');
 const local = (() => { try { return ['localhost', '127.0.0.1', '::1'].includes(new URL(connectionString).hostname); } catch { return false; } })();
-const pool = new Pool({ connectionString: verifiedConnectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: local ? false : { rejectUnauthorized: true } });
+const pool = connectionString ? new Pool({ connectionString: verifiedConnectionString, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000, ssl: local ? false : { rejectUnauthorized: true } }) : null;
+function requirePool() { if (!pool) throw new Error('SWARM_DATABASE_URL no está configurada; los chats están temporalmente deshabilitados.'); return pool; }
 
 export async function recoverableConversationTurns() {
   // A Worker restart may leave a turn marked running after the process died.
-  await pool.query("UPDATE conversation_turns SET status='pending', started_at=NULL WHERE status='running'");
-  const { rows } = await pool.query("SELECT id, conversation_id AS \"conversationId\", user_id AS \"userId\" FROM conversation_turns WHERE status='pending' ORDER BY created_at ASC LIMIT 100");
+  await requirePool().query("UPDATE conversation_turns SET status='pending', started_at=NULL WHERE status='running'");
+  const { rows } = await requirePool().query("SELECT id, conversation_id AS \"conversationId\", user_id AS \"userId\" FROM conversation_turns WHERE status='pending' ORDER BY created_at ASC LIMIT 100");
   return rows;
 }
 
 export async function processConversationTurn(turnId) {
-  const client = await pool.connect();
+  const client = await requirePool().connect();
   let turn;
   try {
     await client.query('BEGIN');
@@ -38,7 +38,7 @@ export async function processConversationTurn(turnId) {
     throw error;
   } finally { client.release(); }
   try {
-    const { rows: contextRows } = await pool.query(
+    const { rows: contextRows } = await requirePool().query(
       `SELECT role, content FROM conversation_messages
         WHERE conversation_id=$1 AND id <= $2
         ORDER BY id DESC LIMIT 21`,
@@ -56,7 +56,7 @@ export async function processConversationTurn(turnId) {
     }));
     const answer = String(response ?? '').trim();
     if (!answer) throw new Error('El proveedor de IA devolvió una respuesta vacía.');
-    const db = await pool.connect();
+    const db = await requirePool().connect();
     try {
       await db.query('BEGIN');
       const current = await db.query('SELECT status FROM conversation_turns WHERE id=$1 FOR UPDATE', [turnId]);
@@ -85,7 +85,6 @@ export async function processConversationTurn(turnId) {
     } catch (error) { await db.query('ROLLBACK').catch(() => {}); throw error; }
     finally { db.release(); }
   } catch (error) {
-    const safeMessage = String(error?.message || 'Fallo del proveedor').replace(/[\r\n\t]+/g, ' ').slice(0, 500);
     await pool.query(
       `UPDATE conversation_turns SET status='failed', last_error=$2, finished_at=now()
         WHERE id=$1 AND status <> 'completed'`,
@@ -100,7 +99,7 @@ export async function processConversationTurn(turnId) {
   }
 }
 
-export async function closeConversationTurnStore() { await pool.end(); }
+export async function closeConversationTurnStore() { if (pool) await pool.end(); }
 
 export async function hasConversationTurn(turnId, conversationId, userId) {
   const { rows } = await pool.query(
