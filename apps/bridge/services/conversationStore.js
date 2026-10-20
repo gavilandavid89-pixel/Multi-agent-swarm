@@ -25,6 +25,23 @@ export async function initConversationStore() {
   )`);
   await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS conversation_messages_idempotency_idx ON conversation_messages(conversation_id, idempotency_key) WHERE idempotency_key IS NOT NULL');
   await pool.query('CREATE INDEX IF NOT EXISTS conversation_messages_order_idx ON conversation_messages(conversation_id, id)');
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL,
+    user_message_id BIGINT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+    assistant_message_id BIGINT REFERENCES conversation_messages(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','running','completed','failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    UNIQUE(conversation_id, idempotency_key)
+  )`);
+  await pool.query('CREATE INDEX IF NOT EXISTS conversation_turns_recovery_idx ON conversation_turns(status, created_at)');
 }
 
 function normalizeTitle(value) {
@@ -106,4 +123,76 @@ export async function listConversationMessages(userId, conversationId, { limit =
     [conversationId, userId, beforeId, limit]
   );
   return rows.reverse();
+}
+
+export async function createConversationTurn(userId, conversationId, message, idempotencyKey) {
+  const content = typeof message === 'string' ? message.trim() : '';
+  if (!content) throw Object.assign(new Error('Escribí un mensaje.'), { status: 400 });
+  if (content.length > 6000) throw Object.assign(new Error('El mensaje supera los 6.000 caracteres.'), { status: 413 });
+  if (typeof idempotencyKey !== 'string' || !/^[0-9a-f-]{36}$/i.test(idempotencyKey)) {
+    throw Object.assign(new Error('Clave de idempotencia inválida.'), { status: 400 });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const owned = await client.query(
+      'SELECT id FROM conversations WHERE id=$1 AND user_id=$2 AND archived_at IS NULL FOR UPDATE',
+      [conversationId, userId]
+    );
+    if (!owned.rows[0]) {
+      await client.query('ROLLBACK');
+      return { missing: true };
+    }
+    const existing = await client.query(
+      `SELECT id, status, user_message_id AS "userMessageId", assistant_message_id AS "assistantMessageId"
+         FROM conversation_turns WHERE conversation_id=$1 AND idempotency_key=$2`,
+      [conversationId, idempotencyKey]
+    );
+    if (existing.rows[0]) {
+      await client.query('COMMIT');
+      return { turn: existing.rows[0], duplicate: true };
+    }
+    const userMessage = await client.query(
+      `INSERT INTO conversation_messages(conversation_id, role, content, metadata, idempotency_key)
+       VALUES($1, 'user', $2, $3::jsonb, $4) RETURNING id`,
+      [conversationId, content, JSON.stringify({ turnStatus: 'pending' }), idempotencyKey]
+    );
+    const turnResult = await client.query(
+      `INSERT INTO conversation_turns(conversation_id, user_id, idempotency_key, user_message_id)
+       VALUES($1, $2, $3, $4)
+       RETURNING id, status, user_message_id AS "userMessageId", assistant_message_id AS "assistantMessageId"`,
+      [conversationId, userId, idempotencyKey, userMessage.rows[0].id]
+    );
+    await client.query(
+      `UPDATE conversations SET updated_at=now(), last_message_at=now(),
+         title=CASE WHEN title='Nuevo chat' THEN left($3, 80) ELSE title END
+       WHERE id=$1 AND user_id=$2`,
+      [conversationId, userId, content]
+    );
+    await client.query('COMMIT');
+    return { turn: turnResult.rows[0], duplicate: false };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') {
+      const existing = await pool.query(
+        `SELECT id, status, user_message_id AS "userMessageId", assistant_message_id AS "assistantMessageId"
+           FROM conversation_turns WHERE conversation_id=$1 AND idempotency_key=$2`,
+        [conversationId, idempotencyKey]
+      );
+      if (existing.rows[0]) return { turn: existing.rows[0], duplicate: true };
+    }
+    throw error;
+  } finally { client.release(); }
+}
+
+export async function getConversationTurn(userId, conversationId, turnId) {
+  const { rows } = await pool.query(
+    `SELECT id, status, last_error AS "lastError", attempt_count AS "attemptCount",
+            user_message_id AS "userMessageId", assistant_message_id AS "assistantMessageId",
+            created_at AS "createdAt", finished_at AS "finishedAt"
+       FROM conversation_turns
+      WHERE id=$1 AND conversation_id=$2 AND user_id=$3`,
+    [turnId, conversationId, userId]
+  );
+  return rows[0] || null;
 }
