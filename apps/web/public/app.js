@@ -16,7 +16,30 @@ async function api(url, options = {}) {
   return data;
 }
 function showAccess() { document.body.classList.add('auth-gate'); $('files-menu-toggle')?.classList.add('hidden'); $('files-drawer')?.classList.add('hidden'); $('access-panel').classList.remove('hidden'); $('app-content').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('account-menu').classList.add('hidden'); $('access-key').value = ''; if ($('access-form')?.classList.contains('hidden')) { $('invite-gate-form')?.classList.remove('hidden'); $('register-form')?.classList.add('hidden'); $('show-login')?.classList.remove('hidden'); $('show-key-login')?.classList.add('hidden'); if ($('register-status')) $('register-status').textContent = ''; } }
-function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); $('account-menu').classList.remove('hidden'); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
+function renderChatSidebar() {
+  const list = $('chat-list');
+  if (!list) return;
+  const jobs = [...(state.jobs || [])].sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  $('chat-count').textContent = String(jobs.length);
+  if (!jobs.length) {
+    list.innerHTML = '<div class="sidebar-empty">Todavía no hay chats.<br>Usá <strong>Comenzar tarea</strong> para iniciar una conversación con el equipo.</div>';
+    return;
+  }
+  list.innerHTML = jobs.map(job => {
+    const title = job.title || `Chat ${String(job.id).slice(0, 8)}`;
+    return `<button type="button" class="chat-list-item ${job.id === state.currentDetailId ? 'active' : ''}" data-chat-id="${escapeHtml(job.id)}"><span class="chat-list-glyph">◉</span><span class="chat-list-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(statusNames[job.status] || job.status || 'Conversación')} · ${escapeHtml(dateLabel(job.updatedAt))}</small></span><span class="chat-list-arrow">›</span></button>`;
+  }).join('');
+  list.querySelectorAll('[data-chat-id]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.chatId)));
+}
+function updateSidebarProfile() {
+  const name = state.user?.username || state.user?.name || state.user?.email || 'Tu cuenta';
+  if ($('sidebar-username')) $('sidebar-username').textContent = name;
+  if ($('sidebar-avatar')) $('sidebar-avatar').textContent = String(name).trim().slice(0, 1).toUpperCase() || 'U';
+  const menu = $('account-menu');
+  if (menu && $('sidebar-account-slot') && menu.parentElement !== $('sidebar-account-slot')) $('sidebar-account-slot').append(menu);
+  menu?.classList.remove('hidden');
+}
+function showApp() { document.body.classList.remove('auth-gate'); syncViewportAfterChange(); $('files-menu-toggle')?.classList.remove('hidden'); $('access-panel').classList.add('hidden'); $('api-settings-panel').classList.add('hidden'); $('app-content').classList.remove('hidden'); updateSidebarProfile(); renderChatSidebar(); const isAdmin = state.user?.role === 'admin'; $('invite-admin-panel').classList.toggle('hidden', !isAdmin); $('managed-users-panel').classList.toggle('hidden', !isAdmin); }
 function setConnection(ok, label) { $('connection-dot').classList.toggle('online', ok); $('connection-label').textContent = label; }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function dateLabel(value) { if (!value) return 'sin fecha'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(); }
@@ -134,7 +157,7 @@ async function monitorAllJobStatuses() {
   const data = await api('/api/jobs?limit=100&offset=0&status=all');
   for (const job of (data.jobs || [])) observeJobStatus(job);
 }
-async function loadJobs({ append = false } = {}) {
+async function loadJobs({ append = false, refreshHead = false } = {}) {
   const pageSize = 25;
   const filter = state.jobsFilter === 'all' ? '' : `&status=${encodeURIComponent(state.jobsFilter)}`;
   let incoming = [];
@@ -144,13 +167,22 @@ async function loadJobs({ append = false } = {}) {
     const data = await api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`);
     incoming = data.jobs || []; total = data.total || 0;
     state.jobs = [...state.jobs, ...incoming];
+  } else if (refreshHead) {
+    // Poll only the newest page; keep already-loaded older chats without repeatedly
+    // downloading every page (which caused visible stutter as the account grew).
+    const data = await api(`/api/jobs?limit=${pageSize}&offset=0${filter}`);
+    incoming = data.jobs || [];
+    total = data.total || 0;
+    const headIds = new Set(incoming.map(job => job.id));
+    const older = state.jobs.filter(job => !headIds.has(job.id));
+    state.jobs = [...incoming, ...older].slice(0, 100);
   } else {
     const offsets = [];
-    const desired = Math.max(pageSize, state.jobs.length);
+    const desired = Math.min(100, Math.max(pageSize, state.jobs.length));
     for (let offset = 0; offset < desired; offset += pageSize) offsets.push(offset);
     if (!offsets.length) offsets.push(0);
     const pages = await Promise.all(offsets.map(offset => api(`/api/jobs?limit=${pageSize}&offset=${offset}${filter}`)));
-    state.jobs = pages.flatMap(page => page.jobs || []);
+    state.jobs = pages.flatMap(page => page.jobs || []).slice(0, 100);
     total = pages[0]?.total || 0;
   }
   state.jobsTotal = total || state.jobs.length;
@@ -163,6 +195,7 @@ async function loadJobs({ append = false } = {}) {
     list.innerHTML = state.jobs.map(job => `<div class="job-row ${job.id === state.currentDetailId ? 'selected' : ''}"><div class="job-main"><div class="job-name" title="${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}">${escapeHtml(job.title || `Tarea ${job.id.slice(0,8)}`)}</div><div class="job-meta">${escapeHtml(job.stage)} · ${escapeHtml(dateLabel(job.updatedAt))}</div><div class="status ${escapeHtml(job.status)}">${escapeHtml(statusNames[job.status] || job.status)}</div></div><button class="mini-button" data-detail="${escapeHtml(job.id)}">Ver comité</button>${job.status === 'failed' || job.status === 'needs_review' ? `<button class="mini-button" data-retry="${escapeHtml(job.id)}">Reintentar</button>` : ''}</div>`).join('');
   }
   $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
+  renderChatSidebar();
   $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
   list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.detail)));
   list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); await loadJobs(); } catch (error) { alert(error.message); } }));
@@ -572,10 +605,18 @@ async function showDetail(id) {
   state.currentDetailId = id;
   $('welcome-chat')?.classList.add('hidden');
   $('detail-panel').classList.remove('hidden');
+  document.body.classList.add('swarm-task-view');
+  const composer = document.querySelector('#app-content > .composer') || document.querySelector('.composer');
+  if (composer && composer.parentElement !== $('detail-panel')) $('detail-panel').append(composer);
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('detail-panel')) $('detail-panel').append(zipTools);
+  $('detail-panel').classList.remove('task-tools-open');
+  $('toggle-task-tools')?.setAttribute('aria-expanded', 'false');
+  renderChatSidebar();
   $('detail-title').textContent = `Agentes · ${id.slice(0,8)}`;
   $('detail-stage').textContent = 'Conectando con la tarea…';
   $('conversation').innerHTML = '<div class="empty-state"><span class="empty-glyph">✳</span><p>Recuperando mensajes de los agentes…</p></div>';
-  $('detail-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('detail-panel').scrollIntoView({ behavior: 'auto', block: 'start' });
   try { await updateSelectedDetail(); await loadJobs(); await loadHistorySummary(); }
   catch (error) { $('detail-stage').textContent = 'No se pudo actualizar la tarea'; $('detail-hint').textContent = error.message; }
 }
@@ -587,10 +628,11 @@ async function enterApp() {
   startTaskEventStream();
   try { await Promise.all([loadHistorySummary(), loadJobs(), monitorAllJobStatuses()]); await refresh(); }
   catch (error) { setConnection(false, 'Error de conexión'); $('jobs-count').textContent = `No se pudieron cargar las tareas: ${error.message}`; }
-  if (!state.pollHandle) state.pollHandle = setInterval(refresh, 1800);
+  if (!state.pollHandle) state.pollHandle = setInterval(() => { if (!document.hidden && state.currentDetailId) refresh(); }, 4500);
   if (!state.listPollHandle) state.listPollHandle = setInterval(async () => {
-    try { await Promise.all([loadJobs(), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
-  }, 12000);
+    if (document.hidden) return;
+    try { await Promise.all([loadJobs({ refreshHead: true }), monitorAllJobStatuses(), loadHistorySummary()]); } catch {}
+  }, 20000);
 }
 $('access-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1179,7 +1221,40 @@ $('agent-reply-form').addEventListener('submit', async event => {
     button.disabled = false; button.textContent = 'Enviar al agente ↗';
   }
 });
-$('close-detail').addEventListener('click', () => { $('detail-panel').classList.add('hidden'); $('welcome-chat')?.classList.remove('hidden'); state.currentDetailId = null; state.lastJobStatus = null; });
+$('begin-task-button')?.addEventListener('click', () => {
+  document.body.classList.remove('swarm-task-view');
+  document.body.classList.add('composer-open');
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
+  const composer = document.querySelector('.composer');
+  if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
+  $('detail-panel').classList.add('hidden');
+  $('welcome-chat')?.classList.remove('hidden');
+  state.currentDetailId = null;
+  state.lastJobStatus = null;
+  renderChatSidebar();
+  $('objective')?.focus({ preventScroll: true });
+});
+$('toggle-task-tools')?.addEventListener('click', () => {
+  const panel = $('detail-panel');
+  const opening = !panel.classList.contains('task-tools-open');
+  panel.classList.toggle('task-tools-open', opening);
+  $('toggle-task-tools').setAttribute('aria-expanded', String(opening));
+  $('toggle-task-tools').textContent = opening ? 'Ocultar herramientas ▴' : 'Herramientas ▾';
+});
+$('close-detail').addEventListener('click', () => {
+  $('detail-panel').classList.add('hidden');
+  document.body.classList.remove('swarm-task-view');
+  document.body.classList.remove('composer-open');
+  const composer = document.querySelector('.composer');
+  if (composer && composer.parentElement !== $('app-content')) $('app-content').insertBefore(composer, $('zip-preview-panel'));
+  const zipTools = $('zip-preview-panel');
+  if (zipTools && zipTools.parentElement !== $('app-content')) $('app-content').insertBefore(zipTools, $('dashboard-grid'));
+  $('welcome-chat')?.classList.remove('hidden');
+  state.currentDetailId = null;
+  state.lastJobStatus = null;
+  renderChatSidebar();
+});
 async function boot() {
   try { const health = await fetch('/healthz'); if (!health.ok) throw new Error(); setConnection(true, 'Puente disponible'); }
   catch { setConnection(false, 'Puente no disponible'); }

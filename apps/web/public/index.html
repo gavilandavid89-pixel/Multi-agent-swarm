@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#292b2e">
   <title>Swarm · Chat de agentes</title>
-  <link rel="stylesheet" href="/styles.css?v=chat-shell-10">
+  <link rel="stylesheet" href="/styles.css?v=chat-shell-11">
 </head>
 <body>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
@@ -67,6 +67,17 @@
       </section>
     </section>
     <section id="app-content" class="hidden">
+      <aside id="chat-sidebar" class="chat-sidebar" aria-label="Menú principal y chats">
+        <div class="sidebar-profile">
+          <div id="sidebar-avatar" class="sidebar-avatar" aria-hidden="true">U</div>
+          <div class="sidebar-user-copy"><strong id="sidebar-username">Tu cuenta</strong><span>Espacio personal</span></div>
+          <div id="sidebar-account-slot"></div>
+        </div>
+        <button id="begin-task-button" class="button button-primary begin-task-button" type="button"><span>＋</span> Comenzar tarea</button>
+        <div class="sidebar-section-title"><span>CHATS</span><span id="chat-count" class="sidebar-count">0</span></div>
+        <div id="chat-list" class="chat-list" aria-label="Tus chats con los agentes"><div class="sidebar-empty">Tus conversaciones aparecerán aquí.</div></div>
+        <div class="sidebar-bottom"><span class="sidebar-status-dot"></span><span>Swarm · agentes conectados</span></div>
+      </aside>
       <section class="panel composer">
         <div class="section-head chat-composer-heading"><div><p class="panel-kicker">CHAT GLOBAL · ORDEN DE TRABAJO</p><h2>Hablemos con Swarm</h2></div><span class="pill"><span class="dot dot-pink"></span> Guardado automático</span></div>
         <form id="job-form" class="global-chat-form"><label class="sr-only" for="objective">Mensaje</label><textarea id="objective" rows="1" maxlength="20000" placeholder="Escribí tu mensaje…" required></textarea><div class="chat-composer-controls"><label class="sr-only" for="chat-target">Destino del mensaje</label><select id="chat-target" class="history-filter"><option value="global">🌐 Orden global · todos los agentes</option><option value="Arquitecto">Arquitecto · diseño</option><option value="Escéptico">Escéptico · buscar fallos</option><option value="Árbitro">Árbitro · decidir</option><option value="Coordinador de coherencia">Coordinador · coherencia</option><option value="Desarrollador">Desarrollador · código</option><option value="Validador">Validador · auditoría</option></select><span class="budget-select-label">Presupuesto por tarea</span><span class="muted tiny">1.000.000 tokens · continuación automática</span><input id="new-task-budget" type="hidden" value="1000000"><button class="button button-primary" id="submit-job" type="submit" aria-label="Enviar mensaje">Enviar ↗</button></div><p id="job-submit-status" class="muted tiny" role="status" aria-live="polite">Elegí Orden global para iniciar un trabajo nuevo, o un agente para preguntarle sobre la tarea abierta.</p></form>
@@ -91,7 +102,7 @@
       </section>
       <section id="welcome-chat" class="welcome-chat" aria-live="polite"><div class="welcome-orb">✳</div><h2>Tu espacio de trabajo</h2><p>Escribí una orden global abajo para iniciar el trabajo. Después podés seguir la conversación o elegir un agente para consultarlo directamente.</p><span class="welcome-hint">Los avances, diagnósticos y archivos quedan asociados a cada tarea.</span></section>
       <section id="detail-panel" class="panel detail-panel hidden">
-        <div class="section-head"><div><p class="panel-kicker">AGENTES TRABAJANDO</p><h2 id="detail-title">Conversación de agentes</h2></div><div class="detail-actions"><span id="detail-live" class="live-label">Sincronizando</span><button id="copy-detail" class="button button-secondary" type="button">Copiar diagnóstico</button><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div></div>
+        <div class="section-head"><div><p class="panel-kicker">AGENTES TRABAJANDO</p><h2 id="detail-title">Conversación de agentes</h2></div><div class="detail-actions"><span id="detail-live" class="live-label">Sincronizando</span><button id="toggle-task-tools" class="button button-secondary" type="button" aria-expanded="false">Herramientas ▾</button><button id="copy-detail" class="button button-secondary" type="button">Copiar diagnóstico</button><button id="close-detail" class="icon-button" aria-label="Cerrar detalle">×</button></div></div>
         <div class="task-status"><div><strong id="detail-stage">Preparando tarea…</strong><span id="detail-status" class="status running">En curso</span></div><span id="detail-progress-label" class="muted tiny">Esperando actividad</span></div>
         <div id="detail-progress" class="progress-track" aria-hidden="true"><span id="detail-progress-fill"></span></div>
         <section class="token-budget" aria-live="polite" aria-label="Presupuesto de tokens de la tarea">
@@ -115,7 +126,7 @@
     <footer><span>SWARM ENGINE <span class="brand-dot">/</span> MODULAR</span><span>Puente ligero · Motor externo</span></footer>
   </main>
   <script src="/global-event-bus.js?v=server-events-1" defer></script>
-  <script src="/app.js?v=server-events-1" defer></script>
+  <script src="/app.js?v=chat-shell-11" defer></script>
   <script src="/invite-gate.js?v=invite-gate-3" defer></script>
 </body>
 </html>
