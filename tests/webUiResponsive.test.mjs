@@ -121,3 +121,15 @@ test('repairing a missing account code preserves an existing encrypted access ke
   assert.match(ensure, /UPDATE app_users SET account_code=\$2 WHERE id=\$1/);
   assert.doesNotMatch(ensure, /if \(!accountCode \|\| !keyHash \|\| !encryptedKey\)/);
 });
+
+
+test('floating preview and touch menus have independent window and scroll behavior', () => {
+  const css = read('../apps/web/public/styles.css');
+  const app = read('../apps/web/public/app.js');
+  assert.match(css, /\.artifact-preview\.preview-window\s*\{[^}]*position:\s*fixed/s);
+  assert.match(css, /touch-action:\s*pan-y/);
+  assert.match(app, /initFloatingArtifactPreview/);
+  assert.match(app, /Minimizar vista previa/);
+  assert.match(app, /Pantalla completa/);
+  assert.match(app, /preview-window-launcher/);
+});
