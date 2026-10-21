@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { logProviderRateLimitDiagnostic } from './providerRateLimitDiagnostics.js';
 import { normalizeProviderResponse, parseProviderResponseBody, validateGeminiResponse } from './providerResponse.js';
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -313,6 +314,9 @@ export async function consultarGemini({
     }
 
     const bodyText = await response.text().catch(() => '');
+    if (response.status === 429) {
+      logProviderRateLimitDiagnostic({ provider: 'Gemini', model, status: response.status, response, bodyText, messages: requestMessages, maxTokens: safeMaxTokens });
+    }
     if (retryableStatus(response.status)) {
       retry++;
       const wait = retryDelay(retry, response.headers.get('retry-after'), bodyText);
