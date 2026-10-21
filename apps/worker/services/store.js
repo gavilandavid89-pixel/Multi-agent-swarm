@@ -144,9 +144,8 @@ export async function getArtifact(id, index) {
 }
 export async function createJob(objective, requestedTokenBudget, userId = null, idempotencyKey = null) {
   const timestamp = now();
-  const rawDefault = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
-  const defaultBudget = Number.isFinite(rawDefault) ? Math.min(1000000, Math.max(4000, rawDefault)) : 1000000;
-  const tokenBudget = Number.isFinite(Number(requestedTokenBudget)) ? Math.min(1000000, Math.max(4000, Math.round(Number(requestedTokenBudget) / 1000) * 1000)) : defaultBudget;
+  // Each task has a fixed budget; larger work continues in a child task.
+  const tokenBudget = 1000000;
   const title = generateTaskTitle(objective);
   const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, title, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
   if (!idempotencyKey) {
