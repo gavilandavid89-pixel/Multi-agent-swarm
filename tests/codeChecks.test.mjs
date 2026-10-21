@@ -45,7 +45,7 @@ test('adapta el Map de extractFiles al arreglo de archivos requerido por los wor
   const delivery = [
     file('index.html', '<main>Hola</main>', 'html'),
     file('src/app.js', 'export const answer = 42;')
-  ].join('\\n\\n');
+  ].join('\n\n');
   assert.deepEqual(extractFileList(delivery), [
     { path: 'index.html', content: '<main>Hola</main>' },
     { path: 'src/app.js', content: 'export const answer = 42;' }
