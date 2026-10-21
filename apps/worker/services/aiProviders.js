@@ -3,6 +3,7 @@ import { serializeAgentToolResult } from './agentToolResult.js';
 import { consultarGemini } from './geminiProvider.js';
 import { assertUserAccountActive, currentUserProviders } from './userProviders.js';
 import { getProviderRetryDelayMs } from './providerRetryPolicy.js';
+import { logProviderRateLimitDiagnostic } from './providerRateLimitDiagnostics.js';
 import { safeProviderFetch } from './safeProviderFetch.js';
 import { normalizeOpenAICompatibleResponse, parseProviderResponseBody } from './providerResponse.js';
 
@@ -515,6 +516,9 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
       const fallbackText = typeof failedGeneration === 'string' && failedGeneration.trim() ? failedGeneration : body;
       console.warn('[worker][provider_json_generation_rejected]', JSON.stringify({ provider: providerName, model, recoveredGeneratedText: Boolean(failedGeneration), fallback: 'validator-parser' }));
       return fallbackText;
+    }
+    if (response.status === 429) {
+      logProviderRateLimitDiagnostic({ provider: providerName, model, status: response.status, response, bodyText: body, messages: requestMessages, maxTokens: safeMaxTokens });
     }
     if (retryableStatus(response.status)) {
       retry++; const wait = retryDelay(retry, response.headers.get('retry-after'), body); const reason = `HTTP ${response.status}`;
