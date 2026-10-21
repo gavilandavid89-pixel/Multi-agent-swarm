@@ -5,7 +5,7 @@ import { initStore, createJob, createContinuationJob, getJob, getPayload, histor
 import { processJob } from './services/multiAiEngine.js';
 import { replyToAgent } from './services/agentChat.js';
 import { processConversationTurn, recoverableConversationTurns, closeConversationTurnStore, hasConversationTurn } from './services/conversationTurns.js';
-import { canContinueBudgetTask, buildAutomaticBudgetExtensionPatch } from './services/tokenAccounting.js';
+import { canContinueBudgetTask, isBudgetPausedJob } from './services/tokenAccounting.js';
 import { getRetryRecoveryMode } from './services/retryRecovery.js';
 import { voteOnImprovement } from './services/improvementVoting.js';
 import { withUserProviders, importLegacyProvidersForUser, registerJobOwnership, testUserProvider, closeUserProvidersStore } from './services/userProviders.js';
@@ -141,30 +141,10 @@ app.post('/internal/jobs', async (req, res) => {
   catch (error) { console.error('[worker] no se pudo guardar la tarea', error?.message || error); res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'No se pudo guardar la tarea de forma persistente.' }); }
 });
 app.get('/internal/jobs/:id', async (req, res, next) => { try { const job = await getJob(req.params.id); if (!job) return res.status(404).json({ error: 'No existe esa tarea.' }); res.json(job); } catch (error) { next(error); } });
-app.post('/internal/jobs/:id/budget', async (req, res, next) => { try {
-  const record = await getPayload(req.params.id);
-  if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-  const configured = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
-  const fallback = Number.isFinite(configured) ? Math.min(1000000, Math.max(4000, configured)) : 1000000;
-  const currentBudget = Math.min(1000000, Math.max(4000, Number(record.payload.tokenBudget) || fallback));
-  const requested = Number(req.body?.tokenBudget);
-  if (!Number.isFinite(requested)) return res.status(400).json({ error: 'Indicá un límite de tokens válido.' });
-  const nextBudget = Math.min(1000000, Math.max(4000, Math.round(requested / 1000) * 1000));
-  if (nextBudget <= currentBudget) return res.status(400).json({ error: 'El nuevo límite debe superar el límite actual.' });
-  const budgetPaused = record.publicJob.status === 'needs_review' && /presupuesto|tokens/i.test(record.publicJob.stage || '');
-  if (budgetPaused) {
-    const patch = buildAutomaticBudgetExtensionPatch(record, currentBudget, nextBudget);
-    if (!patch) return res.status(400).json({ error: 'No se pudo preparar la reanudación con ese límite.' });
-    await updateJob(req.params.id, patch);
-    enqueue(req.params.id);
-  } else {
-    await updateJob(req.params.id, { payload: { tokenBudget: nextBudget } });
-  }
-  console.info('[worker][token_budget_manual_extended]', JSON.stringify({
-    jobId: req.params.id, previousLimit: currentBudget, nextLimit: nextBudget,
-    resumed: budgetPaused, checkpoint: record.payload.lastCheckpoint || null
-  }));
-  res.json({ tokenBudget: nextBudget, resumed: budgetPaused }); } catch (error) { next(error); }
+app.post('/internal/jobs/:id/budget', async (_req, res) => {
+  res.status(409).json({
+    error: 'El presupuesto por tarea es fijo en 1.000.000 tokens. Al agotarse, el sistema crea una tarea hija; no se amplía la tarea actual.'
+  });
 });
 app.post('/internal/jobs/:id/continue-budget', async (req, res, next) => {
   try {
@@ -191,12 +171,18 @@ app.post('/internal/jobs/:id/retry', async (req, res, next) => { try {
   const record = await getPayload(req.params.id);
   if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
   if (!['failed', 'needs_review'].includes(record.publicJob.status)) return res.status(409).json({ error: 'Solo se pueden reintentar tareas fallidas o pendientes de revisión.' });
+  if (isBudgetPausedJob(record.publicJob)) {
+    const continuation = await createContinuationJob(req.params.id);
+    if (continuation.error) return res.status(continuation.status || 400).json({ error: continuation.error });
+    enqueue(continuation.job.id);
+    return res.status(202).json({ ...continuation.job, continuationOf: req.params.id, continuation: true });
+  }
   const recoveryMode = getRetryRecoveryMode(record.payload);
   const transcript = [...(Array.isArray(record.payload.transcript) ? record.payload.transcript : []), {
     at: new Date().toISOString(), agent: 'sistema', type: 'retry',
     content: recoveryMode === 'runner-only'
       ? 'Reintento acotado: se conserva la entrega y la validación de IA ya guardadas; solo se repiten las comprobaciones del runner que fallaron por infraestructura.'
-      : 'Reintento solicitado: se conserva la entrega y el checkpoint; se reinicia la validación pendiente y el presupuesto queda ampliado a 1.000.000 tokens. La recuperación del proveedor se gestiona automáticamente.'
+      : 'Reintento solicitado: se conserva la entrega y el checkpoint dentro del presupuesto fijo de 1.000.000 tokens. La recuperación del proveedor se gestiona automáticamente.'
   }].slice(-150);
   const retryPayload = recoveryMode === 'runner-only'
     ? {
@@ -243,9 +229,7 @@ app.post('/internal/jobs/:id/reply', async (req, res) => {
 });
 app.get('/internal/jobs/:id/history', async (req, res, next) => { try {
   const record = await getPayload(req.params.id); if (!record) return res.status(404).json({ error: 'No existe esa tarea.' });
-  const rawBudget = Number.parseInt(process.env.MAX_TASK_TOKENS || '1000000', 10);
-  const defaultBudget = Number.isFinite(rawBudget) ? Math.min(1000000, Math.max(4000, rawBudget)) : 1000000;
-  const tokenBudget = Math.min(1000000, Math.max(4000, Number(record.payload.tokenBudget) || defaultBudget));
+  const tokenBudget = 1000000;
   const tokenUsage = record.payload.tokenUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {} };
   const tokensUsed = Math.max(0, Number(tokenUsage.totalTokens) || 0);
   const tokenBatchHistory = Array.isArray(record.payload.tokenBatchHistory) ? record.payload.tokenBatchHistory : [];
