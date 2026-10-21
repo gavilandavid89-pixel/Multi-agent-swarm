@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pool, initAccountStore } from '../apps/bridge/services/accountStore.js';
 import {
-  initConversationStore, createConversation, getConversation, listConversationMessages,
+  initConversationStore, createConversation, getConversation, deleteConversation, listConversationMessages,
   createConversationTurn, getConversationTurn
 } from '../apps/bridge/services/conversationStore.js';
 import { recoverableConversationTurns, closeConversationTurnStore } from '../apps/worker/services/conversationTurns.js';
@@ -48,6 +48,14 @@ test('chat persistence enforces account ownership and idempotent retries', async
   assert.equal(ownMessages[0].content, 'Mensaje de prueba');
   assert.equal(ownMessages[0].metadata.turnId, created.turn.id, 'persist the turn reference for reconnect recovery');
   assert.deepEqual(foreignMessages, []);
+  assert.equal(await deleteConversation(userB, chat.id), null, 'another account must not delete this chat');
+  const deleted = await deleteConversation(userA, chat.id);
+  assert.equal(deleted.id, chat.id);
+  assert.equal(await getConversation(userA, chat.id), null, 'deleted chat metadata must be gone');
+  const remainingMessages = await pool.query('SELECT count(*)::int AS count FROM conversation_messages WHERE conversation_id=$1', [chat.id]);
+  const remainingTurns = await pool.query('SELECT count(*)::int AS count FROM conversation_turns WHERE conversation_id=$1', [chat.id]);
+  assert.equal(remainingMessages.rows[0].count, 0, 'messages must cascade-delete with the chat');
+  assert.equal(remainingTurns.rows[0].count, 0, 'turn records must cascade-delete with the chat');
 });
 
 test('pending/running chat turns are recoverable after a Worker restart', async () => {
@@ -86,4 +94,12 @@ test('the web client keeps chats separate from task history and polls durable tu
   assert.match(app, /\/turns\//);
   assert.match(app, /await loadChatMessages\(\)/);
   assert.match(app, /recoverPendingChatTurns\(chatId\)/);
+  assert.match(app, /async function selectTaskFromHistory\(id\)[\s\S]*?closeHistoryDrawer\(\)[\s\S]*?showTaskWorkspace\(\)[\s\S]*?await showDetail\(id\)/);
+  assert.match(app, /data-chat-delete/);
+  assert.match(app, /method: 'DELETE'/);
+  assert.doesNotMatch(app, /archive-chat-button/);
+  assert.match(html, /id="delete-chat-button"/);
+  assert.match(html, /id="chat-message-send"[^>]*aria-label="Enviar mensaje"[^>]*>↑<\/button>/);
+  const css = await readFile(new URL('../apps/web/public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /#chats-drawer \.chat-message-form \.chat-send-icon\s*\{[^}]*position:\s*absolute/s);
 });
