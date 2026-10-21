@@ -605,12 +605,6 @@ async function runJob(jobId) {
       await saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
     }
-    const finalPayload = (await getPayload(jobId))?.payload || {};
-    const reviewTranscript = appendEntries(finalPayload.transcript, [{
-      at: new Date().toISOString(), agent: 'sistema', type: 'check',
-      content: 'El comité terminó sus intentos automáticos, pero la validación no aprobó todos los criterios. La entrega queda pendiente de revisión humana; no se considera aprobada.'
-    }]);
-    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: round, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'AGENT_WORKSPACE_CONFLICT' && current) {
