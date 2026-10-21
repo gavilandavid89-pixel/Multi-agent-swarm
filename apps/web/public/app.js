@@ -176,7 +176,7 @@ async function loadJobs({ append = false } = {}) {
   }
   $('jobs-count').textContent = `${state.jobs.length} de ${state.jobsTotal} tareas`;
   $('load-more-jobs').classList.toggle('hidden', state.jobs.length >= state.jobsTotal);
-  list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => showDetail(button.dataset.detail)));
+  list.querySelectorAll('[data-detail]').forEach(button => button.addEventListener('click', () => { void selectTaskFromHistory(button.dataset.detail); }));
   list.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => { try { await api(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method: 'POST', body: '{}' }); await showDetail(button.dataset.retry); await refresh(); await loadJobs(); } catch (error) { alert(error.message); } }));
 }
 function renderConversation(data) {
@@ -574,6 +574,12 @@ async function refresh() {
     } catch (error) { setConnection(false, 'Reconectando…'); console.warn(error.message); }
   })();
   try { await refreshPromise; } finally { refreshPromise = null; }
+}
+async function selectTaskFromHistory(id) {
+  // A history selection is always a task selection, never a normal chat navigation.
+  closeHistoryDrawer();
+  showTaskWorkspace();
+  await showDetail(id);
 }
 async function showDetail(id) {
   document.body.classList.add('swarm-task-mode', 'swarm-chat-fullscreen', 'swarm-task-chat');
@@ -1256,13 +1262,13 @@ function renderChatList() {
       </button>
       <div class="chat-list-actions">
         <button class="mini-button" type="button" data-chat-rename="${escapeHtml(chat.id)}" aria-label="Renombrar ${escapeHtml(chat.title || 'chat')}" title="Renombrar">✎</button>
-        <button class="mini-button" type="button" data-chat-archive="${escapeHtml(chat.id)}" aria-label="Archivar ${escapeHtml(chat.title || 'chat')}" title="Archivar">×</button>
+        <button class="mini-button" type="button" data-chat-delete="${escapeHtml(chat.id)}" aria-label="Eliminar ${escapeHtml(chat.title || 'chat')}" title="Eliminar permanentemente">×</button>
       </div>
     </article>`;
   }).join('');
   list.querySelectorAll('[data-chat-open]').forEach(button => button.addEventListener('click', () => { void selectChat(button.dataset.chatOpen); }));
   list.querySelectorAll('[data-chat-rename]').forEach(button => button.addEventListener('click', () => { void renameChat(button.dataset.chatRename); }));
-  list.querySelectorAll('[data-chat-archive]').forEach(button => button.addEventListener('click', () => { void archiveChat(button.dataset.chatArchive); }));
+  list.querySelectorAll('[data-chat-delete]').forEach(button => button.addEventListener('click', () => { void deleteChat(button.dataset.chatDelete); }));
 }
 function showChatListView() {
   document.body.classList.remove('swarm-chat-fullscreen');
@@ -1311,7 +1317,7 @@ function renderChatMessages() {
   $('chat-message-input').disabled = !enabled;
   $('chat-message-send').disabled = !enabled;
   $('rename-chat-button').disabled = !enabled;
-  $('archive-chat-button').disabled = !enabled;
+  $('delete-chat-button').disabled = !enabled;
   $('selected-chat-title').textContent = state.currentChat?.title || 'Elegí un chat';
 }
 
@@ -1384,14 +1390,24 @@ async function renameChat(chatId) {
     if ($('chats-status')) $('chats-status').textContent = 'Nombre actualizado.';
   } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo renombrar: ${error.message}`; }
 }
-async function archiveChat(chatId) {
-  if (!window.confirm('¿Archivar este chat? No se borrarán sus mensajes.')) return;
+async function deleteChat(chatId) {
+  const chat = state.chats.find(item => item.id === chatId);
+  const title = chat?.title || 'este chat';
+  if (!window.confirm(`¿Eliminar permanentemente «${title}»? Se borrarán el chat, todos sus mensajes y los registros de sus turnos. Esta acción no se puede deshacer.`)) return;
   try {
-    await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'PATCH', body: JSON.stringify({ archived: true }) });
-    if (state.currentChatId === chatId) { state.currentChatId = null; state.currentChat = null; state.chatMessages = []; renderChatMessages(); showChatListView(); }
+    await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' });
+    if (state.currentChatId === chatId) {
+      state.currentChatId = null;
+      state.currentChat = null;
+      state.chatMessages = [];
+      renderChatMessages();
+      showChatListView();
+    }
     await loadChats();
-    if ($('chats-status')) $('chats-status').textContent = 'Chat archivado. No se borró.';
-  } catch (error) { if ($('chats-status')) $('chats-status').textContent = `No se pudo archivar: ${error.message}`; }
+    if ($('chats-status')) $('chats-status').textContent = 'Chat y mensajes eliminados permanentemente.';
+  } catch (error) {
+    if ($('chats-status')) $('chats-status').textContent = `No se pudo eliminar el chat: ${error.message}`;
+  }
 }
 function openChatsDrawer() {
   showChatHome();
@@ -1408,7 +1424,7 @@ $('new-chat-button').addEventListener('click', () => { void createNewChat(); });
 $('back-to-chats-button').addEventListener('click', () => { showChatListView(); void loadChats(); });
 $('refresh-chats-button').addEventListener('click', () => { void loadChats(); if (state.currentChatId) void loadChatMessages().catch(error => { $('chats-status').textContent = error.message; }); });
 $('rename-chat-button').addEventListener('click', () => { if (state.currentChatId) void renameChat(state.currentChatId); });
-$('archive-chat-button').addEventListener('click', () => { if (state.currentChatId) void archiveChat(state.currentChatId); });
+$('delete-chat-button').addEventListener('click', () => { if (state.currentChatId) void deleteChat(state.currentChatId); });
 $('chat-message-form').addEventListener('submit', async event => {
   event.preventDefault();
   const chatId = state.currentChatId;
@@ -1417,7 +1433,7 @@ $('chat-message-form').addEventListener('submit', async event => {
   if (!chatId || !message) return;
   const button = $('chat-message-send');
   const idempotencyKey = crypto.randomUUID();
-  button.disabled = true; input.disabled = true; button.textContent = 'Enviando…';
+  button.disabled = true; input.disabled = true; button.textContent = '…';
   if ($('chats-status')) $('chats-status').textContent = 'Guardando el mensaje y conectando con la IA…';
   try {
     const created = await api(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
@@ -1452,7 +1468,7 @@ $('chat-message-form').addEventListener('submit', async event => {
     if ($('chats-status')) $('chats-status').textContent = `No se pudo enviar el mensaje: ${error.message}. Si quedó guardado, actualizá el chat para recuperar el estado.`;
     await loadChatMessages().catch(() => {});
   } finally {
-    button.disabled = !state.currentChatId; input.disabled = !state.currentChatId; button.textContent = 'Enviar ↗';
+    button.disabled = !state.currentChatId; input.disabled = !state.currentChatId; button.textContent = '↑';
   }
 });
 

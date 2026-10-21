@@ -3,7 +3,7 @@ import 'dotenv/config';
 import express from 'express';
 import { pool, initAccountStore, hashPassword, verifyPassword, createSession, findSession, revokeSession, changePassword, listApiKeys, saveApiKeys, deleteApiKey, createInvite, validateInvite, registerFromInvite, ensureAccountKey, loginWithAccountKey, listManagedUsers, setManagedUserDisabled } from './services/accountStore.js';
 import { createZip } from './services/zipBundle.js';
-import { initConversationStore, listConversations, createConversation, getConversation, renameConversation, setConversationArchived, listConversationMessages, createConversationTurn, getConversationTurn } from './services/conversationStore.js';
+import { initConversationStore, listConversations, createConversation, getConversation, renameConversation, setConversationArchived, deleteConversation, listConversationMessages, createConversationTurn, getConversationTurn } from './services/conversationStore.js';
 import { parsePreviewZip, previewMimeType } from './services/zipPreview.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -337,6 +337,17 @@ app.patch('/api/chats/:chatId', async (req, res) => {
     }
     res.set('Cache-Control', 'no-store').json({ chat });
   } catch (error) { res.status(error.status || 503).json({ error: error.status === 400 ? error.message : 'No se pudo actualizar el chat.' }); }
+});
+
+app.delete('/api/chats/:chatId', async (req, res) => {
+  if (!validConversationId(req.params.chatId)) return res.status(400).json({ error: 'Identificador de chat inválido.' });
+  try {
+    const deleted = await deleteConversation(req.user.id, req.params.chatId);
+    if (!deleted) return res.status(404).json({ error: 'No se encontró ese chat.' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, deleted: true, chatId: deleted.id });
+  } catch {
+    res.status(503).json({ error: 'No se pudo eliminar el chat y sus mensajes.' });
+  }
 });
 
 

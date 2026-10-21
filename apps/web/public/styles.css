@@ -1116,3 +1116,59 @@ body.swarm-chat-fullscreen #chats-drawer .chat-thread-head .back-to-chats-button
 /* Keep the floating controls above the full-screen conversation stacking layer. */
 body.swarm-chat-fullscreen .shell,
 body.swarm-task-mode:not(.swarm-home-scroll) .shell { z-index: 10000 !important; }
+
+
+/* ChatGPT-like composer: keep the send control inside the message field on desktop and mobile. */
+body:not(.auth-gate) #chats-drawer .chat-message-form {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+body:not(.auth-gate) #chats-drawer .chat-message-form textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 60px;
+  max-height: 140px;
+  padding: 12px 68px 12px 16px;
+  border-radius: 22px;
+  resize: none;
+  touch-action: pan-y;
+}
+body:not(.auth-gate) #chats-drawer .chat-message-form .chat-send-icon {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1;
+}
+@media (max-width: 700px) {
+  body:not(.auth-gate) #chats-drawer .chat-message-form {
+    display: block;
+    flex-direction: initial;
+    align-items: initial;
+    padding: 8px;
+  }
+  body:not(.auth-gate) #chats-drawer .chat-message-form .chat-send-icon {
+    right: 14px;
+    bottom: 14px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+}

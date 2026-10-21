@@ -114,6 +114,16 @@ export async function setConversationArchived(userId, conversationId, archived) 
   return rows[0] || null;
 }
 
+// Hard-delete only a conversation owned by the requesting account. PostgreSQL
+// cascades deletion to its messages and turns, preventing orphaned chat records.
+export async function deleteConversation(userId, conversationId) {
+  const { rows } = await pool.query(
+    'DELETE FROM conversations WHERE id=$1 AND user_id=$2 RETURNING id',
+    [conversationId, userId]
+  );
+  return rows[0] || null;
+}
+
 export async function listConversationMessages(userId, conversationId, { limit = 50, beforeId = null } = {}) {
   const { rows } = await pool.query(
     `SELECT m.id, m.role, m.content, m.metadata, m.created_at AS "createdAt"
