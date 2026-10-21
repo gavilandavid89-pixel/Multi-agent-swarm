@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkJavascriptSyntax } from '../apps/worker/services/codeChecks.js';
+import { checkJavascriptSyntax, extractFileList } from '../apps/worker/services/codeChecks.js';
 
 const file = (name, source, language = 'js') =>
   '### Archivo: ' + name + '\n```' + language + '\n' + source + '\n```';
@@ -39,4 +39,15 @@ test('no ejecuta HTML generado dentro del Worker y declara que la prueba de nave
   assert.equal(result.ok, true, result.message);
   assert.equal(result.browserChecked, false);
   assert.match(result.message, /NO EJECUTADA dentro del Worker/);
+});
+
+test('adapta el Map de extractFiles al arreglo de archivos requerido por los workspaces', () => {
+  const delivery = [
+    file('index.html', '<main>Hola</main>', 'html'),
+    file('src/app.js', 'export const answer = 42;')
+  ].join('\n\n');
+  assert.deepEqual(extractFileList(delivery), [
+    { path: 'index.html', content: '<main>Hola</main>' },
+    { path: 'src/app.js', content: 'export const answer = 42;' }
+  ]);
 });

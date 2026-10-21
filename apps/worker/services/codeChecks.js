@@ -22,6 +22,11 @@ export function extractFiles(delivery) {
   return files;
 }
 
+/** Convert the Map returned by extractFiles into the array shape used by workspace APIs. */
+export function extractFileList(delivery) {
+  return [...extractFiles(delivery).entries()].map(([path, file]) => ({ path, content: file.content }));
+}
+
 export async function checkJavascriptSyntax(delivery) {
   const sourceText = String(delivery || '');
   const files = extractFiles(sourceText);
