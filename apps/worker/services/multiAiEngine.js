@@ -1,6 +1,6 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
 import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
-import { checkJavascriptSyntax, extractFiles } from './codeChecks.js';
+import { checkJavascriptSyntax, extractFiles, extractFileList } from './codeChecks.js';
 import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
 import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
 import { getAgentToolDefinitions, createAgentToolDispatcher } from './agentToolDispatcher.js';
@@ -16,7 +16,7 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
   const initial = await getPayload(jobId);
   const stored = initial?.payload?.agentWorkspaces?.[workspaceId];
   if (!Array.isArray(stored)) {
-    const seed = extractFiles(seedDelivery);
+    const seed = extractFileList(seedDelivery);
     if (seed.length) await updateJob(jobId, { payload: { agentWorkspaces: { ...(initial?.payload?.agentWorkspaces || {}), [workspaceId]: seed } } });
   }
   const readFiles = async () => {
@@ -197,9 +197,9 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
   };
 }
 async function integrateAgentWorkspace(jobId, round, baseDelivery, modelDelivery, toolContext) {
-  const baseFiles = extractFiles(baseDelivery);
+  const baseFiles = extractFileList(baseDelivery);
   const workspaceFiles = await toolContext.workspace.list();
-  const modelFiles = extractFiles(modelDelivery);
+  const modelFiles = extractFileList(modelDelivery);
   if (!workspaceFiles.length && !modelFiles.length) return modelDelivery;
   const merged = mergeAgentWorkspaceChanges({
     baseFiles,
@@ -470,7 +470,7 @@ async function runJob(jobId) {
       const retryFailedStep = syntax?.runnerExecution?.runtimeChecks?.find(item => item && item.ok === false) || null;
       const retryAttempt = Math.max(1, Number(payload.runnerRetryCount) || 1);
       const runnerExecution = await runProjectToolchainChecks({
-        taskId: jobId, round, files: extractFiles(delivery), retryFailedStep, retryAttempt
+        taskId: jobId, round, files: extractFileList(delivery), retryFailedStep, retryAttempt
       });
       const baseSyntax = syntax || await checkJavascriptSyntax(delivery);
       const hasRuntimeTests = Array.isArray(runnerExecution.runtimeChecks)
@@ -527,7 +527,7 @@ async function runJob(jobId) {
           };
         }
         syntax = await checkJavascriptSyntax(delivery);
-        const runnerExecution = await runProjectToolchainChecks({ taskId: jobId, round, files: extractFiles(delivery) });
+        const runnerExecution = await runProjectToolchainChecks({ taskId: jobId, round, files: extractFileList(delivery) });
         const hasRuntimeTests = Array.isArray(runnerExecution.runtimeChecks)
           && runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
         const executionStatus = hasRuntimeTests
