@@ -85,38 +85,6 @@ export function canContinueBudgetTask(job = {}, payload = {}) {
   return isBudgetPausedJob(job) && !payload?.continuedByJobId;
 }
 
-/** Resume the same task after an automatic budget increase, preserving its checkpoint and transcript. */
-export function buildAutomaticBudgetExtensionPatch(current = {}, fromBudget, toBudget, timestamp = new Date().toISOString()) {
-  const payload = current?.payload && typeof current.payload === 'object' ? current.payload : {};
-  const from = Math.min(1000000, Math.max(4000, Math.round(number(fromBudget || payload.tokenBudget || 50000) / 1000) * 1000));
-  const to = Math.min(1000000, Math.max(4000, Math.round(number(toBudget) / 1000) * 1000));
-  if (to <= from || to > 1000000) return null;
-  const checkpoint = String(payload.lastCheckpoint || 'último checkpoint guardado').slice(0, 160);
-  const transcript = [...(Array.isArray(payload.transcript) ? payload.transcript : []), {
-    at: timestamp,
-    agent: 'sistema',
-    type: 'budget',
-    content: `Se agotó el límite de ${from.toLocaleString('es-AR')} tokens. El presupuesto se amplió a ${to.toLocaleString('es-AR')} (+${(to-from).toLocaleString('es-AR')}); la tarea seguirá desde el checkpoint ${checkpoint}.`
-  }].slice(-150);
-  return {
-    status: 'queued',
-    stage: `Reanudando · presupuesto ampliado a ${to.toLocaleString('es-AR')}`,
-    progress: Math.min(95, Math.max(0, Number(current?.publicJob?.progress) || 0)),
-    error: null,
-    payload: {
-      ...payload,
-      tokenBudget: to,
-      transcript,
-      result: null,
-      providerBlock: null,
-      retryAt: null,
-      activeStage: null,
-      lastBudgetIncrease: { from, to, at: timestamp },
-      lastCheckpoint: payload.lastCheckpoint || 'token-budget'
-    }
-  };
-}
-
 /** Build a durable state transition when a task runs out of its token budget. */
 export function buildBudgetPausePatch(current = {}, error = {}, timestamp = new Date().toISOString()) {
   const payload = current?.payload && typeof current.payload === 'object' ? current.payload : {};
