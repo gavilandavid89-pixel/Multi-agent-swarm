@@ -71,7 +71,7 @@ async function recoverPendingAgentToolCalls(state, { tools, onToolCall, model, p
     }
   }
   if (assistantIndex < 0) return;
-  const calls = state.requestMessages[assistantIndex].tool_calls.slice(0, 8);
+  const calls = state.requestMessages[assistantIndex].tool_calls;
   const completedIds = new Set(state.requestMessages.slice(assistantIndex + 1)
     .filter(item => item?.role === 'tool').map(item => String(item.tool_call_id || '')));
   if (calls.some(call => !completedIds.has(String(call?.id || '')))
@@ -411,14 +411,9 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
            error.code = 'AGENT_TOOL_DISPATCH_UNAVAILABLE';
            throw error;
          }
-         if (toolRounds >= Math.max(1, Math.min(12, Number(maxToolRounds) || 8))) {
-           const error = new Error('El agente superó el máximo de rondas de herramientas permitido.');
-           error.code = 'AGENT_TOOL_ROUND_LIMIT';
-           throw error;
-         }
          const usage = data?.usage || {};
          await onRetry({ usage: true, usageId, model, promptTokens: Number(usage.prompt_tokens) || 0, completionTokens: Number(usage.completion_tokens) || 0, totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0) });
-         const calls = message.tool_calls.slice(0, 8);
+         const calls = message.tool_calls;
          requestMessages = [...requestMessages, { role: 'assistant', content: typeof content === 'string' ? content : '', tool_calls: calls }];
          toolRounds++;
          await saveConversation();
@@ -436,13 +431,12 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         if (emptyRetries <= 2) { const wait = retryDelay(emptyRetries); await onRetry({ retry: emptyRetries, wait, reason: `respuesta vacía del modelo (${diagnostic})` }); await sleep(wait); continue; }
         throw deferredProviderError(model, emptyRetries, retryDelay(emptyRetries), `respuesta vacía del modelo (${diagnostic})`);
       }
-      if (content.length + accumulatedContent.length > 1000000) throw new Error(`El modelo ${model} superó el límite acumulado de seguridad (1.000.000 caracteres).`);
       accumulatedContent += content;
       await onPartialOutput({ content: accumulatedContent, finishReason: choice?.finish_reason || null, continuation: continuationCount });
       const truncated = choice?.finish_reason === 'length';
-      if (truncated && continueOnLength && !responseFormat && continuationCount < Math.max(0, Math.min(8, Number(maxContinuations) || 0))) {
+      if (truncated && continueOnLength && !responseFormat) {
         const allowance = await canContinue(safeMaxTokens, estimateInputTokens(requestMessages));
-        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto de tokens de esta tarea durante la continuación. El checkpoint previo se conserva; el motor ampliará el presupuesto o abrirá otra tanda automáticamente.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
+        if (!allowance || (typeof allowance === 'number' && allowance < 256)) { const error = new Error('Se alcanzó el presupuesto fijo de tokens de esta tarea durante la continuación. El checkpoint previo se conserva y se abrirá una tarea hija automáticamente.'); error.code = 'TASK_TOKEN_BUDGET'; throw error; }
         if (typeof allowance === 'number') safeMaxTokens = Math.min(safeMaxTokens, Math.floor(allowance));
         continuationCount++;
         requestMessages = [...requestMessages, { role: 'assistant', content }, { role: 'user', content: 'Tu respuesta anterior se cortó por el límite de salida. Continuá EXACTAMENTE desde el último carácter, sin repetir ni resumir nada de lo anterior. Mantené el formato y completá la entrega. Si estás escribiendo un archivo, seguí el mismo archivo hasta terminarlo y marcá claramente cuándo finaliza.' }];
@@ -450,7 +444,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         console.info('[worker][provider_continuation]', JSON.stringify({ provider: providerName, model, continuation: continuationCount, maxContinuations }));
         continue;
       }
-      if (truncated && continueOnLength) { const error = new Error(`La respuesta de ${model} sigue truncada tras ${continuationCount} continuaciones; no se considera una entrega completa. Reducí el tamaño por módulo o aumentá MAX_CONTINUATION_CALLS.`); error.code = 'OUTPUT_TRUNCATED'; throw error; }
+      if (truncated && continueOnLength) { const error = new Error(`La respuesta de ${model} sigue truncada y no se considera una entrega completa.`); error.code = 'OUTPUT_TRUNCATED'; throw error; }
       await saveConversation('completed', accumulatedContent);
       return accumulatedContent;
     }
