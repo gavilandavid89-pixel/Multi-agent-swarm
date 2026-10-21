@@ -489,7 +489,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     // Groq sometimes misinterprets the requested JSON output as a function call named JSON.
     // Keep authorized tools available in history, but disable new tool calls for one corrective retry.
     const invalidJsonToolCall = response.status === 400 && Array.isArray(tools) && tools.length > 0
-      && /attempted to call tool ['"]?JSON['"]? which was not in request\\.tools/i.test(body);
+      && /attempted to call tool ['"]?JSON['"]? which was not in request\.tools/i.test(body);
     if (invalidJsonToolCall && toolValidationFallbacks < 1) {
       toolValidationFallbacks++;
       requestMessages = [...requestMessages, {
