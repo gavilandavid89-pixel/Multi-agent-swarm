@@ -5,8 +5,7 @@ const RATE_HEADERS = [
   'x-ratelimit-limit-requests-day', 'x-ratelimit-remaining-requests-day',
   'x-ratelimit-limit-tokens-day', 'x-ratelimit-remaining-tokens-day',
   'anthropic-ratelimit-requests-limit', 'anthropic-ratelimit-requests-remaining', 'anthropic-ratelimit-requests-reset',
-  'anthropic-ratelimit-tokens-limit', 'anthropic-ratelimit-tokens-remaining', 'anthropic-ratelimit-tokens-reset',
-  'x-goog-quota-user'
+  'anthropic-ratelimit-tokens-limit', 'anthropic-ratelimit-tokens-remaining', 'anthropic-ratelimit-tokens-reset'
 ];
 
 function classifyProviderLimit(bodyText, status) {
