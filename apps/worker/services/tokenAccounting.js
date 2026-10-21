@@ -121,7 +121,7 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
   const batchSnapshot = {
     jobId: String(sourceJob.id || ''),
     batchNumber: continuationNumber - 1,
-    tokenBudget: Math.max(0, Number(sourcePayload.tokenBudget) || 50000),
+    tokenBudget: 1000000,
     tokenUsage: {
       promptTokens: number(currentUsage.promptTokens),
       completionTokens: number(currentUsage.completionTokens),
