@@ -10,7 +10,6 @@ import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPo
 import { recordAgentCheckpoint } from './agentMemory.js';
 import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks, agentStageTaskId } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
-const MAX_ROUNDS = 3; // hasta dos ciclos correctivos, además de la entrega inicial
 const MAX_TRANSCRIPT_ENTRIES = 150;
 async function createAgentToolContext(jobId, round, role = 'desarrollador', seedDelivery = '') {
   const workspaceId = deriveAgentWorkspaceId(jobId, role, 'round-' + round);
@@ -503,19 +502,19 @@ async function runJob(jobId) {
       }
       payload = (await getPayload(jobId))?.payload || {};
     }
-    while (round <= MAX_ROUNDS) {
+    while (true) {
       const saved = resumeState.validationSaved;
-      const progress = Math.min(60 + Math.round((round - 1) * 30 / MAX_ROUNDS), 90);
+      const progress = Math.min(60 + Math.round((round - 1) * 2), 90);
       if (!saved) {
         let coherenceReview = resumeState.coherenceReview;
         if (!coherenceReview) {
-          await startAgent(jobId, `Auditoría de coherencia ${round}/${MAX_ROUNDS}`, progress, 'Coordinador de coherencia', 'Voy a revisar las conexiones entre archivos y buscar incompatibilidades concretas antes de que el proyecto llegue a la validación final.');
+          await startAgent(jobId, `Auditoría de coherencia · ronda ${round}`, progress, 'Coordinador de coherencia', 'Voy a revisar las conexiones entre archivos y buscar incompatibilidades concretas antes de que el proyecto llegue a la validación final.');
           await assertTaskTokenBudget(jobId);
           const auditorTools = await createAgentToolContext(jobId, round, 'auditor', delivery);
           coherenceReview = await agenteAuditorCoherencia(objective, coherence, delivery, onRetry('Coordinador de coherencia', `Auditoría de coherencia ${round}`), auditorTools);
           await checkpoint(jobId, `Auditoría de coherencia ${round}`, progress + 2, 'Coordinador de coherencia', JSON.stringify(coherenceReview), { proposal, critique, strategy, coherence, coherenceReview, coherenceReviewRound: round, activeValidationRound: round, delivery, validation: null, syntax: null });
         }
-        await startAgent(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
+        await startAgent(jobId, `Validación · ronda ${round}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
         await assertTaskTokenBudget(jobId);
         const validatorTools = await createAgentToolContext(jobId, round, 'validador', delivery);
         validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools);
@@ -555,7 +554,7 @@ async function runJob(jobId) {
           { at: new Date().toISOString(), agent: 'Validador', type: 'message', content: JSON.stringify(validation).slice(0, 20000) },
           { at: new Date().toISOString(), agent: 'Validador determinista', type: 'check', content: syntax.message.slice(0, 4000) }
         );
-        await checkpoint(jobId, `Validación ${round}/${MAX_ROUNDS}`, progress + 5, 'Validador', JSON.stringify(validation).slice(0, 16000), { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` }, { attempt: round }, runnerExecution.infraError ? 'blocked' : 'done');
+        await checkpoint(jobId, `Validación · ronda ${round}`, progress + 5, 'Validador', JSON.stringify(validation).slice(0, 16000), { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), proposal, critique, strategy, coherenceReview: coherenceReview || null, coherenceReviewRound: round, activeValidationRound: round, delivery, validation, syntax, validationRound: round, lastCheckpoint: `validation-${round}` }, { attempt: round }, runnerExecution.infraError ? 'blocked' : 'done');
         payload = (await getPayload(jobId))?.payload || {};
         resumeState = getValidationResumeState(payload, round);
       }
@@ -592,7 +591,7 @@ async function runJob(jobId) {
         await updateJob(jobId, { status: 'completed', stage: runtimeTestsExecuted ? 'Completado · IA + sintaxis + ejecución' : syntax.checked ? 'Completado · IA + sintaxis' : 'Completado · revisión IA', progress: 100, attempt: round, error: null, payload: { proposal, critique, strategy, coherence, coherenceReview: latestPayload.coherenceReview || null, delivery, validation, syntax, validationRound: round, validationLevel, result, transcript, activeStage: null, lastCheckpoint: 'completed' } });
         return;
       }
-      if (round >= MAX_ROUNDS) break;
+      
       const findings = [...(validation?.findings || [])]; if (syntax && !syntax.ok) findings.push(syntax.message);
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
@@ -611,7 +610,7 @@ async function runJob(jobId) {
       at: new Date().toISOString(), agent: 'sistema', type: 'check',
       content: 'El comité terminó sus intentos automáticos, pero la validación no aprobó todos los criterios. La entrega queda pendiente de revisión humana; no se considera aprobada.'
     }]);
-    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: MAX_ROUNDS, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
+    await updateJob(jobId, { status: 'needs_review', stage: 'Requiere revisión humana', progress: 99, attempt: round, error: 'La revisión automática no aprobó todos los criterios; requiere revisión humana.', payload: { ...finalPayload, proposal, critique, strategy, coherence, delivery, validation, syntax, transcript: reviewTranscript, activeStage: null, result: { status: 'needs_review', delivery, validation, syntax }, lastCheckpoint: 'needs_review' } });
   } catch (error) {
     const current = await getPayload(jobId);
     if (error?.code === 'AGENT_WORKSPACE_CONFLICT' && current) {
