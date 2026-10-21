@@ -345,7 +345,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
   }
   const apiKey = suppliedApiKey;
   if (!apiKey) throw new Error(`Falta la credencial configurada para ${providerName}.`);
-  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let sizeRetries = 0;
+  let retry = 0; let emptyRetries = 0; let formatRetries = 0; let jsonFormatFallbacks = 0; let toolValidationFallbacks = 0; let sizeRetries = 0;
   const conversationState = await restoreAgentConversation(messages, conversationStore);
   if (conversationState.completed) return conversationState.result;
   let continuationCount = conversationState.continuationCount;
@@ -375,7 +375,7 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
     const usageId = randomUUID();
     if (beforeProviderRequest) await beforeProviderRequest();
     let response;
-    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName, tools, toolChoice: 'auto' }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
+    try { const request = buildProviderRequest({ model, messages: requestMessages, temperature, maxTokens: safeMaxTokens, reasoningEffort, responseFormat: responseFormat && jsonFormatFallbacks === 0 ? responseFormat : null, apiKey, baseUrl, providerName, tools, toolChoice: toolValidationFallbacks > 0 ? 'none' : 'auto' }); response = await fetchProviderEndpoint(request.url, request.options, baseUrl); }
     catch (error) {
       const reason = `error de red: ${String(error?.message || error).slice(0, 180)}`;
       if (failoverAvailable) throw deferredProviderError(model, 1, retryDelay(1), reason, providerName);
@@ -485,6 +485,22 @@ async function consultarOpenAICompatible({ model, messages, temperature = 0.3, m
         : 'El proveedor rechazó la solicitud por tamaño (HTTP 413). Dividí el trabajo en módulos más pequeños o acortá el contexto.');
       error.code = 'PROVIDER_INPUT_TOO_LARGE'; error.providerModel = model; error.providerStatus = 413;
       throw error;
+    }
+    // Groq sometimes misinterprets the requested JSON output as a function call named JSON.
+    // Keep authorized tools available in history, but disable new tool calls for one corrective retry.
+    const invalidJsonToolCall = response.status === 400 && Array.isArray(tools) && tools.length > 0
+      && /attempted to call tool ['"]?JSON['"]? which was not in request\\.tools/i.test(body);
+    if (invalidJsonToolCall && toolValidationFallbacks < 1) {
+      toolValidationFallbacks++;
+      requestMessages = [...requestMessages, {
+        role: 'user',
+        content: 'Corrección de protocolo: no llames ninguna herramienta en esta respuesta. JSON es el formato de salida, no una herramienta. Devolvé directamente el resultado solicitado como JSON válido en el contenido del mensaje.'
+      }];
+      await saveConversation();
+      console.warn('[worker][provider_invalid_tool_call_recovery]', JSON.stringify({
+        provider: providerName, model, retry: toolValidationFallbacks, toolChoice: 'none'
+      }));
+      continue;
     }
     const jsonFormatRejected = response.status === 400 && /json_validate_failed|failed to generate json|tool call validation failed[\\s\\S]*?attempted to call tool ['\"]?JSON/i.test(body);
     const incompleteJsonGeneration = jsonFormatRejected && /max completion tokens reached before generating a valid document/i.test(body);
