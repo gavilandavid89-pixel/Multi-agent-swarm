@@ -1,6 +1,10 @@
 const number = value => Math.max(0, Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : 0);
 const key = (value, fallback) => String(value || fallback).slice(0, 100);
 
+export function isUnlimitedBudgetTask(payload = {}) {
+  return payload?.userRole === 'admin';
+}
+
 function counter(previous = {}) {
   return {
     promptTokens: number(previous.promptTokens),
@@ -121,7 +125,7 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
   const batchSnapshot = {
     jobId: String(sourceJob.id || ''),
     batchNumber: continuationNumber - 1,
-    tokenBudget: 1000000,
+    tokenBudget: isUnlimitedBudgetTask(sourcePayload) ? null : 1000000,
     tokenUsage: {
       promptTokens: number(currentUsage.promptTokens),
       completionTokens: number(currentUsage.completionTokens),
@@ -138,11 +142,13 @@ export function prepareContinuationPayload(sourcePayload = {}, sourceJob = {}, t
     at: timestamp,
     agent: 'sistema',
     type: 'budget',
-    content: 'Se creó automáticamente una tarea de continuación con un presupuesto nuevo de hasta 1.000.000 tokens. Se conservan el checkpoint, las decisiones, el contexto y los archivos anteriores; el consumo acumulado sigue registrado.'
+    content: isUnlimitedBudgetTask(sourcePayload)
+      ? 'Se creó automáticamente una tarea de continuación para la cuenta de administrador sin límite de tokens por tarea. Se conservan el checkpoint, las decisiones, el contexto y los archivos anteriores; el consumo acumulado sigue registrado.'
+      : 'Se creó automáticamente una tarea de continuación con un presupuesto nuevo de hasta 1.000.000 tokens. Se conservan el checkpoint, las decisiones, el contexto y los archivos anteriores; el consumo acumulado sigue registrado.'
   });
   return {
     ...sourcePayload,
-    tokenBudget: 1000000,
+    tokenBudget: isUnlimitedBudgetTask(sourcePayload) ? null : 1000000,
     tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, byModel: {}, byAgent: {}, byStage: {}, byInteraction: {}, wastedTokens: 0, wastedCalls: 0, unreportedCalls: 0, dedupedEvents: 0 },
     usageEventIds: [],
     tokenBatchHistory: [...previousBatches, batchSnapshot],
