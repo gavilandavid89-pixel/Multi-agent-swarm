@@ -1,6 +1,12 @@
+
+test('solo la cuenta con rol admin tiene presupuesto de tarea ilimitado', () => {
+  assert.equal(isUnlimitedBudgetTask({ userRole: 'admin' }), true);
+  assert.equal(isUnlimitedBudgetTask({ userRole: 'user' }), false);
+  assert.equal(isUnlimitedBudgetTask({}), false);
+});
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, isBudgetPausedJob, canContinueBudgetTask } from '../apps/worker/services/tokenAccounting.js';
+import { applyTokenUsage, prepareContinuationPayload, buildBudgetPausePatch, isBudgetPausedJob, canContinueBudgetTask, isUnlimitedBudgetTask } from '../apps/worker/services/tokenAccounting.js';
 
 const usageEvent = (overrides = {}) => ({
   usageId: 'call-1', model: 'model-a', agent: 'Arquitecto', stage: 'Arquitectura',
