@@ -5,7 +5,7 @@ import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAg
 import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
 import { getAgentToolDefinitions, createAgentToolDispatcher } from './agentToolDispatcher.js';
 import { getValidationResumeState } from './validationResume.js';
-import { buildBudgetPausePatch } from './tokenAccounting.js';
+import { buildBudgetPausePatch, isUnlimitedBudgetTask } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
 import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks, agentStageTaskId } from './agentCoordination.js';
@@ -284,7 +284,7 @@ async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const current = await getPayload(jobId);
   const limit = 1000000;
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
-  if (current?.payload?.userRole === 'admin') return Math.max(256, Number(requested) || 1200);
+  if (isUnlimitedBudgetTask(current?.payload)) return Math.max(256, Number(requested) || 1200);
   const remaining = Math.max(0, limit - used);
   const inputReserve = Math.max(0, Math.ceil(Number(estimatedInputTokens) || 0));
   const availableForOutput = Math.max(0, remaining - inputReserve);
@@ -299,7 +299,7 @@ async function assertTaskTokenBudget(jobId) {
   const current = await getPayload(jobId);
   const limit = 1000000;
   const used = Number(current?.payload?.tokenUsage?.totalTokens) || 0;
-  if (current?.payload?.userRole === 'admin') return;
+  if (isUnlimitedBudgetTask(current?.payload)) return;
   if (used >= limit) {
     const error = new Error(`Se alcanzó el presupuesto de la tarea (${used}/${limit} tokens). El checkpoint se conserva; se creará automáticamente una tarea de continuación con presupuesto propio.`);
     error.code = 'TASK_TOKEN_BUDGET'; error.usedTokens = used; error.tokenLimit = limit;
