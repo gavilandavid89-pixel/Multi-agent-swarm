@@ -386,22 +386,23 @@ $('close-zip-preview').addEventListener('click', closeUploadedZipPreview);
 
 function renderTokenBudget(data) {
   const usage = data.tokenUsage || {};
+  const unlimited = data.tokenBudgetUnlimited === true;
   const total = Math.max(1, Number(data.tokenBudget) || 50000);
-  state.currentTokenBudget = total;
+  state.currentTokenBudget = unlimited ? Infinity : total;
   const job = data.job || {};
   const budgetPaused = job.status === 'needs_review' && /presupuesto|tokens/i.test(job.stage || '');
   // Continuations are created by the worker; no manual budget-extension or batch button is shown.
   const used = Math.max(0, Number(data.tokensUsed ?? usage.totalTokens) || 0);
-  const remaining = Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
+  const remaining = unlimited ? Infinity : Math.max(0, Number(data.tokensRemaining ?? (total - used)) || 0);
   const prompt = Math.max(0, Number(usage.promptTokens) || 0);
   const completion = Math.max(0, Number(usage.completionTokens) || 0);
   const calls = Math.max(0, Number(usage.calls) || 0);
   const wasted = Math.max(0, Number(usage.wastedTokens) || 0);
   const chatTokens = Math.max(0, Number(usage.byInteraction?.['direct-chat']?.totalTokens) || 0);
-  const pct = Math.min(100, used / total * 100);
+  const pct = unlimited ? 0 : Math.min(100, used / total * 100);
   const fmt = value => Math.round(value).toLocaleString('es-AR');
-  $('tokens-remaining').textContent = fmt(remaining);
-  $('tokens-total-label').textContent = 'de ' + fmt(total);
+  $('tokens-remaining').textContent = unlimited ? '∞' : fmt(remaining);
+  $('tokens-total-label').textContent = unlimited ? 'sin límite' : 'de ' + fmt(total);
   $('tokens-used').textContent = fmt(used);
   $('tokens-input').textContent = fmt(prompt);
   $('tokens-output').textContent = fmt(completion);
@@ -409,9 +410,9 @@ function renderTokenBudget(data) {
   if ($('tokens-wasted')) $('tokens-wasted').textContent = fmt(wasted);
   if ($('tokens-chat')) $('tokens-chat').textContent = fmt(chatTokens);
   $('token-budget-fill').style.width = pct + '%';
-  $('token-budget-track').setAttribute('aria-valuemax', String(total));
-  $('token-budget-track').setAttribute('aria-valuenow', String(Math.min(total, used)));
-  $('token-budget-track').classList.toggle('token-budget-low', remaining <= total * 0.15);
+  $('token-budget-track').setAttribute('aria-valuemax', String(unlimited ? Math.max(used, 1) : total));
+  $('token-budget-track').setAttribute('aria-valuenow', String(unlimited ? used : Math.min(total, used)));
+  $('token-budget-track').classList.toggle('token-budget-low', !unlimited && remaining <= total * 0.15);
   const stageSummary = Object.entries(usage.byStage || {})
     .filter(([, bucket]) => Number(bucket?.totalTokens) > 0)
     .sort((a, b) => Number(b[1]?.totalTokens || 0) - Number(a[1]?.totalTokens || 0))
@@ -423,11 +424,15 @@ function renderTokenBudget(data) {
     const taskNumber = Math.max(1, Number(data.continuationNumber) || 1);
     const prior = Math.max(0, Number(data.priorTokensUsed) || 0);
     const lifetime = Math.max(0, Number(data.lifetimeTokensUsed) || (prior + used));
-    $('token-chain-note').textContent = `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
+    $('token-chain-note').textContent = unlimited
+      ? `Tarea ${taskNumber} · ${fmt(used)} tokens consumidos, sin límite por tarea. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`
+      : `Tarea ${taskNumber} · ${fmt(used)} / ${fmt(total)} tokens. Tareas anteriores: ${fmt(prior)} · acumulado de la cadena: ${fmt(lifetime)} tokens.`;
   }
   const duplicateEvents = Math.max(0, Number(usage.dedupedEvents) || 0);
   const unreportedCalls = Math.max(0, Number(usage.unreportedCalls) || 0);
-  const baseNote = budgetPaused
+  const baseNote = unlimited
+    ? 'Esta tarea de administrador no tiene límite de tokens por tarea. El consumo se sigue registrando; los límites y cuotas del proveedor de IA siguen vigentes.'
+    : budgetPaused
     ? 'Esta tarea llegó al presupuesto configurado. El checkpoint se conserva y la continuación se crea automáticamente.'
     : remaining === 0
       ? 'Cada tarea tiene un máximo de 1.000.000 tokens. Al agotarlo, Swarm crea automáticamente otra tarea y conserva el checkpoint, los archivos y el consumo acumulado.'
