@@ -142,17 +142,18 @@ export async function getArtifact(id, index) {
   if (!file || !Number.isInteger(Number(index)) || Number(index) < 0) return null;
   return { path: file.path, content: file.content, size: file.size, contentType: file.contentType };
 }
-export async function createJob(objective, requestedTokenBudget, userId = null, idempotencyKey = null) {
+export async function createJob(objective, requestedTokenBudget, userId = null, idempotencyKey = null, userRole = 'user') {
   const timestamp = now();
   // Each task has a fixed budget; larger work continues in a child task.
-  const tokenBudget = 1000000;
+  const isAdmin = userRole === 'admin';
+  const tokenBudget = isAdmin ? null : 1000000;
   const title = generateTaskTitle(objective);
-  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, title, tokenBudget, userId, transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
+  const row = { id: randomUUID(), status: 'queued', stage: 'En cola', progress: 0, attempt: 0, created_at: timestamp, updated_at: timestamp, error: null, encrypted_payload: seal({ objective, title, tokenBudget, userId, userRole: isAdmin ? 'admin' : 'user', transcript: [], artifacts: [], result: null, lastCheckpoint: 'created' }) };
   if (!idempotencyKey) {
     await pool.query('INSERT INTO jobs (id,status,stage,progress,attempt,created_at,updated_at,error,encrypted_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [row.id,row.status,row.stage,row.progress,row.attempt,row.created_at,row.updated_at,row.error,row.encrypted_payload]);
     return toPublic(row);
   }
-  const requestHash = createHash('sha256').update(JSON.stringify({ objective, tokenBudget, userId })).digest('hex');
+  const requestHash = createHash('sha256').update(JSON.stringify({ objective, tokenBudget, userId, userRole: isAdmin ? 'admin' : 'user' })).digest('hex');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
