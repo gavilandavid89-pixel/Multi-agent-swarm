@@ -630,7 +630,7 @@ function showTaskWorkspace() {
   $('main-chat-home')?.classList.add('hidden');
   $('task-history-toggle')?.classList.remove('hidden');
   $('app-content').classList.remove('hidden');
-  $('task-mode-toggle').textContent = '＋ Tarea';
+  $('task-mode-toggle').textContent = '← Chats';
   $('files-menu-toggle')?.classList.remove('hidden');
   if (state.taskWorkspaceStarted) return;
   state.taskWorkspaceStarted = true;
