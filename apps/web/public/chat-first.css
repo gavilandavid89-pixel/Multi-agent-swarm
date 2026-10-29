@@ -160,3 +160,83 @@ body.swarm-chat-fullscreen #chats-drawer .chat-message-content {
   body.swarm-task-mode #conversation,
   body.swarm-task-chat #conversation { padding:8px 8px 12px; }
 }
+
+/* Put the task conversation above its reply composer, like a real chat timeline. */
+body.swarm-task-mode #detail-panel > #conversation,
+body.swarm-task-chat #detail-panel > #conversation { order:2; }
+body.swarm-task-mode #detail-panel > .agent-reply-panel,
+body.swarm-task-chat #detail-panel > .agent-reply-panel {
+  display:block!important;
+  order:3;
+  flex:0 0 auto;
+  margin:0;
+  padding:12px 0 2px;
+  border:0;
+  border-top:1px solid var(--chat-line);
+  border-radius:0;
+  background:transparent;
+}
+body.swarm-task-mode #detail-panel > .agent-reply-panel h3,
+body.swarm-task-chat #detail-panel > .agent-reply-panel h3 {
+  margin:0 0 6px;
+  font-size:16px;
+}
+body.swarm-task-mode #detail-panel > .agent-reply-panel > p,
+body.swarm-task-chat #detail-panel > .agent-reply-panel > p { display:none; }
+body.swarm-task-mode #agent-reply-form,
+body.swarm-task-chat #agent-reply-form {
+  display:grid;
+  grid-template-columns:minmax(130px,190px) minmax(0,1fr) auto;
+  align-items:end;
+  gap:10px;
+}
+body.swarm-task-mode #agent-reply-form #agent-reply-target,
+body.swarm-task-chat #agent-reply-form #agent-reply-target { min-width:0; }
+body.swarm-task-mode #agent-reply-form #agent-reply-message,
+body.swarm-task-chat #agent-reply-form #agent-reply-message {
+  min-height:52px;
+  max-height:150px;
+  resize:vertical;
+}
+body.swarm-task-mode #agent-reply-form .composer-footer,
+body.swarm-task-chat #agent-reply-form .composer-footer { display:contents; }
+body.swarm-task-mode #agent-reply-form #agent-reply-status,
+body.swarm-task-chat #agent-reply-form #agent-reply-status { display:none; }
+body.swarm-task-mode #agent-reply-form #agent-reply-submit,
+body.swarm-task-chat #agent-reply-form #agent-reply-submit {
+  min-height:52px;
+  white-space:nowrap;
+  font-size:0;
+  width:52px;
+  padding:0;
+}
+body.swarm-task-mode #agent-reply-form #agent-reply-submit::after,
+body.swarm-task-chat #agent-reply-form #agent-reply-submit::after {
+  content:"↑";
+  font-size:25px;
+  line-height:1;
+}
+body.swarm-task-mode #detail-panel > .diagnostic,
+body.swarm-task-chat #detail-panel > .diagnostic { order:5; }
+body.swarm-task-mode #detail-panel > #artifacts-panel,
+body.swarm-task-chat #detail-panel > #artifacts-panel { order:4; }
+@media(max-width:760px) {
+  body.swarm-task-mode #agent-reply-form,
+  body.swarm-task-chat #agent-reply-form {
+    grid-template-columns:minmax(0,1fr) 48px;
+    gap:8px;
+  }
+  body.swarm-task-mode #agent-reply-form #agent-reply-target,
+  body.swarm-task-chat #agent-reply-form #agent-reply-target { grid-column:1 / -1; }
+  body.swarm-task-mode #agent-reply-form #agent-reply-message,
+  body.swarm-task-chat #agent-reply-form #agent-reply-message { grid-column:1; }
+  body.swarm-task-mode #agent-reply-form #agent-reply-submit,
+  body.swarm-task-chat #agent-reply-form #agent-reply-submit {
+    grid-column:2;
+    grid-row:2;
+    width:48px;
+    min-width:48px;
+    min-height:48px;
+    height:48px;
+  }
+}
