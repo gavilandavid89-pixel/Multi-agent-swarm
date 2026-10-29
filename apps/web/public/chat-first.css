@@ -272,7 +272,9 @@ body.swarm-task-chat #detail-panel #token-chain-note { display:none; }
 body.swarm-task-mode #detail-panel .token-budget-track,
 body.swarm-task-chat #detail-panel .token-budget-track { height:4px; margin-top:5px; }
 body.swarm-task-mode #detail-panel #improvement-vote-panel,
-body.swarm-task-chat #detail-panel #improvement-vote-panel { display:none; }
+body.swarm-task-chat #detail-panel #improvement-vote-panel { padding:10px; margin:0; }
+body.swarm-task-mode #detail-panel #improvement-vote-panel .section-head,
+body.swarm-task-chat #detail-panel #improvement-vote-panel .section-head { margin-bottom:6px; }
 body.swarm-task-mode #detail-panel #agent-memory-panel,
 body.swarm-task-chat #detail-panel #agent-memory-panel { flex:0 0 auto; margin:0; }
 body.swarm-task-mode #detail-panel #agent-memory-panel:not([open]) .agent-memory-content,
