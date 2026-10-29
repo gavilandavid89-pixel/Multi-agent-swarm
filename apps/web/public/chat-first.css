@@ -71,3 +71,92 @@ footer{font-size:12px;color:var(--chat-muted);padding:12px 0 4px}
 @media(max-width:420px){.connection{gap:5px}.connection #task-mode-toggle{font-size:12px;padding:8px}.brand{gap:7px}.chat-thread-actions{width:100%}.chat-thread-actions .mini-button{flex:1}.back-to-chats-button{max-width:100%}.chats-toolbar .button{font-size:12px;padding:9px 10px}}
 @media(orientation:landscape) and (max-height:560px){.shell{padding:5px 12px;gap:4px}.topbar{padding:2px 0 5px}.brand-mark{width:30px;height:30px}.connection .dot{display:none}.chat-thread{height:calc(100dvh - 95px);min-height:0}.chat-messages{padding:10px 16px;gap:10px}.chat-message-form{padding:6px 10px calc(6px + env(safe-area-inset-bottom))}.chat-message-form textarea{min-height:44px;max-height:120px}.chat-send-icon{height:44px;min-height:44px;width:44px;min-width:44px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+
+/* Final pass: target the real task transcript markup, not just the independent-chat view. */
+body.swarm-task-mode #detail-panel,
+body.swarm-task-chat #detail-panel {
+  display:flex;
+  flex-direction:column;
+  flex:1 1 auto;
+  min-height:0;
+  height:calc(100dvh - 86px);
+  max-height:none;
+  margin:0;
+  overflow:hidden;
+}
+body.swarm-task-mode #detail-panel > .section-head,
+body.swarm-task-chat #detail-panel > .section-head {
+  flex:0 0 auto;
+  gap:12px;
+  margin-bottom:8px;
+}
+body.swarm-task-mode #detail-title,
+body.swarm-task-chat #detail-title { font-size:clamp(20px,2.3vw,27px); }
+body.swarm-task-mode #conversation,
+body.swarm-task-chat #conversation {
+  flex:1 1 auto;
+  min-height:0;
+  max-height:none;
+  gap:18px;
+  padding:18px clamp(8px,2vw,24px) 22px;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
+body.swarm-task-mode #conversation .chat-message,
+body.swarm-task-chat #conversation .chat-message {
+  max-width:min(92%,920px);
+  gap:12px;
+}
+body.swarm-task-mode #conversation .message-body,
+body.swarm-task-chat #conversation .message-body {
+  padding:16px 19px;
+  border-radius:6px 19px 19px 19px;
+}
+body.swarm-task-mode #conversation .message-text,
+body.swarm-task-chat #conversation .message-text {
+  font-size:16px;
+  line-height:1.8;
+  overflow-wrap:anywhere;
+}
+body.swarm-task-mode #conversation .message-heading strong,
+body.swarm-task-chat #conversation .message-heading strong { font-size:14px; }
+body.swarm-task-mode #conversation .agent-avatar,
+body.swarm-task-chat #conversation .agent-avatar {
+  width:40px;
+  height:40px;
+  min-width:40px;
+  font-size:16px;
+}
+body.swarm-task-mode #agent-reply-form textarea,
+body.swarm-task-chat #agent-reply-form textarea,
+body.swarm-task-mode #objective,
+body.swarm-task-chat #objective { font-size:16px; line-height:1.6; }
+body.swarm-task-mode #detail-panel .diagnostic,
+body.swarm-task-chat #detail-panel .diagnostic { flex:0 0 auto; }
+body.swarm-task-mode #detail-panel .agent-reply-panel,
+body.swarm-task-chat #detail-panel .agent-reply-panel { flex:0 0 auto; }
+body.swarm-chat-fullscreen #chats-drawer .chat-message-content {
+  font-size:16px;
+  line-height:1.8;
+  overflow-wrap:anywhere;
+}
+@media(max-width:760px) {
+  body.swarm-task-mode #detail-panel,
+  body.swarm-task-chat #detail-panel { height:calc(100dvh - 64px); padding:12px; }
+  body.swarm-task-mode #conversation,
+  body.swarm-task-chat #conversation { padding:12px 4px 16px; gap:14px; }
+  body.swarm-task-mode #conversation .chat-message,
+  body.swarm-task-chat #conversation .chat-message { max-width:100%; }
+  body.swarm-task-mode #conversation .message-body,
+  body.swarm-task-chat #conversation .message-body { padding:13px 14px; }
+  body.swarm-task-mode #conversation .message-text,
+  body.swarm-task-chat #conversation .message-text { font-size:16px; line-height:1.75; }
+}
+@media(orientation:landscape) and (max-height:560px) {
+  body.swarm-task-mode #detail-panel,
+  body.swarm-task-chat #detail-panel { height:calc(100dvh - 52px); padding:8px 12px; }
+  body.swarm-task-mode #conversation,
+  body.swarm-task-chat #conversation { padding:8px 8px 12px; }
+}
