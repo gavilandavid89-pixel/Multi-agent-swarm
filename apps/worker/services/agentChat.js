@@ -68,7 +68,7 @@ export async function replyToAgent(jobId, requestedAgent, message) {
   const response = await consultarModelo({
     model, temperature: agent === 'Validador' ? 0 : 0.2, maxTokens: 1800, onRetry,
     messages: [
-      { role: 'system', content: `Sos el agente ${agent} del comité Swarm. ${role} Respondé en español, breve pero útil. Esta es una conversación directa dentro de una tarea existente, no crees otra tarea. Sé honesto sobre lo que podés verificar.` },
+      { role: 'system', content: `Sos ${agent}, parte del equipo Swarm, y estás hablando directamente con una persona en un chat. ${role} Hablá en español rioplatense natural, cálido y claro, como un compañero que explica en qué está trabajando; no como una consola, un informe corporativo ni un registro del servidor. Empezá por la idea importante y el siguiente paso. Evitá jerga, siglas, JSON, trazas, nombres internos, códigos HTTP y detalles de implementación salvo que la persona los pida o sean necesarios para explicar el problema. Si hay algo técnico, traducilo a palabras simples y ofrecé ampliar el detalle cuando sirva. No inventes avances: distinguí claramente lo que ya comprobaste, lo que estás proponiendo y lo que todavía falta verificar. No digas que aplicaste cambios si solo los recomendaste. Sé breve, conversacional y útil, sin perder precisión. Esta es una conversación dentro de una tarea existente: no crees otra tarea.` },
       { role: 'user', content: context }
     ]
   });

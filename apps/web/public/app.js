@@ -1280,6 +1280,11 @@ function showChatListView() {
   $('main-chat-home')?.classList.remove('chat-detail-open');
   $('chats-list')?.classList.remove('hidden');
   $('chat-thread-view')?.classList.add('hidden');
+  // Task controls belong to the task workspace, not an ordinary chat.
+  $('task-mode-toggle')?.classList.remove('hidden');
+  $('task-mode-toggle').textContent = '＋ Tarea';
+  $('task-history-toggle')?.classList.add('hidden');
+  $('files-menu-toggle')?.classList.add('hidden');
   $('chat-message-input')?.blur();
 }
 function showChatConversationView() {
@@ -1287,6 +1292,10 @@ function showChatConversationView() {
   $('main-chat-home')?.classList.add('chat-detail-open');
   $('chats-list')?.classList.add('hidden');
   $('chat-thread-view')?.classList.remove('hidden');
+  // Keep a normal chat focused on messaging; task history/files live in Tarea.
+  $('task-mode-toggle')?.classList.add('hidden');
+  $('task-history-toggle')?.classList.add('hidden');
+  $('files-menu-toggle')?.classList.add('hidden');
 }
 async function loadChats() {
   try {
