@@ -240,3 +240,63 @@ body.swarm-task-chat #detail-panel > #artifacts-panel { order:4; }
     height:48px;
   }
 }
+
+
+/* Compact task metadata so the actual conversation gets most of the viewport. */
+body.swarm-task-mode #detail-panel,
+body.swarm-task-chat #detail-panel { gap:8px; }
+body.swarm-task-mode #detail-panel > .section-head,
+body.swarm-task-chat #detail-panel > .section-head { margin:0; }
+body.swarm-task-mode #detail-panel .task-status,
+body.swarm-task-chat #detail-panel .task-status { padding:6px 12px; margin:0; min-height:0; }
+body.swarm-task-mode #detail-panel #detail-progress,
+body.swarm-task-chat #detail-panel #detail-progress { flex:0 0 5px; height:5px; min-height:5px; }
+body.swarm-task-mode #detail-panel #detail-hint,
+body.swarm-task-chat #detail-panel #detail-hint { display:none; }
+body.swarm-task-mode #detail-panel .token-budget,
+body.swarm-task-chat #detail-panel .token-budget { padding:7px 12px; margin:0; border-radius:12px; }
+body.swarm-task-mode #detail-panel .token-budget-head,
+body.swarm-task-chat #detail-panel .token-budget-head { display:flex; align-items:center; gap:10px; }
+body.swarm-task-mode #detail-panel .token-budget-head .panel-kicker,
+body.swarm-task-chat #detail-panel .token-budget-head .panel-kicker { display:none; }
+body.swarm-task-mode #detail-panel .token-budget-head strong,
+body.swarm-task-chat #detail-panel .token-budget-head strong { font-size:12px; }
+body.swarm-task-mode #detail-panel .token-budget-stats,
+body.swarm-task-mode #detail-panel #token-budget-note,
+body.swarm-task-mode #detail-panel #token-stage-breakdown,
+body.swarm-task-mode #detail-panel #token-chain-note,
+body.swarm-task-chat #detail-panel .token-budget-stats,
+body.swarm-task-chat #detail-panel #token-budget-note,
+body.swarm-task-chat #detail-panel #token-stage-breakdown,
+body.swarm-task-chat #detail-panel #token-chain-note { display:none; }
+body.swarm-task-mode #detail-panel .token-budget-track,
+body.swarm-task-chat #detail-panel .token-budget-track { height:4px; margin-top:5px; }
+body.swarm-task-mode #detail-panel #improvement-vote-panel,
+body.swarm-task-chat #detail-panel #improvement-vote-panel { display:none; }
+body.swarm-task-mode #detail-panel #agent-memory-panel,
+body.swarm-task-chat #detail-panel #agent-memory-panel { flex:0 0 auto; margin:0; }
+body.swarm-task-mode #detail-panel #agent-memory-panel:not([open]) .agent-memory-content,
+body.swarm-task-chat #detail-panel #agent-memory-panel:not([open]) .agent-memory-content { display:none; }
+body.swarm-task-mode #detail-panel #agent-memory-panel > summary,
+body.swarm-task-chat #detail-panel #agent-memory-panel > summary { padding:5px 10px; font-size:12px; }
+body.swarm-task-mode #detail-panel > #conversation,
+body.swarm-task-chat #detail-panel > #conversation {
+  display:flex;
+  flex:1 1 0;
+  min-height:160px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+body.swarm-task-mode #detail-panel > .agent-reply-panel,
+body.swarm-task-chat #detail-panel > .agent-reply-panel { margin-top:0; }
+@media(max-width:760px) {
+  body.swarm-task-mode #detail-panel,
+  body.swarm-task-chat #detail-panel { height:calc(100dvh - 66px); padding:10px; gap:6px; }
+  body.swarm-task-mode #detail-panel .token-budget,
+  body.swarm-task-chat #detail-panel .token-budget { padding:5px 8px; }
+  body.swarm-task-mode #detail-panel .agent-reply-panel h3,
+  body.swarm-task-chat #detail-panel .agent-reply-panel h3 { font-size:14px; }
+  body.swarm-task-mode #detail-panel > #conversation,
+  body.swarm-task-chat #detail-panel > #conversation { min-height:120px; padding:12px 8px; }
+}
