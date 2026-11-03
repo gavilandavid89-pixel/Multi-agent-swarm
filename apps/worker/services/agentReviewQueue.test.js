@@ -177,3 +177,15 @@ test('peer approval cannot clear an already queued correction for the same versi
   assert.equal(getCurrentArtifactVersion(state, { taskId: 'task-1', artifactId: 'report' }).status, 'correction_queued');
   assert.equal(state.agentCorrectionQueue.some(item => item.status === 'queued'), true);
 });
+
+test('expired correction claims recover after a worker crash without double-claiming a live lease', () => {
+  let state = deliver({}, 'v1', '2026-01-01T00:00:00.000Z');
+  state = reviewArtifactVersion(state, { versionId: 'task-1:report:v1', verdict: 'needs_correction', summary: 'Recover after crash' }, 'validador', '2026-01-01T00:01:00.000Z');
+  state = claimNextCorrection(state, 'desarrollador', { busy: false }, '2026-01-01T00:02:00.000Z');
+  const live = claimNextCorrection(state, 'desarrollador', { busy: false }, '2026-01-01T00:10:00.000Z');
+  assert.equal(live.reason, 'queue_empty');
+  const recovered = claimNextCorrection(state, 'desarrollador', { busy: false }, '2026-01-01T00:18:00.000Z');
+  assert.equal(recovered.reason, 'claimed');
+  assert.equal(recovered.claimedCorrection.status, 'in_progress');
+  assert.equal(recovered.claimedCorrection.claimedAt, '2026-01-01T00:18:00.000Z');
+});
