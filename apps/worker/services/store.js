@@ -4,6 +4,7 @@ import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash }
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
 import { generateTaskTitle } from './taskTitle.js';
+import { claimNextCorrection } from './agentReviewQueue.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -401,4 +402,30 @@ let closeStorePromise;
 export function closeStore() {
   if (!closeStorePromise) closeStorePromise = pool.end();
   return closeStorePromise;
+}
+
+/** Atomically claim one correction in the encrypted job payload.
+ * SELECT ... FOR UPDATE serializes claims across worker processes/instances.
+ * A busy author never has active work interrupted.
+ */
+export async function claimAgentCorrectionForJob(jobId, authorRole, { busy = false } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [jobId]);
+    const row = rows[0];
+    if (!row) { await client.query('ROLLBACK'); return { missing: true, claimedCorrection: null, reason: 'job_not_found' }; }
+    const payload = unseal(row.encrypted_payload);
+    const result = claimNextCorrection(payload, authorRole, { busy });
+    if (result.reason === 'author_busy' || result.reason === 'queue_empty') {
+      await client.query('COMMIT');
+      return { missing: false, claimedCorrection: null, reason: result.reason };
+    }
+    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [jobId, now(), seal({ ...payload, agentCorrectionQueue: result.agentCorrectionQueue })]);
+    await client.query('COMMIT');
+    return { missing: false, claimedCorrection: result.claimedCorrection, reason: result.reason };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
 }
