@@ -124,3 +124,21 @@ test('cannot mark a correction delivered before it was claimed', () => {
     state, state.agentCorrectionQueue[0].correctionId, 'task-1:report:v2'
   ), /reclamada/);
 });
+
+test('history cap never silently discards active correction requests', () => {
+  let state = deliver({}, 'v1', '2026-01-01T00:00:00.000Z');
+  state = reviewArtifactVersion(state, {
+    versionId: 'task-1:report:v1', verdict: 'needs_correction', summary: 'Keep this request'
+  }, 'validador', '2026-01-01T00:02:00.000Z');
+  const active = state.agentCorrectionQueue[0];
+  const padded = {
+    ...state,
+    agentCorrectionQueue: Array.from({ length: 200 }, (_, i) => ({
+      correctionId: 'done-' + i, status: 'delivered', queueSequence: i + 1
+    })).concat(active)
+  };
+  const next = reviewArtifactVersion(padded, {
+    versionId: 'task-1:report:v1', verdict: 'uncertain', summary: 'Second reviewer is unsure'
+  }, 'auditor', '2026-01-01T00:03:00.000Z');
+  assert.ok(next.agentCorrectionQueue.some(c => c.correctionId === active.correctionId));
+});
