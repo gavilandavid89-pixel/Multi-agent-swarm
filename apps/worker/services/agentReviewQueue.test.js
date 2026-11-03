@@ -169,3 +169,11 @@ test('new deliveries do not trim queued correction work', () => {
   }
   assert.ok(state.agentCorrectionQueue.some(c => c.correctionId === correctionId && c.status === 'queued'));
 });
+
+test('peer approval cannot clear an already queued correction for the same version', () => {
+  let state = deliver({}, 'v1', '2026-01-01T00:00:00.000Z');
+  state = reviewArtifactVersion(state, { versionId: 'task-1:report:v1', verdict: 'needs_correction', summary: 'Missing regression test' }, 'validador', '2026-01-01T00:01:00.000Z');
+  state = reviewArtifactVersion(state, { versionId: 'task-1:report:v1', verdict: 'approve', summary: 'Another reviewer approves the current content' }, 'auditor', '2026-01-01T00:02:00.000Z');
+  assert.equal(getCurrentArtifactVersion(state, { taskId: 'task-1', artifactId: 'report' }).status, 'correction_queued');
+  assert.equal(state.agentCorrectionQueue.some(item => item.status === 'queued'), true);
+});
