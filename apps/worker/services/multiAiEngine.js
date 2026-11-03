@@ -13,6 +13,10 @@ import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts,
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_TRANSCRIPT_ENTRIES = 150;
 async function persistDeliveryVersion(jobId, content, correctionId = null) {
+  if (Buffer.byteLength(String(content || ''), 'utf8') > 512 * 1024) {
+    if (correctionId) throw new Error('La entrega corregida supera 512 KiB; no se puede cerrar la corrección sin una versión verificable.');
+    return null;
+  }
   return mutateJobPayload(jobId, payload => {
     const identity = { taskId: jobId, artifactId: 'delivery' };
     const current = getCurrentArtifactVersion(payload, identity);
@@ -488,7 +492,7 @@ async function runJob(jobId) {
       await saveArtifacts(jobId, delivery);
     }
     let artifactVersion = await persistDeliveryVersion(jobId, delivery);
-    if (!artifactVersion) throw new Error('No se pudo guardar la versión verificable de la entrega.');
+    if (!artifactVersion) console.warn('[worker][artifact_version_skipped]', JSON.stringify({ jobId, reason: 'delivery_exceeds_512_kib' }));
     payload = (await getPayload(jobId))?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
     let resumeState = getValidationResumeState(payload, (await getPayload(jobId))?.publicJob.attempt || 0);
@@ -646,7 +650,7 @@ async function runJob(jobId) {
       const correctedDelivery = await integrateAgentWorkspace(jobId, round + 1, delivery, correctedOutput, toolContext);
       const mergedDelivery = correctedDelivery;
       const correctedArtifactVersion = await persistDeliveryVersion(jobId, mergedDelivery, queuedCorrection?.correctionId || null);
-      if (!correctedArtifactVersion) throw new Error('No se pudo guardar la versión corregida de la entrega.');
+      if (!correctedArtifactVersion && queuedCorrection) throw new Error('No se pudo guardar la versión corregida de la entrega.');
       artifactVersion = correctedArtifactVersion;
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
