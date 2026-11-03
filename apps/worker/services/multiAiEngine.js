@@ -115,7 +115,8 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     reviewArtifact: async (input, sourceRole) => {
       const result = await mutateJobPayload(jobId, payload => {
         const next = reviewArtifactVersion(payload, input, sourceRole);
-        return { payload: next, result: { review: next.review, correction: next.correction, message: next.review.stale ? 'La revisión corresponde a una versión antigua y requiere revalidación.' : next.correction ? 'Corrección encolada para el autor original; no interrumpe su tarea activa.' : next.review.verdict === 'approve' ? 'Revisión por pares registrada; la aprobación final sigue siendo del supervisor.' : 'Revisión registrada.' } };
+        const { review, correction, ...persisted } = next;
+        return { payload: persisted, result: { review, correction, message: review.stale ? 'La revisión corresponde a una versión antigua y requiere revalidación.' : correction ? 'Corrección encolada para el autor original; no interrumpe su tarea activa.' : review.verdict === 'approve' ? 'Revisión por pares registrada; la aprobación final sigue siendo del supervisor.' : 'Revisión registrada.' } };
       });
       if (!result) throw new Error('La tarea dejó de existir al registrar la revisión.');
       return result;
