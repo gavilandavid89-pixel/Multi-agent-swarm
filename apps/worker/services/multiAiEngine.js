@@ -1,5 +1,5 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob, mutateJobPayload } from './store.js';
+import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob, mutateJobPayload, claimAgentCorrectionForJob } from './store.js';
 import { checkJavascriptSyntax, extractFiles, extractFileList } from './codeChecks.js';
 import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
 import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
@@ -8,10 +8,20 @@ import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, isUnlimitedBudgetTask } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
-import { submitArtifactVersion, reviewArtifactVersion, listArtifactLineage } from './agentReviewQueue.js';
+import { submitArtifactVersion, reviewArtifactVersion, listArtifactLineage, getCurrentArtifactVersion, completeCorrectionDelivery } from './agentReviewQueue.js';
 import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks, agentStageTaskId } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_TRANSCRIPT_ENTRIES = 150;
+async function persistDeliveryVersion(jobId, content, correctionId = null) {
+  return mutateJobPayload(jobId, payload => {
+    const identity = { taskId: jobId, artifactId: 'delivery' };
+    const current = getCurrentArtifactVersion(payload, identity);
+    const next = current?.content === content ? payload : submitArtifactVersion(payload, { ...identity, title: 'Entrega principal', content }, 'desarrollador');
+    const head = getCurrentArtifactVersion(next, identity);
+    const persisted = correctionId ? completeCorrectionDelivery(next, correctionId, head.versionId) : next;
+    return { payload: persisted, result: { taskId: jobId, artifactId: 'delivery', versionId: head.versionId, contentHash: head.contentHash, predecessorVersionId: head.predecessorVersionId } };
+  });
+}
 async function createAgentToolContext(jobId, round, role = 'desarrollador', seedDelivery = '') {
   const workspaceId = deriveAgentWorkspaceId(jobId, role, 'round-' + round);
   const initial = await getPayload(jobId);
@@ -477,6 +487,8 @@ async function runJob(jobId) {
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
     }
+    const artifactVersion = await persistDeliveryVersion(jobId, delivery);
+    if (!artifactVersion) throw new Error('No se pudo guardar la versión verificable de la entrega.');
     payload = (await getPayload(jobId))?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
     let resumeState = getValidationResumeState(payload, (await getPayload(jobId))?.publicJob.attempt || 0);
@@ -534,7 +546,7 @@ async function runJob(jobId) {
         await startAgent(jobId, `Validación · ronda ${round}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
         await assertTaskTokenBudget(jobId);
         const validatorTools = await createAgentToolContext(jobId, round, 'validador', delivery);
-        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools);
+        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools, artifactVersion);
         if (coherenceReview.verdict !== 'APPROVED') {
           validation = {
             ...validation,
@@ -613,11 +625,18 @@ async function runJob(jobId) {
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       await assertTaskTokenBudget(jobId);
-      const repairContext = selectRepairContext(delivery, findings.join('\n'));
+      const correctionClaim = await claimAgentCorrectionForJob(jobId, 'desarrollador', { busy: false });
+      const queuedCorrection = correctionClaim?.claimedCorrection || null;
+      const correctionFindings = queuedCorrection
+        ? [...findings, 'Corrección encolada por revisión por pares (versión exacta ' + queuedCorrection.targetVersionId + '): ' + queuedCorrection.summary + (queuedCorrection.evidence ? '\nEvidencia: ' + queuedCorrection.evidence : '')]
+        : findings;
+      const repairContext = selectRepairContext(delivery, correctionFindings.join('\n'));
       const toolContext = await createAgentToolContext(jobId, round + 1, 'desarrollador', repairContext);
-      const correctedOutput = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
+      const correctedOutput = await agenteDesarrollador(objective, strategy, correctionFindings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
       const correctedDelivery = await integrateAgentWorkspace(jobId, round + 1, delivery, correctedOutput, toolContext);
       const mergedDelivery = correctedDelivery;
+      const correctedArtifactVersion = await persistDeliveryVersion(jobId, mergedDelivery, queuedCorrection?.correctionId || null);
+      if (!correctedArtifactVersion) throw new Error('No se pudo guardar la versión corregida de la entrega.');
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
