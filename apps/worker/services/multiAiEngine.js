@@ -130,56 +130,46 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       return listAgentFindings(record?.payload, agentRole);
     },
     reportFinding: async (finding, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al registrar el hallazgo.');
-      const update = recordAgentFinding(record.payload, finding, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, update.notifications);
-      await updateJob(jobId, { payload: { agentFindings: update.findings, transcript } });
-      return {
-        findingId: update.finding.id, created: update.created,
-        status: update.finding.status, notifiedRoles: update.finding.targetRoles,
-        message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
-      };
+      const result = await mutateJobPayload(jobId, payload => {
+        const update = recordAgentFinding(payload, finding, sourceRole);
+        const transcript = appendEntries(payload.transcript, update.notifications);
+        return { payload: { ...payload, agentFindings: update.findings, transcript }, result: {
+          findingId: update.finding.id, created: update.created, status: update.finding.status, notifiedRoles: update.finding.targetRoles,
+          message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
+        } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al registrar el hallazgo.');
+      return result;
     },
     publishPost: async (post, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al publicar en el feed.');
-      const update = recordAgentPost(record.payload, post, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, [{
-        at: update.post.createdAt, agent: sourceRole, type: 'agent_feed',
-        content: '[' + update.post.type + '] ' + update.post.title + ': ' + update.post.body
-      }]);
-      await updateJob(jobId, { payload: { agentFeed: update.posts, transcript } });
-      return { postId: update.post.id, createdAt: update.post.createdAt, visibleTo: 'all_agents' };
+      const result = await mutateJobPayload(jobId, payload => {
+        const update = recordAgentPost(payload, post, sourceRole);
+        const transcript = appendEntries(payload.transcript, [{ at: update.post.createdAt, agent: sourceRole, type: 'agent_feed', content: '[' + update.post.type + '] ' + update.post.title + ': ' + update.post.body }]);
+        return { payload: { ...payload, agentFeed: update.posts, transcript }, result: { postId: update.post.id, createdAt: update.post.createdAt, visibleTo: 'all_agents' } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al publicar en el feed.');
+      return result;
     },
     listPosts: async options => {
       const record = await getPayload(jobId);
       return listAgentPosts(record?.payload, options);
     },
     updateTask: async (task, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al actualizar el tablero.');
-      const existingTask = Array.isArray(record.payload.agentTasks)
-        ? record.payload.agentTasks.find(item => item?.taskId === task.taskId) : null;
-      const normalizedTask = {
-        ...task,
-        title: String(task.title || existingTask?.title || task.summary || task.taskId || 'Tarea sin título').slice(0, 160)
-      };
-      const update = upsertAgentTask(record.payload, normalizedTask, sourceRole);
-      const postType = update.task.status === 'blocked' ? 'blocker'
-        : update.task.status === 'done' ? 'result'
-        : update.task.status === 'in_review' ? 'handoff' : 'progress';
-      const feed = recordAgentPost({ ...record.payload, agentFeed: record.payload.agentFeed || [] }, {
-        type: postType, title: 'Tarea: ' + update.task.title,
-        body: 'Estado: ' + update.task.status + '. Responsable: ' + update.task.assignedRole + '. Próximo paso: ' + (update.task.nextStep || 'No especificado') + '. ' + update.task.summary,
-        taskId: update.task.taskId
-      }, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, [{
-        at: update.task.updatedAt, agent: sourceRole, type: 'agent_task',
-        content: 'Tarea "' + update.task.title + '" → ' + update.task.status + ' (responsable: ' + update.task.assignedRole + ')'
-      }]);
-      await updateJob(jobId, { payload: { agentTasks: update.tasks, agentFeed: feed.posts, transcript } });
-      return { task: update.task, created: update.created, feedPostId: feed.post.id };
+      const result = await mutateJobPayload(jobId, payload => {
+        const existingTask = Array.isArray(payload.agentTasks) ? payload.agentTasks.find(item => item?.taskId === task.taskId) : null;
+        const normalizedTask = { ...task, title: String(task.title || existingTask?.title || task.summary || task.taskId || 'Tarea sin título').slice(0, 160) };
+        const update = upsertAgentTask(payload, normalizedTask, sourceRole);
+        const postType = update.task.status === 'blocked' ? 'blocker' : update.task.status === 'done' ? 'result' : update.task.status === 'in_review' ? 'handoff' : 'progress';
+        const feed = recordAgentPost({ ...payload, agentFeed: payload.agentFeed || [] }, {
+          type: postType, title: 'Tarea: ' + update.task.title,
+          body: 'Estado: ' + update.task.status + '. Responsable: ' + update.task.assignedRole + '. Próximo paso: ' + (update.task.nextStep || 'No especificado') + '. ' + update.task.summary,
+          taskId: update.task.taskId
+        }, sourceRole);
+        const transcript = appendEntries(payload.transcript, [{ at: update.task.updatedAt, agent: sourceRole, type: 'agent_task', content: 'Tarea "' + update.task.title + '" → ' + update.task.status + ' (responsable: ' + update.task.assignedRole + ')' }]);
+        return { payload: { ...payload, agentTasks: update.tasks, agentFeed: feed.posts, transcript }, result: { task: update.task, created: update.created, feedPostId: feed.post.id } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al actualizar el tablero.');
+      return result;
     },
     listTasks: async options => {
       const record = await getPayload(jobId);
