@@ -294,8 +294,10 @@ async function retryNotice(jobId, info) {
   }
   const reason = String(info.reason || 'error temporal').slice(0, 240);
   console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
-  await updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
+  await mutateJobPayload(jobId, payload => {
+    const transcript = appendEntries(payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
+    return { payload: { ...payload, transcript, activeStage: payload.activeStage || null }, jobPatch: { stage: 'Esperando al proveedor de IA' }, result: true };
+  });
 }
 async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const current = await getPayload(jobId);
