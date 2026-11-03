@@ -361,14 +361,17 @@ function updateAutomaticAgentTask(payload, { agent, stage, content, jobId, at, t
   }, role, at);
 }
 async function startAgent(jobId, stage, progress, agent, content) {
-  const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const at = new Date().toISOString();
-  const transcript = appendEntries(current.payload.transcript, [{ at, agent, type: 'thinking', content }]);
   const activeAgentTaskId = agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
-  const taskUpdate = updateAutomaticAgentTask(current.payload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
-  const taskPayload = { ...current.payload, agentTasks: taskUpdate.tasks };
-  const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
-  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
+  const result = await mutateJobPayload(jobId, payload => {
+    const at = new Date().toISOString();
+    const transcript = appendEntries(payload.transcript, [{ at, agent, type: 'thinking', content }]);
+    const taskUpdate = updateAutomaticAgentTask(payload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
+    const taskPayload = { ...payload, agentTasks: taskUpdate.tasks };
+    const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
+    return { payload: { ...payload, transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId }, jobPatch: { status: 'running', stage, progress, error: null }, result: { id: jobId, status: 'running', stage, progress } };
+  });
+  if (!result) throw new Error('La tarea dejó de existir.');
+  return result;
 }
 async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, checkpointSignal = 'result') {
   const result = await mutateJobPayload(jobId, (currentPayload) => {
