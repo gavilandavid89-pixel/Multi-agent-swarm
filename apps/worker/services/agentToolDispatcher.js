@@ -1,21 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { submitArtifactVersion, reviewArtifactVersion, listArtifactLineage } from './agentReviewQueue.js';
 
 const PERMISSIONS = {
   coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
 
-  arbitro: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  arbitro: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list']
+  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage']
 };
 const BLOCKED_DIRS = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.docker', 'node_modules', '.venv', 'venv']);
 const BLOCKED_FILES = new Set(['.npmrc', '.netrc', '.pypirc', '.git-credentials', 'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519', 'terraform.tfstate', 'terraform.tfvars', 'kubeconfig']);
