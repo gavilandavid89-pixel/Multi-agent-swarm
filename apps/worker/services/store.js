@@ -440,9 +440,15 @@ export async function mutateJobPayload(id, mutator) {
     const row = rows[0];
     if (!row) { await client.query('ROLLBACK'); return null; }
     const payload = unseal(row.encrypted_payload);
-    const outcome = mutator(payload);
+    const outcome = mutator(payload, row);
     if (!outcome || typeof outcome !== 'object' || !outcome.payload || typeof outcome.payload !== 'object') throw new Error('El mutator debe devolver { payload, result }.');
-    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [id, now(), seal(outcome.payload)]);
+    const patch = outcome.jobPatch || {};
+    const nextStatus = patch.status ?? row.status;
+    const nextStage = patch.stage ?? row.stage;
+    const nextProgress = patch.progress ?? row.progress;
+    const nextAttempt = patch.attempt ?? row.attempt;
+    const nextError = patch.error === undefined ? row.error : patch.error;
+    await client.query('UPDATE jobs SET status=$2,stage=$3,progress=$4,attempt=$5,updated_at=$6,error=$7,encrypted_payload=$8 WHERE id=$1', [id, nextStatus, nextStage, nextProgress, nextAttempt, now(), nextError, seal(outcome.payload)]);
     await client.query('COMMIT');
     return outcome.result;
   } catch (error) {
