@@ -95,19 +95,19 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
         || null;
     },
     saveInvocation: async invocation => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al guardar el checkpoint de la herramienta.');
-      const entries = Array.isArray(record.payload.agentToolInvocations) ? record.payload.agentToolInvocations : [];
-      const pendingIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
-        && item?.role === invocation.role && item?.round === invocation.round
-        && item?.workspaceHash === invocation.workspaceHash && item.status === 'started');
-      const identityIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
-        && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash);
-      const index = invocation.status === 'started' && pendingIndex >= 0 ? pendingIndex : identityIndex;
-      const next = [...entries];
-      if (index >= 0) next[index] = { ...next[index], ...invocation };
-      else next.push(invocation);
-      await updateJob(jobId, { payload: { agentToolInvocations: next.slice(-100) } });
+      const saved = await mutateJobPayload(jobId, payload => {
+        const entries = Array.isArray(payload.agentToolInvocations) ? payload.agentToolInvocations : [];
+        const pendingIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
+          && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash && item.status === 'started');
+        const identityIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
+          && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash);
+        const index = invocation.status === 'started' && pendingIndex >= 0 ? pendingIndex : identityIndex;
+        const next = [...entries];
+        if (index >= 0) next[index] = { ...next[index], ...invocation };
+        else next.push(invocation);
+        return { payload: { ...payload, agentToolInvocations: next.slice(-100) }, result: true };
+      });
+      if (!saved) throw new Error('La tarea dejó de existir al guardar el checkpoint de la herramienta.');
     },
     saveArtifactVersion: async (input, sourceRole) => {
       const result = await mutateJobPayload(jobId, payload => {
