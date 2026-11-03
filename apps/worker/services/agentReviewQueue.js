@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 const ROLES = new Set(['coordinador', 'arquitecto', 'esceptico', 'arbitro', 'auditor', 'validador', 'desarrollador']);
-const STATUSES = new Set(['in_review', 'correction_queued', 'correcting', 'superseded', 'ready_for_supervisor', 'approved']);
 const MAX_ARTIFACTS = 200;
 const MAX_REVIEWS = 500;
 const MAX_CORRECTIONS = 200;
@@ -34,7 +33,7 @@ export function submitArtifactVersion(payload = {}, input, sourceRole, at = new 
   const same = artifacts.filter(a => a?.taskId === taskId && a?.artifactId === artifactId);
   const previous = same.sort((a, b) => Number(b.version) - Number(a.version))[0];
   const version = previous ? Number(previous.version) + 1 : 1;
-  const versionId = artifactId + ':v' + version;
+  const versionId = taskId + ':' + artifactId + ':v' + version;
   if (artifacts.some(a => a?.versionId === versionId)) throw new Error('La versión ya existe.');
   const digest = hash(content);
   const nextArtifacts = artifacts.map(a => a?.taskId === taskId && a?.artifactId === artifactId && a.versionId === previous?.versionId
@@ -155,10 +154,12 @@ export function completeCorrectionDelivery(payload = {}, correctionId, newVersio
   const correction = queue.find(c => c?.correctionId === id);
   if (!correction) throw new Error('Corrección inexistente.');
   const version = list(payload, 'agentArtifactVersions').find(a => a?.versionId === versionId);
-  if (!version || version.predecessorVersionId !== correction.targetVersionId) {
+  if (correction.status !== 'in_progress') throw new Error('La corrección debe estar reclamada antes de registrar su entrega.');
+  if (!version || version.taskId !== correction.taskId || version.artifactId !== correction.artifactId || version.predecessorVersionId !== correction.targetVersionId) {
     throw new Error('La nueva versión debe declarar como predecesora la versión corregida.');
   }
   if (version.authorRole !== correction.authorRole) throw new Error('La corrección debe entregarla el agente responsable original.');
+  if (correction.deliveredVersionId) throw new Error('La corrección ya tiene una entrega vinculada.');
   return {
     ...payload,
     agentCorrectionQueue: queue.map(c => c?.correctionId === id
