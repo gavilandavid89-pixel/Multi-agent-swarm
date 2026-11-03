@@ -25,6 +25,22 @@ function boundCorrectionHistory(items) {
   return [...completed.slice(-room), ...active].sort((a, b) => Number(a.queueSequence) - Number(b.queueSequence));
 }
 
+function boundArtifactHistory(items, heads) {
+  if (items.length <= MAX_ARTIFACTS) return items;
+  // Current heads are live pointers and must never be trimmed away. The cap
+  // applies to historical versions first; it may be exceeded if there are
+  // more live artifacts than the nominal history budget.
+  const headIds = new Set(Object.values(heads || {}));
+  const current = items.filter(item => headIds.has(item?.versionId));
+  const history = items.filter(item => !headIds.has(item?.versionId));
+  const room = Math.max(0, MAX_ARTIFACTS - current.length);
+  return [...history.slice(-room), ...current].sort((a, b) =>
+    String(a.taskId).localeCompare(String(b.taskId)) ||
+    String(a.artifactId).localeCompare(String(b.artifactId)) ||
+    Number(a.version) - Number(b.version)
+  );
+}
+
 /**
  * Adds an immutable artifact version. Only metadata is changed on previous
  * versions; their content and hash are never overwritten.
@@ -56,15 +72,16 @@ export function submitArtifactVersion(payload = {}, input, sourceRole, at = new 
     reviewIds: [], correctionTaskIds: []
   };
   const current = { ...(payload || {}) };
+  const heads = {
+    ...(current.agentArtifactHeads || {}),
+    [taskId + '|' + artifactId]: versionId
+  };
   return {
     ...current,
-    agentArtifactVersions: [...nextArtifacts, record].slice(-MAX_ARTIFACTS),
-    agentArtifactHeads: {
-      ...(current.agentArtifactHeads || {}),
-      [taskId + '|' + artifactId]: versionId
-    },
+    agentArtifactVersions: boundArtifactHistory([...nextArtifacts, record], heads),
+    agentArtifactHeads: heads,
     agentArtifactReviews: list(current, 'agentArtifactReviews').slice(-MAX_REVIEWS),
-    agentCorrectionQueue: list(current, 'agentCorrectionQueue').slice(-MAX_CORRECTIONS)
+    agentCorrectionQueue: boundCorrectionHistory(list(current, 'agentCorrectionQueue'))
   };
 }
 
