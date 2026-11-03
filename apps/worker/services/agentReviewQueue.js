@@ -158,8 +158,13 @@ export function claimNextCorrection(payload = {}, authorRole, { busy = false } =
   if (!ROLES.has(role)) throw new Error('Rol responsable inválido.');
   if (busy) return { ...payload, claimedCorrection: null, reason: 'author_busy' };
   const queue = list(payload, 'agentCorrectionQueue');
-  const next = queue.filter(c => c?.authorRole === role && c.status === 'queued')
-    .sort((a, b) => Number(a.queueSequence) - Number(b.queueSequence))[0];
+  const nowMs = Date.parse(at);
+  const leaseMs = 15 * 60 * 1000;
+  const next = queue.filter(c => {
+    if (c?.authorRole !== role) return false;
+    if (c.status === 'queued') return true;
+    return c.status === 'in_progress' && Number.isFinite(nowMs) && Number.isFinite(Date.parse(c.claimedAt)) && nowMs - Date.parse(c.claimedAt) >= leaseMs;
+  }).sort((a, b) => Number(a.queueSequence) - Number(b.queueSequence))[0];
   if (!next) return { ...payload, claimedCorrection: null, reason: 'queue_empty' };
   const head = getCurrentArtifactVersion(payload, { taskId: next.taskId, artifactId: next.artifactId });
   const stale = !head || head.versionId !== next.targetVersionId || head.contentHash !== next.targetVersionHash;
