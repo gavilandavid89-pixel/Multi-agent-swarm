@@ -121,8 +121,9 @@ export function reviewArtifactVersion(payload = {}, input, reviewerRole, at = ne
     if (a?.versionId !== versionId) return a;
     const reviewIds = [...(Array.isArray(a.reviewIds) ? a.reviewIds : []), reviewId].slice(-100);
     let status = a.status;
+    const hasActiveCorrection = corrections.some(item => item?.targetVersionId === versionId && ['queued', 'in_progress', 'needs_revalidation'].includes(item?.status));
     if (!stale && verdict === 'needs_correction') status = 'correction_queued';
-    if (!stale && verdict === 'approve') status = 'ready_for_supervisor';
+    if (!stale && verdict === 'approve') status = hasActiveCorrection ? 'correction_queued' : 'ready_for_supervisor';
     return { ...a, reviewIds, status };
   });
   let correction = null;
