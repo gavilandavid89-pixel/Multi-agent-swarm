@@ -142,3 +142,30 @@ test('history cap never silently discards active correction requests', () => {
   }, 'auditor', '2026-01-01T00:03:00.000Z');
   assert.ok(next.agentCorrectionQueue.some(c => c.correctionId === active.correctionId));
 });
+
+
+test('new deliveries preserve every current artifact head beyond the history budget', () => {
+  let state = {};
+  for (let i = 0; i < 205; i++) {
+    state = submitArtifactVersion(state, {
+      taskId: 'task-' + i, artifactId: 'report', title: 'Report ' + i, content: 'content-' + i
+    }, 'desarrollador', new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString());
+  }
+  assert.equal(state.agentArtifactHeads['task-0|report'], 'task-0:report:v1');
+  assert.ok(state.agentArtifactVersions.some(v => v.versionId === 'task-0:report:v1'));
+  assert.equal(state.agentArtifactHeads['task-204|report'], 'task-204:report:v1');
+});
+
+test('new deliveries do not trim queued correction work', () => {
+  let state = deliver({}, 'v1', '2026-01-01T00:00:00.000Z');
+  state = reviewArtifactVersion(state, {
+    versionId: 'task-1:report:v1', verdict: 'needs_correction', summary: 'Keep queued fix'
+  }, 'validador', '2026-01-01T00:01:00.000Z');
+  const correctionId = state.agentCorrectionQueue[0].correctionId;
+  for (let i = 0; i < 205; i++) {
+    state = submitArtifactVersion(state, {
+      taskId: 'other-' + i, artifactId: 'artifact', title: 'Other', content: 'other content'
+    }, 'arquitecto', new Date(Date.UTC(2026, 0, 2, 0, i)).toISOString());
+  }
+  assert.ok(state.agentCorrectionQueue.some(c => c.correctionId === correctionId && c.status === 'queued'));
+});
