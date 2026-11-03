@@ -429,3 +429,24 @@ export async function claimAgentCorrectionForJob(jobId, authorRole, { busy = fal
     throw error;
   } finally { client.release(); }
 }
+
+/** Atomically transform a job payload under a PostgreSQL row lock. The mutator must be synchronous and side-effect free. */
+export async function mutateJobPayload(id, mutator) {
+  if (typeof mutator !== 'function') throw new TypeError('mutator debe ser una función.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
+    const row = rows[0];
+    if (!row) { await client.query('ROLLBACK'); return null; }
+    const payload = unseal(row.encrypted_payload);
+    const outcome = mutator(payload);
+    if (!outcome || typeof outcome !== 'object' || !outcome.payload || typeof outcome.payload !== 'object') throw new Error('El mutator debe devolver { payload, result }.');
+    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [id, now(), seal(outcome.payload)]);
+    await client.query('COMMIT');
+    return outcome.result;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
+}
