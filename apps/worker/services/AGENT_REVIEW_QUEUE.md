@@ -17,3 +17,9 @@ The functions are pure transformations over the existing persisted job payload s
 `node --test services/agentReviewQueue.test.js`
 
 No provider API calls are made by these tests.
+
+## History retention safeguards
+
+- Current artifact-head versions are preserved even when the nominal history budget is exceeded; the head map must never point to a version that was silently evicted.
+- When queue history is trimmed, terminal correction entries are discarded first. Queued, in-progress, and needs-revalidation work is retained even if that means exceeding the nominal queue-history cap.
+- These safeguards prevent memory-oriented caps from silently deleting live pointers or unfinished work. They do not replace durable database transactions or multi-worker concurrency controls; those must be covered by the runtime integration.
