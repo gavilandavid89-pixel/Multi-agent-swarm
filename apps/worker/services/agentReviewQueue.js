@@ -15,6 +15,16 @@ function safeId(value, label = 'ID') {
 }
 function list(payload, key) { return Array.isArray(payload?.[key]) ? payload[key] : []; }
 
+// Never evict work that has not reached a terminal state just to satisfy a
+// history cap. Completed queue entries are the first candidates for trimming.
+function boundCorrectionHistory(items) {
+  if (items.length <= MAX_CORRECTIONS) return items;
+  const active = items.filter(item => ['queued', 'in_progress', 'needs_revalidation'].includes(item?.status));
+  const completed = items.filter(item => !['queued', 'in_progress', 'needs_revalidation'].includes(item?.status));
+  const room = Math.max(0, MAX_CORRECTIONS - active.length);
+  return [...completed.slice(-room), ...active].sort((a, b) => Number(a.queueSequence) - Number(b.queueSequence));
+}
+
 /**
  * Adds an immutable artifact version. Only metadata is changed on previous
  * versions; their content and hash are never overwritten.
@@ -109,7 +119,7 @@ export function reviewArtifactVersion(payload = {}, input, reviewerRole, at = ne
       summary, evidence: clean(input.evidence, 3000), createdAt: at,
       queueSequence: corrections.length ? Math.max(...corrections.map(c => Number(c.queueSequence) || 0)) + 1 : 1
     };
-    if (!corrections.some(c => c?.correctionId === correctionId)) corrections = [...corrections, correction].slice(-MAX_CORRECTIONS);
+    if (!corrections.some(c => c?.correctionId === correctionId)) corrections = boundCorrectionHistory([...corrections, correction]);
   }
   const updated = nextArtifacts.map(a => a?.versionId === versionId && correction
     ? { ...a, correctionTaskIds: [...(Array.isArray(a.correctionTaskIds) ? a.correctionTaskIds : []), correction.correctionId].slice(-100) }
