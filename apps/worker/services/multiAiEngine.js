@@ -371,34 +371,27 @@ async function startAgent(jobId, stage, progress, agent, content) {
   return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
 }
 async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, checkpointSignal = 'result') {
-  const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const at = new Date().toISOString();
-  const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
-  for (let i = transcript.length - 1; i >= 0; i--) {
-    if (transcript[i].agent === agent && transcript[i].type === 'thinking') {
-      transcript.splice(i, 1);
-      break;
+  const result = await mutateJobPayload(jobId, (currentPayload) => {
+    const at = new Date().toISOString();
+    const transcript = Array.isArray(currentPayload.transcript) ? [...currentPayload.transcript] : [];
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      if (transcript[i].agent === agent && transcript[i].type === 'thinking') { transcript.splice(i, 1); break; }
     }
-  }
-  transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
-  const savedConversations = current.payload.agentConversations && typeof current.payload.agentConversations === 'object'
-    ? current.payload.agentConversations : {};
-  // A stage checkpoint is durable proof that its provider conversation no longer needs replay.
-  // Keep active snapshots for interrupted stages; remove completed snapshots to bound payload growth.
-  const retainedConversations = Object.fromEntries(Object.entries(savedConversations)
-    .filter(([, snapshot]) => snapshot?.status !== 'completed'));
-  const checkpointPayload = { ...current.payload, ...extra };
-  const activeAgentTaskId = current.payload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
-  const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
-  const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
-  const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
-  const isInfrastructureBlock = checkpointSignal === 'blocked';
-  const feed = appendAgentFeedEvent(taskPayload, {
-    agent, stage, type: isInfrastructureBlock ? 'blocker' : 'result',
-    title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage,
-    body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at
+    transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
+    const savedConversations = currentPayload.agentConversations && typeof currentPayload.agentConversations === 'object' ? currentPayload.agentConversations : {};
+    const retainedConversations = Object.fromEntries(Object.entries(savedConversations).filter(([, snapshot]) => snapshot?.status !== 'completed'));
+    const checkpointPayload = { ...currentPayload, ...extra };
+    const activeAgentTaskId = currentPayload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
+    const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
+    const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
+    const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
+    const isInfrastructureBlock = checkpointSignal === 'blocked';
+    const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: isInfrastructureBlock ? 'blocker' : 'result', title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage, body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at });
+    const nextPayload = { ...currentPayload, transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, agentConversations: retainedConversations, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory };
+    return { payload: nextPayload, jobPatch: { status: 'running', stage, progress, ...publicPatch }, result: { id: jobId, status: 'running', stage, progress } };
   });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, agentConversations: retainedConversations, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory }, ...publicPatch });
+  if (!result) throw new Error('La tarea dejó de existir al guardar el checkpoint.');
+  return result;
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
