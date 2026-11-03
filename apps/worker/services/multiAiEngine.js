@@ -487,7 +487,7 @@ async function runJob(jobId) {
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
     }
-    const artifactVersion = await persistDeliveryVersion(jobId, delivery);
+    let artifactVersion = await persistDeliveryVersion(jobId, delivery);
     if (!artifactVersion) throw new Error('No se pudo guardar la versión verificable de la entrega.');
     payload = (await getPayload(jobId))?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
@@ -602,6 +602,16 @@ async function runJob(jobId) {
         }
         return { blocked: true, reason: 'runner-infra-error' };
       }
+      const reviewSnapshot = await getPayload(jobId);
+      const pendingPeerCorrections = (Array.isArray(reviewSnapshot?.payload?.agentCorrectionQueue) ? reviewSnapshot.payload.agentCorrectionQueue : [])
+        .filter(item => item?.targetVersionId === artifactVersion?.versionId && item.status === 'queued');
+      if (pendingPeerCorrections.length) {
+        validation = {
+          ...validation, verdict: 'NEEDS_CHANGES',
+          findings: [...(validation?.findings || []), ...pendingPeerCorrections.map(item => 'Corrección pendiente de revisión por pares: ' + item.summary + (item.evidence ? ' Evidencia: ' + item.evidence : ''))].slice(0, 30),
+          summary: 'La revisión por pares dejó correcciones pendientes para esta versión; no se puede cerrar la tarea todavía.'
+        };
+      }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const runtimeTestsExecuted = Array.isArray(syntax.runnerExecution?.runtimeChecks)
           && syntax.runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
@@ -637,6 +647,7 @@ async function runJob(jobId) {
       const mergedDelivery = correctedDelivery;
       const correctedArtifactVersion = await persistDeliveryVersion(jobId, mergedDelivery, queuedCorrection?.correctionId || null);
       if (!correctedArtifactVersion) throw new Error('No se pudo guardar la versión corregida de la entrega.');
+      artifactVersion = correctedArtifactVersion;
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);
