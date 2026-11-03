@@ -8,6 +8,7 @@ import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, isUnlimitedBudgetTask } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
+import { submitArtifactVersion, reviewArtifactVersion, listArtifactLineage } from './agentReviewQueue.js';
 import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks, agentStageTaskId } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_TRANSCRIPT_ENTRIES = 150;
@@ -101,6 +102,26 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       if (index >= 0) next[index] = { ...next[index], ...invocation };
       else next.push(invocation);
       await updateJob(jobId, { payload: { agentToolInvocations: next.slice(-100) } });
+    },
+    saveArtifactVersion: async (input, sourceRole) => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al registrar la entrega versionada.');
+      const next = submitArtifactVersion(record.payload, input, sourceRole);
+      await updateJob(jobId, { payload: { agentArtifactVersions: next.agentArtifactVersions, agentArtifactHeads: next.agentArtifactHeads, agentCorrectionQueue: next.agentCorrectionQueue, agentArtifactReviews: next.agentArtifactReviews } });
+      const version = next.agentArtifactVersions.find(item => item.versionId === next.agentArtifactHeads[input.taskId + '|' + input.artifactId]);
+      return { versionId: version.versionId, version: version.version, contentHash: version.contentHash, status: version.status, predecessorVersionId: version.predecessorVersionId, message: 'Entrega versionada guardada; requiere revisión independiente y aprobación final del supervisor.' };
+    },
+    reviewArtifact: async (input, sourceRole) => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al registrar la revisión.');
+      const next = reviewArtifactVersion(record.payload, input, sourceRole);
+      await updateJob(jobId, { payload: { agentArtifactVersions: next.agentArtifactVersions, agentArtifactHeads: next.agentArtifactHeads, agentCorrectionQueue: next.agentCorrectionQueue, agentArtifactReviews: next.agentArtifactReviews } });
+      return { review: next.review, correction: next.correction, message: next.review.stale ? 'La revisión corresponde a una versión antigua y requiere revalidación.' : next.correction ? 'Corrección encolada para el autor original; no interrumpe su tarea activa.' : next.review.verdict === 'approve' ? 'Revisión por pares registrada; la aprobación final sigue siendo del supervisor.' : 'Revisión registrada.' };
+    },
+    getArtifactLineage: async input => {
+      const record = await getPayload(jobId);
+      if (!record) throw new Error('La tarea dejó de existir al consultar las versiones.');
+      return listArtifactLineage(record.payload, input);
     },
     listFindings: async agentRole => {
       const record = await getPayload(jobId);
