@@ -18,7 +18,11 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
   const stored = initial?.payload?.agentWorkspaces?.[workspaceId];
   if (!Array.isArray(stored)) {
     const seed = extractFileList(seedDelivery);
-    if (seed.length) await updateJob(jobId, { payload: { agentWorkspaces: { ...(initial?.payload?.agentWorkspaces || {}), [workspaceId]: seed } } });
+    if (seed.length) await mutateJobPayload(jobId, payload => {
+      const workspaces = payload.agentWorkspaces && typeof payload.agentWorkspaces === 'object' ? payload.agentWorkspaces : {};
+      if (Array.isArray(workspaces[workspaceId])) return { payload, result: false };
+      return { payload: { ...payload, agentWorkspaces: { ...workspaces, [workspaceId]: seed } }, result: true };
+    });
   }
   const readFiles = async () => {
     const record = await getPayload(jobId);
@@ -26,9 +30,11 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     return Array.isArray(value) ? value.map(file => ({ path: file.path, content: file.content })) : [];
   };
   const writeFiles = async files => {
-    const record = await getPayload(jobId);
-    const all = record?.payload?.agentWorkspaces || {};
-    await updateJob(jobId, { payload: { agentWorkspaces: { ...all, [workspaceId]: files } } });
+    const saved = await mutateJobPayload(jobId, payload => {
+      const all = payload.agentWorkspaces && typeof payload.agentWorkspaces === 'object' ? payload.agentWorkspaces : {};
+      return { payload: { ...payload, agentWorkspaces: { ...all, [workspaceId]: files } }, result: true };
+    });
+    if (!saved) throw new Error('La tarea dejó de existir al guardar el workspace del agente.');
   };
   const workspace = {
     list: readFiles,
