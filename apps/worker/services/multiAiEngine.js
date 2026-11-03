@@ -192,23 +192,20 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       return saved && saved.baseHash === baseHash ? saved : null;
     },
     saveConversation: async snapshot => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al guardar la conversación del agente.');
       const key = workspaceId + ':' + String(snapshot.baseHash || '');
       const nextSnapshot = { ...snapshot, workspaceId, updatedAt: new Date().toISOString() };
-      const serialized = JSON.stringify(nextSnapshot);
-      if (serialized.length > 900000) {
+      if (JSON.stringify(nextSnapshot).length > 900000) {
         const error = new Error('El checkpoint de conversación supera el límite seguro de 900 KB; se conserva el journal de herramientas, pero no se puede garantizar la reanudación exacta del turno.');
         error.code = 'AGENT_CONVERSATION_CHECKPOINT_TOO_LARGE';
         throw error;
       }
-      const current = record.payload.agentConversations && typeof record.payload.agentConversations === 'object'
-        ? record.payload.agentConversations : {};
-      const entries = { ...current, [key]: nextSnapshot };
-      const keep = Object.entries(entries)
-        .sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || '')))
-        .slice(0, 16);
-      await updateJob(jobId, { payload: { agentConversations: Object.fromEntries(keep) } });
+      const saved = await mutateJobPayload(jobId, payload => {
+        const current = payload.agentConversations && typeof payload.agentConversations === 'object' ? payload.agentConversations : {};
+        const entries = { ...current, [key]: nextSnapshot };
+        const keep = Object.entries(entries).sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || ''))).slice(0, 16);
+        return { payload: { ...payload, agentConversations: Object.fromEntries(keep) }, result: true };
+      });
+      if (!saved) throw new Error('La tarea dejó de existir al guardar la conversación del agente.');
     }
   };
   return {
