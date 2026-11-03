@@ -1,5 +1,5 @@
 import { agenteArquitecto, agenteEsceptico, agenteArbitro, agenteCoordinador, agenteAuditorCoherencia, agenteDesarrollador, agenteValidador } from './aiProviders.js';
-import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob } from './store.js';
+import { getPayload, updateJob, saveArtifacts, recordTokenUsage, withJobLock, createContinuationJob, mutateJobPayload, claimAgentCorrectionForJob } from './store.js';
 import { checkJavascriptSyntax, extractFiles, extractFileList } from './codeChecks.js';
 import { runAgentCommand, runProjectToolchainChecks, getAgentJobStatus, cancelAgentJob, getAgentJobArtifact } from './runnerClient.js';
 import { deriveAgentWorkspaceId, mergeAgentWorkspaceChanges } from './agentWorkspace.js';
@@ -8,16 +8,35 @@ import { getValidationResumeState } from './validationResume.js';
 import { buildBudgetPausePatch, isUnlimitedBudgetTask } from './tokenAccounting.js';
 import { getDeferredCooldownMs, getScheduledJobDelayMs } from './providerRetryPolicy.js';
 import { recordAgentCheckpoint } from './agentMemory.js';
+import { submitArtifactVersion, reviewArtifactVersion, listArtifactLineage, getCurrentArtifactVersion, completeCorrectionDelivery } from './agentReviewQueue.js';
 import { recordAgentFinding, listAgentFindings, recordAgentPost, listAgentPosts, upsertAgentTask, listAgentTasks, agentStageTaskId } from './agentCoordination.js';
 // Entrega inicial y hasta dos ciclos correctivos; cada ronda pasa por auditoría y validación.
 const MAX_TRANSCRIPT_ENTRIES = 150;
+async function persistDeliveryVersion(jobId, content, correctionId = null) {
+  if (Buffer.byteLength(String(content || ''), 'utf8') > 512 * 1024) {
+    if (correctionId) throw new Error('La entrega corregida supera 512 KiB; no se puede cerrar la corrección sin una versión verificable.');
+    return null;
+  }
+  return mutateJobPayload(jobId, payload => {
+    const identity = { taskId: jobId, artifactId: 'delivery' };
+    const current = getCurrentArtifactVersion(payload, identity);
+    const next = current?.content === content ? payload : submitArtifactVersion(payload, { ...identity, title: 'Entrega principal', content }, 'desarrollador');
+    const head = getCurrentArtifactVersion(next, identity);
+    const persisted = correctionId ? completeCorrectionDelivery(next, correctionId, head.versionId) : next;
+    return { payload: persisted, result: { taskId: jobId, artifactId: 'delivery', versionId: head.versionId, contentHash: head.contentHash, predecessorVersionId: head.predecessorVersionId } };
+  });
+}
 async function createAgentToolContext(jobId, round, role = 'desarrollador', seedDelivery = '') {
   const workspaceId = deriveAgentWorkspaceId(jobId, role, 'round-' + round);
   const initial = await getPayload(jobId);
   const stored = initial?.payload?.agentWorkspaces?.[workspaceId];
   if (!Array.isArray(stored)) {
     const seed = extractFileList(seedDelivery);
-    if (seed.length) await updateJob(jobId, { payload: { agentWorkspaces: { ...(initial?.payload?.agentWorkspaces || {}), [workspaceId]: seed } } });
+    if (seed.length) await mutateJobPayload(jobId, payload => {
+      const workspaces = payload.agentWorkspaces && typeof payload.agentWorkspaces === 'object' ? payload.agentWorkspaces : {};
+      if (Array.isArray(workspaces[workspaceId])) return { payload, result: false };
+      return { payload: { ...payload, agentWorkspaces: { ...workspaces, [workspaceId]: seed } }, result: true };
+    });
   }
   const readFiles = async () => {
     const record = await getPayload(jobId);
@@ -25,9 +44,11 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
     return Array.isArray(value) ? value.map(file => ({ path: file.path, content: file.content })) : [];
   };
   const writeFiles = async files => {
-    const record = await getPayload(jobId);
-    const all = record?.payload?.agentWorkspaces || {};
-    await updateJob(jobId, { payload: { agentWorkspaces: { ...all, [workspaceId]: files } } });
+    const saved = await mutateJobPayload(jobId, payload => {
+      const all = payload.agentWorkspaces && typeof payload.agentWorkspaces === 'object' ? payload.agentWorkspaces : {};
+      return { payload: { ...payload, agentWorkspaces: { ...all, [workspaceId]: files } }, result: true };
+    });
+    if (!saved) throw new Error('La tarea dejó de existir al guardar el workspace del agente.');
   };
   const workspace = {
     list: readFiles,
@@ -88,75 +109,88 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
         || null;
     },
     saveInvocation: async invocation => {
+      const saved = await mutateJobPayload(jobId, payload => {
+        const entries = Array.isArray(payload.agentToolInvocations) ? payload.agentToolInvocations : [];
+        const pendingIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
+          && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash && item.status === 'started');
+        const identityIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
+          && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash);
+        const index = invocation.status === 'started' && pendingIndex >= 0 ? pendingIndex : identityIndex;
+        const next = [...entries];
+        if (index >= 0) next[index] = { ...next[index], ...invocation };
+        else next.push(invocation);
+        return { payload: { ...payload, agentToolInvocations: next.slice(-100) }, result: true };
+      });
+      if (!saved) throw new Error('La tarea dejó de existir al guardar el checkpoint de la herramienta.');
+    },
+    saveArtifactVersion: async (input, sourceRole) => {
+      const result = await mutateJobPayload(jobId, payload => {
+        const next = submitArtifactVersion(payload, input, sourceRole);
+        const version = next.agentArtifactVersions.find(item => item.versionId === next.agentArtifactHeads[input.taskId + '|' + input.artifactId]);
+        return { payload: next, result: { versionId: version.versionId, version: version.version, contentHash: version.contentHash, status: version.status, predecessorVersionId: version.predecessorVersionId, message: 'Entrega versionada guardada; requiere revisión independiente y aprobación final del supervisor.' } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al registrar la entrega versionada.');
+      return result;
+    },
+    reviewArtifact: async (input, sourceRole) => {
+      const result = await mutateJobPayload(jobId, payload => {
+        const next = reviewArtifactVersion(payload, input, sourceRole);
+        const { review, correction, ...persisted } = next;
+        return { payload: persisted, result: { review, correction, message: review.stale ? 'La revisión corresponde a una versión antigua y requiere revalidación.' : correction ? 'Corrección encolada para el autor original; no interrumpe su tarea activa.' : review.verdict === 'approve' ? 'Revisión por pares registrada; la aprobación final sigue siendo del supervisor.' : 'Revisión registrada.' } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al registrar la revisión.');
+      return result;
+    },
+    getArtifactLineage: async input => {
       const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al guardar el checkpoint de la herramienta.');
-      const entries = Array.isArray(record.payload.agentToolInvocations) ? record.payload.agentToolInvocations : [];
-      const pendingIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
-        && item?.role === invocation.role && item?.round === invocation.round
-        && item?.workspaceHash === invocation.workspaceHash && item.status === 'started');
-      const identityIndex = entries.findIndex(item => item?.name === invocation.name && item?.argsHash === invocation.argsHash
-        && item?.role === invocation.role && item?.round === invocation.round && item?.workspaceHash === invocation.workspaceHash);
-      const index = invocation.status === 'started' && pendingIndex >= 0 ? pendingIndex : identityIndex;
-      const next = [...entries];
-      if (index >= 0) next[index] = { ...next[index], ...invocation };
-      else next.push(invocation);
-      await updateJob(jobId, { payload: { agentToolInvocations: next.slice(-100) } });
+      if (!record) throw new Error('La tarea dejó de existir al consultar las versiones.');
+      return listArtifactLineage(record.payload, input);
     },
     listFindings: async agentRole => {
       const record = await getPayload(jobId);
       return listAgentFindings(record?.payload, agentRole);
     },
     reportFinding: async (finding, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al registrar el hallazgo.');
-      const update = recordAgentFinding(record.payload, finding, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, update.notifications);
-      await updateJob(jobId, { payload: { agentFindings: update.findings, transcript } });
-      return {
-        findingId: update.finding.id, created: update.created,
-        status: update.finding.status, notifiedRoles: update.finding.targetRoles,
-        message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
-      };
+      const result = await mutateJobPayload(jobId, payload => {
+        const update = recordAgentFinding(payload, finding, sourceRole);
+        const transcript = appendEntries(payload.transcript, update.notifications);
+        return { payload: { ...payload, agentFindings: update.findings, transcript }, result: {
+          findingId: update.finding.id, created: update.created, status: update.finding.status, notifiedRoles: update.finding.targetRoles,
+          message: update.created ? 'Hallazgo guardado y enrutado a los roles responsables.' : 'Hallazgo duplicado; se actualizó su contador sin enviar otra notificación.'
+        } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al registrar el hallazgo.');
+      return result;
     },
     publishPost: async (post, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al publicar en el feed.');
-      const update = recordAgentPost(record.payload, post, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, [{
-        at: update.post.createdAt, agent: sourceRole, type: 'agent_feed',
-        content: '[' + update.post.type + '] ' + update.post.title + ': ' + update.post.body
-      }]);
-      await updateJob(jobId, { payload: { agentFeed: update.posts, transcript } });
-      return { postId: update.post.id, createdAt: update.post.createdAt, visibleTo: 'all_agents' };
+      const result = await mutateJobPayload(jobId, payload => {
+        const update = recordAgentPost(payload, post, sourceRole);
+        const transcript = appendEntries(payload.transcript, [{ at: update.post.createdAt, agent: sourceRole, type: 'agent_feed', content: '[' + update.post.type + '] ' + update.post.title + ': ' + update.post.body }]);
+        return { payload: { ...payload, agentFeed: update.posts, transcript }, result: { postId: update.post.id, createdAt: update.post.createdAt, visibleTo: 'all_agents' } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al publicar en el feed.');
+      return result;
     },
     listPosts: async options => {
       const record = await getPayload(jobId);
       return listAgentPosts(record?.payload, options);
     },
     updateTask: async (task, sourceRole) => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al actualizar el tablero.');
-      const existingTask = Array.isArray(record.payload.agentTasks)
-        ? record.payload.agentTasks.find(item => item?.taskId === task.taskId) : null;
-      const normalizedTask = {
-        ...task,
-        title: String(task.title || existingTask?.title || task.summary || task.taskId || 'Tarea sin título').slice(0, 160)
-      };
-      const update = upsertAgentTask(record.payload, normalizedTask, sourceRole);
-      const postType = update.task.status === 'blocked' ? 'blocker'
-        : update.task.status === 'done' ? 'result'
-        : update.task.status === 'in_review' ? 'handoff' : 'progress';
-      const feed = recordAgentPost({ ...record.payload, agentFeed: record.payload.agentFeed || [] }, {
-        type: postType, title: 'Tarea: ' + update.task.title,
-        body: 'Estado: ' + update.task.status + '. Responsable: ' + update.task.assignedRole + '. Próximo paso: ' + (update.task.nextStep || 'No especificado') + '. ' + update.task.summary,
-        taskId: update.task.taskId
-      }, sourceRole);
-      const transcript = appendEntries(record.payload.transcript, [{
-        at: update.task.updatedAt, agent: sourceRole, type: 'agent_task',
-        content: 'Tarea "' + update.task.title + '" → ' + update.task.status + ' (responsable: ' + update.task.assignedRole + ')'
-      }]);
-      await updateJob(jobId, { payload: { agentTasks: update.tasks, agentFeed: feed.posts, transcript } });
-      return { task: update.task, created: update.created, feedPostId: feed.post.id };
+      const result = await mutateJobPayload(jobId, payload => {
+        const existingTask = Array.isArray(payload.agentTasks) ? payload.agentTasks.find(item => item?.taskId === task.taskId) : null;
+        const normalizedTask = { ...task, title: String(task.title || existingTask?.title || task.summary || task.taskId || 'Tarea sin título').slice(0, 160) };
+        const update = upsertAgentTask(payload, normalizedTask, sourceRole);
+        const postType = update.task.status === 'blocked' ? 'blocker' : update.task.status === 'done' ? 'result' : update.task.status === 'in_review' ? 'handoff' : 'progress';
+        const feed = recordAgentPost({ ...payload, agentFeed: payload.agentFeed || [] }, {
+          type: postType, title: 'Tarea: ' + update.task.title,
+          body: 'Estado: ' + update.task.status + '. Responsable: ' + update.task.assignedRole + '. Próximo paso: ' + (update.task.nextStep || 'No especificado') + '. ' + update.task.summary,
+          taskId: update.task.taskId
+        }, sourceRole);
+        const transcript = appendEntries(payload.transcript, [{ at: update.task.updatedAt, agent: sourceRole, type: 'agent_task', content: 'Tarea "' + update.task.title + '" → ' + update.task.status + ' (responsable: ' + update.task.assignedRole + ')' }]);
+        return { payload: { ...payload, agentTasks: update.tasks, agentFeed: feed.posts, transcript }, result: { task: update.task, created: update.created, feedPostId: feed.post.id } };
+      });
+      if (!result) throw new Error('La tarea dejó de existir al actualizar el tablero.');
+      return result;
     },
     listTasks: async options => {
       const record = await getPayload(jobId);
@@ -172,23 +206,20 @@ async function createAgentToolContext(jobId, round, role = 'desarrollador', seed
       return saved && saved.baseHash === baseHash ? saved : null;
     },
     saveConversation: async snapshot => {
-      const record = await getPayload(jobId);
-      if (!record) throw new Error('La tarea dejó de existir al guardar la conversación del agente.');
       const key = workspaceId + ':' + String(snapshot.baseHash || '');
       const nextSnapshot = { ...snapshot, workspaceId, updatedAt: new Date().toISOString() };
-      const serialized = JSON.stringify(nextSnapshot);
-      if (serialized.length > 900000) {
+      if (JSON.stringify(nextSnapshot).length > 900000) {
         const error = new Error('El checkpoint de conversación supera el límite seguro de 900 KB; se conserva el journal de herramientas, pero no se puede garantizar la reanudación exacta del turno.');
         error.code = 'AGENT_CONVERSATION_CHECKPOINT_TOO_LARGE';
         throw error;
       }
-      const current = record.payload.agentConversations && typeof record.payload.agentConversations === 'object'
-        ? record.payload.agentConversations : {};
-      const entries = { ...current, [key]: nextSnapshot };
-      const keep = Object.entries(entries)
-        .sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || '')))
-        .slice(0, 16);
-      await updateJob(jobId, { payload: { agentConversations: Object.fromEntries(keep) } });
+      const saved = await mutateJobPayload(jobId, payload => {
+        const current = payload.agentConversations && typeof payload.agentConversations === 'object' ? payload.agentConversations : {};
+        const entries = { ...current, [key]: nextSnapshot };
+        const keep = Object.entries(entries).sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || ''))).slice(0, 16);
+        return { payload: { ...payload, agentConversations: Object.fromEntries(keep) }, result: true };
+      });
+      if (!saved) throw new Error('La tarea dejó de existir al guardar la conversación del agente.');
     }
   };
   return {
@@ -277,8 +308,10 @@ async function retryNotice(jobId, info) {
   }
   const reason = String(info.reason || 'error temporal').slice(0, 240);
   console.warn('[worker][provider_retry]', JSON.stringify({ jobId, retry: info.retry, waitMs: info.wait, reason }));
-  const transcript = appendEntries(current.payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
-  await updateJob(jobId, { stage: 'Esperando al proveedor de IA', payload: { transcript, activeStage: current.payload.activeStage || null } });
+  await mutateJobPayload(jobId, payload => {
+    const transcript = appendEntries(payload.transcript, [{ at: new Date().toISOString(), agent: 'sistema', type: 'retry', content: `[${info.agent || 'Agente'} · ${info.stage || 'sin etapa'}] Reintento ${info.retry}; espera ${Math.ceil(info.wait / 1000)} s; motivo: ${reason}` }]);
+    return { payload: { ...payload, transcript, activeStage: payload.activeStage || null }, jobPatch: { stage: 'Esperando al proveedor de IA' }, result: true };
+  });
 }
 async function getOutputAllowance(jobId, requested, estimatedInputTokens = 0) {
   const current = await getPayload(jobId);
@@ -344,44 +377,40 @@ function updateAutomaticAgentTask(payload, { agent, stage, content, jobId, at, t
   }, role, at);
 }
 async function startAgent(jobId, stage, progress, agent, content) {
-  const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const at = new Date().toISOString();
-  const transcript = appendEntries(current.payload.transcript, [{ at, agent, type: 'thinking', content }]);
   const activeAgentTaskId = agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
-  const taskUpdate = updateAutomaticAgentTask(current.payload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
-  const taskPayload = { ...current.payload, agentTasks: taskUpdate.tasks };
-  const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
-  return updateJob(jobId, { status: 'running', stage, progress, error: null, payload: { transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId } });
+  const result = await mutateJobPayload(jobId, payload => {
+    const at = new Date().toISOString();
+    const transcript = appendEntries(payload.transcript, [{ at, agent, type: 'thinking', content }]);
+    const taskUpdate = updateAutomaticAgentTask(payload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
+    const taskPayload = { ...payload, agentTasks: taskUpdate.tasks };
+    const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: 'progress', title: 'Inició: ' + stage, body: content, jobId, taskId: activeAgentTaskId, at });
+    return { payload: { ...payload, transcript, agentTasks: taskUpdate.tasks, agentFeed: feed.posts, retryAt: null, providerBlock: null, activeStage: stage, activeAgentTaskId }, jobPatch: { status: 'running', stage, progress, error: null }, result: { id: jobId, status: 'running', stage, progress } };
+  });
+  if (!result) throw new Error('La tarea dejó de existir.');
+  return result;
 }
 async function checkpoint(jobId, stage, progress, agent, content, extra = {}, publicPatch = {}, checkpointSignal = 'result') {
-  const current = await getPayload(jobId); if (!current) throw new Error('La tarea dejó de existir.');
-  const at = new Date().toISOString();
-  const transcript = Array.isArray(current.payload.transcript) ? [...current.payload.transcript] : [];
-  for (let i = transcript.length - 1; i >= 0; i--) {
-    if (transcript[i].agent === agent && transcript[i].type === 'thinking') {
-      transcript.splice(i, 1);
-      break;
+  const result = await mutateJobPayload(jobId, (currentPayload) => {
+    const at = new Date().toISOString();
+    const transcript = Array.isArray(currentPayload.transcript) ? [...currentPayload.transcript] : [];
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      if (transcript[i].agent === agent && transcript[i].type === 'thinking') { transcript.splice(i, 1); break; }
     }
-  }
-  transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
-  const savedConversations = current.payload.agentConversations && typeof current.payload.agentConversations === 'object'
-    ? current.payload.agentConversations : {};
-  // A stage checkpoint is durable proof that its provider conversation no longer needs replay.
-  // Keep active snapshots for interrupted stages; remove completed snapshots to bound payload growth.
-  const retainedConversations = Object.fromEntries(Object.entries(savedConversations)
-    .filter(([, snapshot]) => snapshot?.status !== 'completed'));
-  const checkpointPayload = { ...current.payload, ...extra };
-  const activeAgentTaskId = current.payload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
-  const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
-  const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
-  const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
-  const isInfrastructureBlock = checkpointSignal === 'blocked';
-  const feed = appendAgentFeedEvent(taskPayload, {
-    agent, stage, type: isInfrastructureBlock ? 'blocker' : 'result',
-    title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage,
-    body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at
+    transcript.push({ at, agent, type: 'message', content: String(content ?? '').slice(0, 16000) });
+    const savedConversations = currentPayload.agentConversations && typeof currentPayload.agentConversations === 'object' ? currentPayload.agentConversations : {};
+    const retainedConversations = Object.fromEntries(Object.entries(savedConversations).filter(([, snapshot]) => snapshot?.status !== 'completed'));
+    const checkpointPayload = { ...currentPayload, ...extra };
+    const activeAgentTaskId = currentPayload.activeAgentTaskId || agentStageTaskId(roleForAgentLabel(agent, stage), agent, stage);
+    const taskUpdate = updateAutomaticAgentTask(checkpointPayload, { agent, stage, content, jobId, at, taskId: activeAgentTaskId });
+    const taskPayload = { ...checkpointPayload, agentTasks: taskUpdate.tasks };
+    const memory = recordAgentCheckpoint(taskPayload, { agent, stage, content });
+    const isInfrastructureBlock = checkpointSignal === 'blocked';
+    const feed = appendAgentFeedEvent(taskPayload, { agent, stage, type: isInfrastructureBlock ? 'blocker' : 'result', title: isInfrastructureBlock ? 'Bloqueo de infraestructura: ' + stage : 'Checkpoint: ' + stage, body: String(content ?? '').slice(0, 2000), jobId, taskId: activeAgentTaskId, at });
+    const nextPayload = { ...currentPayload, transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, agentConversations: retainedConversations, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory };
+    return { payload: nextPayload, jobPatch: { status: 'running', stage, progress, ...publicPatch }, result: { id: jobId, status: 'running', stage, progress } };
   });
-  return await updateJob(jobId, { status: 'running', stage, progress, payload: { transcript: transcript.slice(-MAX_TRANSCRIPT_ENTRIES), agentTasks: taskUpdate.tasks, agentFeed: feed.posts, agentConversations: retainedConversations, lastCheckpoint: stage, activeStage: null, activeAgentTaskId: null, ...extra, ...memory }, ...publicPatch });
+  if (!result) throw new Error('La tarea dejó de existir al guardar el checkpoint.');
+  return result;
 }
 export async function processJob(jobId) {
   const result = await withJobLock(jobId, () => runJob(jobId));
@@ -462,6 +491,8 @@ async function runJob(jobId) {
       await checkpoint(jobId, 'Validación', 55, 'Desarrollador', delivery, { proposal, critique, strategy, coherence, delivery, partialDelivery: '', partialOutputAt: null });
       await saveArtifacts(jobId, delivery);
     }
+    let artifactVersion = await persistDeliveryVersion(jobId, delivery);
+    if (!artifactVersion) console.warn('[worker][artifact_version_skipped]', JSON.stringify({ jobId, reason: 'delivery_exceeds_512_kib' }));
     payload = (await getPayload(jobId))?.payload || {};
     let validation = payload.validation || null; let syntax = payload.syntax || null;
     let resumeState = getValidationResumeState(payload, (await getPayload(jobId))?.publicJob.attempt || 0);
@@ -519,7 +550,7 @@ async function runJob(jobId) {
         await startAgent(jobId, `Validación · ronda ${round}`, progress + 2, 'Validador', 'Haré una revisión independiente y separaré los problemas confirmados de las dudas que todavía requieren comprobación.');
         await assertTaskTokenBudget(jobId);
         const validatorTools = await createAgentToolContext(jobId, round, 'validador', delivery);
-        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools);
+        validation = await agenteValidador(objective, strategy, delivery, onRetry('Validador', `Validación ${round}`), validatorTools, artifactVersion);
         if (coherenceReview.verdict !== 'APPROVED') {
           validation = {
             ...validation,
@@ -575,6 +606,16 @@ async function runJob(jobId) {
         }
         return { blocked: true, reason: 'runner-infra-error' };
       }
+      const reviewSnapshot = await getPayload(jobId);
+      const pendingPeerCorrections = (Array.isArray(reviewSnapshot?.payload?.agentCorrectionQueue) ? reviewSnapshot.payload.agentCorrectionQueue : [])
+        .filter(item => item?.targetVersionId === artifactVersion?.versionId && item.status === 'queued');
+      if (pendingPeerCorrections.length) {
+        validation = {
+          ...validation, verdict: 'NEEDS_CHANGES',
+          findings: [...(validation?.findings || []), ...pendingPeerCorrections.map(item => 'Corrección pendiente de revisión por pares: ' + item.summary + (item.evidence ? ' Evidencia: ' + item.evidence : ''))].slice(0, 30),
+          summary: 'La revisión por pares dejó correcciones pendientes para esta versión; no se puede cerrar la tarea todavía.'
+        };
+      }
       if (validation?.verdict === 'APPROVED' && syntax?.ok) {
         const runtimeTestsExecuted = Array.isArray(syntax.runnerExecution?.runtimeChecks)
           && syntax.runnerExecution.runtimeChecks.some(item => item.phase === 'tests');
@@ -598,11 +639,19 @@ async function runJob(jobId) {
       if (!findings.length) findings.push('La revisión no aprobó la entrega; explicá y corregí los puntos débiles.');
       await startAgent(jobId, `Corrección ${round}`, Math.min(progress + 5, 94), 'Desarrollador (corrección)', 'Estoy corrigiendo los hallazgos de la revisión antes de volver a validar.');
       await assertTaskTokenBudget(jobId);
-      const repairContext = selectRepairContext(delivery, findings.join('\n'));
+      const correctionClaim = await claimAgentCorrectionForJob(jobId, 'desarrollador', { busy: false });
+      const queuedCorrection = correctionClaim?.claimedCorrection || null;
+      const correctionFindings = queuedCorrection
+        ? [...findings, 'Corrección encolada por revisión por pares (versión exacta ' + queuedCorrection.targetVersionId + '): ' + queuedCorrection.summary + (queuedCorrection.evidence ? '\nEvidencia: ' + queuedCorrection.evidence : '')]
+        : findings;
+      const repairContext = selectRepairContext(delivery, correctionFindings.join('\n'));
       const toolContext = await createAgentToolContext(jobId, round + 1, 'desarrollador', repairContext);
-      const correctedOutput = await agenteDesarrollador(objective, strategy, findings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
+      const correctedOutput = await agenteDesarrollador(objective, strategy, correctionFindings.join('\n'), onRetry('Desarrollador (corrección)', `Corrección ${round}`), repairContext, coherence, canContinue, savePartial, toolContext);
       const correctedDelivery = await integrateAgentWorkspace(jobId, round + 1, delivery, correctedOutput, toolContext);
       const mergedDelivery = correctedDelivery;
+      const correctedArtifactVersion = await persistDeliveryVersion(jobId, mergedDelivery, queuedCorrection?.correctionId || null);
+      if (!correctedArtifactVersion && queuedCorrection) throw new Error('No se pudo guardar la versión corregida de la entrega.');
+      artifactVersion = correctedArtifactVersion;
       await checkpoint(jobId, `Corrección ${round}`, Math.min(progress + 8, 95), 'Desarrollador (corrección)', mergedDelivery, { proposal, critique, strategy, coherence, coherenceReview: null, coherenceReviewRound: null, activeValidationRound: round + 1, delivery: mergedDelivery, validation: null, syntax: null, validationRound: round, lastCheckpoint: `correction-${round}` });
       await saveArtifacts(jobId, mergedDelivery);
       delivery = mergedDelivery; validation = null; syntax = null; payload = (await getPayload(jobId))?.payload || {}; round += 1; resumeState = getValidationResumeState(payload, round - 1);

@@ -4,6 +4,7 @@ import { randomUUID, createCipheriv, createDecipheriv, randomBytes, createHash }
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { applyTokenUsage, prepareContinuationPayload, isBudgetPausedJob } from './tokenAccounting.js';
 import { generateTaskTitle } from './taskTitle.js';
+import { claimNextCorrection } from './agentReviewQueue.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -401,4 +402,57 @@ let closeStorePromise;
 export function closeStore() {
   if (!closeStorePromise) closeStorePromise = pool.end();
   return closeStorePromise;
+}
+
+/** Atomically claim one correction in the encrypted job payload.
+ * SELECT ... FOR UPDATE serializes claims across worker processes/instances.
+ * A busy author never has active work interrupted.
+ */
+export async function claimAgentCorrectionForJob(jobId, authorRole, { busy = false } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [jobId]);
+    const row = rows[0];
+    if (!row) { await client.query('ROLLBACK'); return { missing: true, claimedCorrection: null, reason: 'job_not_found' }; }
+    const payload = unseal(row.encrypted_payload);
+    const result = claimNextCorrection(payload, authorRole, { busy });
+    if (result.reason === 'author_busy' || result.reason === 'queue_empty') {
+      await client.query('COMMIT');
+      return { missing: false, claimedCorrection: null, reason: result.reason };
+    }
+    await client.query('UPDATE jobs SET updated_at=$2, encrypted_payload=$3 WHERE id=$1', [jobId, now(), seal({ ...payload, agentCorrectionQueue: result.agentCorrectionQueue })]);
+    await client.query('COMMIT');
+    return { missing: false, claimedCorrection: result.claimedCorrection, reason: result.reason };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
+}
+
+/** Atomically transform a job payload under a PostgreSQL row lock. The mutator must be synchronous and side-effect free. */
+export async function mutateJobPayload(id, mutator) {
+  if (typeof mutator !== 'function') throw new TypeError('mutator debe ser una función.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('SELECT * FROM jobs WHERE id=$1 FOR UPDATE', [id]);
+    const row = rows[0];
+    if (!row) { await client.query('ROLLBACK'); return null; }
+    const payload = unseal(row.encrypted_payload);
+    const outcome = mutator(payload, row);
+    if (!outcome || typeof outcome !== 'object' || !outcome.payload || typeof outcome.payload !== 'object') throw new Error('El mutator debe devolver { payload, result }.');
+    const patch = outcome.jobPatch || {};
+    const nextStatus = patch.status ?? row.status;
+    const nextStage = patch.stage ?? row.stage;
+    const nextProgress = patch.progress ?? row.progress;
+    const nextAttempt = patch.attempt ?? row.attempt;
+    const nextError = patch.error === undefined ? row.error : patch.error;
+    await client.query('UPDATE jobs SET status=$2,stage=$3,progress=$4,attempt=$5,updated_at=$6,error=$7,encrypted_payload=$8 WHERE id=$1', [id, nextStatus, nextStage, nextProgress, nextAttempt, now(), nextError, seal(outcome.payload)]);
+    await client.query('COMMIT');
+    return outcome.result;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw error;
+  } finally { client.release(); }
 }
