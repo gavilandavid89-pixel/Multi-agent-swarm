@@ -33,7 +33,6 @@ const jobs = new Map();
 const idempotency = new Map();
 const queue = [];
 const running = new Map();
-const workspaceBusy = new Map();
 // stdin is kept in memory only: debugger input must never be persisted in job records.
 const pendingInput = new Map();
 let active = 0;
@@ -132,13 +131,13 @@ async function save(job) {
   await fsp.writeFile(temp, JSON.stringify(job), { mode: 0o600 });
   await fsp.rename(temp, target);
 }
-async function writeWorkspace(job, files, resetWorkspace) {
+async function writeWorkspace(job, files, resetWorkspace, workspacePath = job.workspace) {
   if (resetWorkspace) {
-    await fsp.rm(job.workspace, { recursive: true, force: true });
-    await fsp.mkdir(job.workspace, { recursive: false, mode: 0o755 });
+    await fsp.rm(workspacePath, { recursive: true, force: true });
+    await fsp.mkdir(workspacePath, { recursive: false, mode: 0o755 });
   } else {
     let workspaceStat;
-    try { workspaceStat = await fsp.stat(job.workspace); }
+    try { workspaceStat = await fsp.stat(workspacePath); }
     catch (error) {
       if (error.code === 'ENOENT') throw Object.assign(new Error('No existe el workspace para reutilizar.'), { status: 404 });
       throw error;
@@ -147,11 +146,24 @@ async function writeWorkspace(job, files, resetWorkspace) {
     if (files.length) throw Object.assign(new Error('No se pueden añadir archivos a un workspace existente sin reset.'), { status: 400 });
   }
   for (const file of files) {
-    const target = path.resolve(job.workspace, ...file.path.split('/'));
-    if (!target.startsWith(job.workspace + path.sep)) throw new Error('La ruta sale del workspace.');
+    const target = path.resolve(workspacePath, ...file.path.split('/'));
+    if (!target.startsWith(workspacePath + path.sep)) throw new Error('La ruta sale del workspace.');
     await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
     await fsp.writeFile(target, file.content, { flag: 'wx', mode: 0o644 });
   }
+}
+async function prepareWorkspace(job) {
+  const inputExists = await fsp.stat(job.inputWorkspace).then(stat => stat.isDirectory()).catch(() => false);
+  if (!inputExists) return;
+  if (job.resetWorkspace) {
+    await fsp.rm(job.workspace, { recursive: true, force: true });
+    await fsp.rename(job.inputWorkspace, job.workspace);
+    return;
+  }
+  const workspaceExists = await fsp.stat(job.workspace).then(stat => stat.isDirectory()).catch(() => false);
+  if (!workspaceExists) throw Object.assign(new Error('No existe el workspace para reutilizar.'), { status: 404 });
+  if (job.inputHasFiles) await fsp.cp(job.inputWorkspace, job.workspace, { recursive: true, force: false, errorOnExist: false });
+  await fsp.rm(job.inputWorkspace, { recursive: true, force: true });
 }
 function dockerArgs(job) {
   const args = [
@@ -381,6 +393,7 @@ async function runJob(job) {
     stop();
   }, job.timeoutMs + 5000);
   try {
+    await prepareWorkspace(job);
     await save(job);
     if (job.network === 'restricted') await ensureRestrictedNetwork();
     if (timedOut || cancelled) throw new Error('La ejecución fue cancelada antes de iniciar el contenedor.');
@@ -449,7 +462,7 @@ async function runJob(job) {
     job.finishedAt = new Date().toISOString();
     await save(job).catch(() => {});
     active--;
-    if (workspaceBusy.get(job.workspaceId) === job.id) workspaceBusy.delete(job.workspaceId);
+    await fsp.rm(job.inputWorkspace || path.join(WORKSPACES, job.id + '.input'), { recursive: true, force: true }).catch(() => {});
     pump();
   }
 }
@@ -470,6 +483,7 @@ async function deleteJob(job) {
   if (job.idempotencyKey && idempotency.get(job.idempotencyKey) === job.id) idempotency.delete(job.idempotencyKey);
   await fsp.rm(path.join(STATE, job.id + '.json'), { force: true });
   await fsp.rm(path.join(STATE, job.id + '.cid'), { force: true });
+  await fsp.rm(job.inputWorkspace || path.join(WORKSPACES, job.id + '.input'), { recursive: true, force: true });
   const workspaceStillReferenced = [...jobs.values()].some(other => other.workspaceId === job.workspaceId);
   if (!workspaceStillReferenced) await fsp.rm(job.workspace, { recursive: true, force: true });
 }
@@ -514,19 +528,16 @@ async function handle(req, res) {
     await pruneOldJobs();
     const id = randomUUID(); const now = new Date().toISOString();
     const workspaceId = body.workspaceId || id;
-    if (workspaceBusy.has(workspaceId)) return json(res, 409, { error: 'Ya hay una ejecución en cola o activa para este workspace.' });
-    const job = { id, workspaceId, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, hasStdin: body.hasStdin, stdinBytes: Buffer.byteLength(body.stdin, 'utf8'), workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, requestHash, artifactSnapshot: [] };
-    workspaceBusy.set(workspaceId, id);
+    const job = { id, workspaceId, inputWorkspace: path.join(WORKSPACES, id + '.input'), inputHasFiles: body.files.length > 0, resetWorkspace: body.resetWorkspace, status: 'queued', createdAt: now, updatedAt: now, command: body.command, network: body.network, timeoutMs: body.timeoutMs, hasStdin: body.hasStdin, stdinBytes: Buffer.byteLength(body.stdin, 'utf8'), workspace: path.join(WORKSPACES, workspaceId), stdout: '', stderr: '', exitCode: null, timedOut: false, cancelled: false, error: null, idempotencyKey: key || null, requestHash, artifactSnapshot: [] };
     jobs.set(id, job);
     if (key) idempotency.set(key, id);
     try {
-      await writeWorkspace(job, body.files, body.resetWorkspace);
+      await writeWorkspace(job, body.files, true, job.inputWorkspace);
       if (body.hasStdin) pendingInput.set(id, body.stdin);
       await save(job); queue.push(id); void pump();
     } catch (error) {
-      if (workspaceBusy.get(workspaceId) === id) workspaceBusy.delete(workspaceId);
       pendingInput.delete(id);
-      if (body.resetWorkspace) await fsp.rm(job.workspace, { recursive: true, force: true }).catch(() => {});
+      await fsp.rm(job.inputWorkspace, { recursive: true, force: true }).catch(() => {});
       job.status = 'failed';
       job.error = String(error?.message || error).slice(0, 1200);
       job.finishedAt = new Date().toISOString();
@@ -593,13 +604,7 @@ async function initialize() {
           job.finishedAt = new Date().toISOString(); await save(job);
           continue;
         }
-        if (workspaceBusy.has(job.workspaceId)) {
-          job.status = 'failed'; job.error = 'Se detectaron trabajos duplicados para el mismo workspace durante la recuperación.';
-          job.finishedAt = new Date().toISOString(); await save(job);
-        } else {
-          workspaceBusy.set(job.workspaceId, job.id);
-          queue.push(job.id);
-        }
+        queue.push(job.id);
       }
     } catch {}
   }
