@@ -266,6 +266,7 @@ async function copyWorkspaceFromContainer(job) {
   const cid = await readContainerId(job);
   if (!cid) return;
 
+  // Jobs sharing a workspace are serialized by the single global runner. Each queued job keeps its own input snapshot, so submitting another command never overwrites the input of a job already waiting in the queue.
   // The command runs as UID 65532, separate from the container's idle PID 1 (UID 10001).
   // Kill any task-spawned background processes before taking a consistent snapshot.
   const killed = await dockerCommand(['exec', '--user', '65532:65532', cid, 'pkill', '-KILL', '-u', '65532'], 5000);
@@ -558,7 +559,6 @@ async function handle(req, res) {
     if (job.status === 'queued') {
       pendingInput.delete(job.id);
       job.status = 'cancelled'; job.cancelled = true; job.finishedAt = new Date().toISOString(); await save(job);
-      if (workspaceBusy.get(job.workspaceId) === job.id) workspaceBusy.delete(job.workspaceId);
     }
     else running.get(job.id)?.cancel();
     return json(res, 202, publicJob(job));
