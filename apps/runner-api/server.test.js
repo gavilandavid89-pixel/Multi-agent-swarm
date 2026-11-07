@@ -12,7 +12,7 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
     '--pids-limit', '--memory', '--cpus', '--tmpfs',
     '--cidfile', 'no-new-privileges:true', 'MAX_OUTPUT_CHARS',
     '/input,readonly', '/workspace:rw,nosuid,nodev,size=256m,mode=0777',
-    'workspaceId', 'resetWorkspace', 'workspaceBusy', 'artifactSnapshot', 'finalizing', 'recopilando artefactos', 'finalizing', 'recopilando artefactos',
+    'workspaceId', 'resetWorkspace', 'inputWorkspace', 'artifactSnapshot', 'finalizing', 'recopilando artefactos', 'finalizing', 'recopilando artefactos',
     'MAX_PENDING_JOBS', 'MAX_RETAINED_JOBS', 'pruneOldJobs',
     'No existe el workspace para reutilizar', 'el contenedor fue detenido',
     'containsCredential', '.npmrc', 'auth.json', 'settings.xml', 'service-account.json', 'PRIVATE KEY', 'createHash', 'requestHash', 'clave de idempotencia ya se usó', 'const hasStdin', 'stdin supera el límite de 16 KiB.', 'stdin interactivo solo se permite con network none.', 'stdin solo se permite para sesiones por lotes de Python PDB.', "command[0] === 'python3' && command[1] === '-m' && command[2] === 'pdb'", 'currentChild.stdin.end(stdin || \'\')', 'pendingInput', 'job.hasStdin', 'La entrada interactiva del depurador no se conserva tras reiniciar el runner',
@@ -48,6 +48,15 @@ test('runner API is authenticated, bounded, and uses a fixed hardened Docker inv
   assert.ok(source.includes("mode: 0o755"));
   assert.ok(source.includes("mode: 0o644"));
   assert.equal(source.includes('process.env, stdio'), false);
+});
+
+test('runner queues multiple jobs for the same workspace instead of rejecting the second submission', () => {
+  assert.equal(source.includes("workspaceBusy.has(job.workspaceId)"), false);
+  assert.equal(source.includes("Ya hay una ejecución en cola o activa para este workspace."), false);
+  assert.ok(source.includes('const inputWorkspace =') || source.includes('inputWorkspace: path.join(WORKSPACES, id + \'\.input\')'));
+  assert.ok(source.includes('prepareWorkspace(job)'));
+  assert.ok(source.includes('queue.push(id)'));
+  assert.ok(source.includes('MAX_PENDING_JOBS'));
 });
 
 test('runner API exposes authenticated capability discovery without widening job permissions', () => {
