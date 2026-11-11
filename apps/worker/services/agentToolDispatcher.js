@@ -1,20 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 const PERMISSIONS = {
-  coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  coordinador: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
 
-  arbitro: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  arbitro: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  arquitecto: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  esceptico: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  auditor: ['workspace_list', 'workspace_read', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list'],
+  validador: ['workspace_list', 'workspace_read', 'runner_check', 'runner_job_status', 'runner_artifact', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage'],
 
-  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list']
+  desarrollador: ['workspace_list', 'workspace_read', 'workspace_write', 'runner_execute', 'runner_check', 'runner_job_status', 'runner_cancel', 'runner_artifact', 'runner_dependency', 'agent_findings_list', 'agent_finding_report', 'agent_feed_publish', 'agent_feed_list', 'agent_task_upsert', 'agent_tasks_list', 'agent_artifact_submit', 'agent_artifact_review', 'agent_artifact_lineage']
 };
 const BLOCKED_DIRS = new Set(['.git', '.ssh', '.aws', '.azure', '.kube', '.docker', 'node_modules', '.venv', 'venv']);
 const BLOCKED_FILES = new Set(['.npmrc', '.netrc', '.pypirc', '.git-credentials', 'credentials.json', 'service-account.json', 'id_rsa', 'id_ed25519', 'terraform.tfstate', 'terraform.tfvars', 'kubeconfig']);
@@ -26,6 +26,7 @@ const TOOL_TO_PERMISSION = {
   agent_findings_list: 'agent_findings_list', agent_finding_report: 'agent_finding_report',
   agent_feed_publish: 'agent_feed_publish', agent_feed_list: 'agent_feed_list',
   agent_task_upsert: 'agent_task_upsert', agent_tasks_list: 'agent_tasks_list',
+  agent_artifact_submit: 'agent_artifact_submit', agent_artifact_review: 'agent_artifact_review', agent_artifact_lineage: 'agent_artifact_lineage',
   runner_cancel: 'runner_cancel', runner_artifact: 'runner_artifact', runner_dependency: 'runner_dependency'
 };
 const tool = (name, description, properties = {}, required = []) => ({
@@ -63,6 +64,9 @@ export const AGENT_TOOL_DEFINITIONS = Object.freeze([
     status: { type: 'string', enum: ['pending', 'in_progress', 'blocked', 'in_review', 'done'] },
     limit: { type: 'integer', minimum: 1, maximum: 100 }
   }),
+  tool('agent_artifact_submit', 'Registra una entrega versionada e inmutable para revisión independiente.', { taskId: { type: 'string', maxLength: 96 }, artifactId: { type: 'string', maxLength: 96 }, title: { type: 'string', maxLength: 160 }, content: { type: 'string', maxLength: 524288 } }, ['taskId', 'artifactId', 'title', 'content']),
+  tool('agent_artifact_review', 'Revisa una versión exacta de otro agente; la aprobación entre pares nunca sustituye al supervisor.', { versionId: { type: 'string', maxLength: 96 }, verdict: { type: 'string', enum: ['approve', 'needs_correction', 'uncertain', 'false_positive'] }, summary: { type: 'string', maxLength: 2000 }, evidence: { type: 'string', maxLength: 3000 } }, ['versionId', 'verdict', 'summary']),
+  tool('agent_artifact_lineage', 'Consulta versiones, hashes, revisiones y correcciones de un artefacto sin exponer el contenido completo.', { taskId: { type: 'string', maxLength: 96 }, artifactId: { type: 'string', maxLength: 96 } }, ['taskId', 'artifactId']),
   tool('agent_finding_report', 'Registra un bug, riesgo, fallo de prueba o mejora que debe revisar otro agente. No realices cambios fuera de tu rol: informa evidencia y ruta.', {
     category: { type: 'string', enum: ['bug', 'security', 'test', 'architecture', 'performance', 'quality', 'product', 'other'] },
     severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
@@ -134,7 +138,7 @@ function collectRunnerJobIds(value, ids = new Set(), depth = 0) {
   for (const child of children) collectRunnerJobIds(child, ids, depth + 1);
   return ids;
 }
-export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings, publishPost, listPosts, updateTask, listTasks, getInvocation, saveInvocation } = {}) {
+export function createAgentToolDispatcher({ role, workspace, runner, jobId, round = 0, maxCalls = 40, reportFinding, listFindings, publishPost, listPosts, updateTask, listTasks, saveArtifactVersion, reviewArtifact, getArtifactLineage, getInvocation, saveInvocation } = {}) {
   const normalizedRole = String(role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const allowed = PERMISSIONS[normalizedRole];
   if (!allowed) throw error('Rol desconocido; herramientas denegadas.', 'AGENT_TOOL_ROLE_DENIED');
@@ -261,6 +265,21 @@ export function createAgentToolDispatcher({ role, workspace, runner, jobId, roun
         if (args.limit !== undefined && (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100)) throw error('limit inválido.');
         if (typeof listTasks !== 'function') throw error('El tablero de tareas no está disponible.');
         result = await listTasks({ role: args.assignedRole, status: args.status, limit: args.limit }); break;
+      case 'agent_artifact_submit': {
+        if (Object.keys(args).some(k => !['taskId', 'artifactId', 'title', 'content'].includes(k))) throw error('Campos extra no permitidos en la entrega.');
+        if (typeof saveArtifactVersion !== 'function') throw error('El registro versionado de entregas no está disponible.');
+        result = await saveArtifactVersion(args, normalizedRole); break;
+      }
+      case 'agent_artifact_review': {
+        if (Object.keys(args).some(k => !['versionId', 'verdict', 'summary', 'evidence'].includes(k))) throw error('Campos extra no permitidos en la revisión.');
+        if (typeof reviewArtifact !== 'function') throw error('El sistema de revisión por pares no está disponible.');
+        result = await reviewArtifact(args, normalizedRole); break;
+      }
+      case 'agent_artifact_lineage': {
+        if (Object.keys(args).some(k => !['taskId', 'artifactId'].includes(k))) throw error('Campos extra no permitidos en la consulta de versiones.');
+        if (typeof getArtifactLineage !== 'function') throw error('El historial versionado no está disponible.');
+        result = await getArtifactLineage(args); break;
+      }
       case 'agent_findings_list':
         if (Object.keys(args).length) throw error('agent_findings_list no acepta argumentos.');
         if (typeof listFindings !== 'function') throw error('La bandeja de hallazgos no está disponible.');
