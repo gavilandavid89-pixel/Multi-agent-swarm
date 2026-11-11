@@ -534,14 +534,18 @@ body:not(.auth-gate) #history-drawer #history-list{max-height:calc(var(--swarm-v
 }
 body:not(.auth-gate) #detail-panel { position:relative; }
 body:not(.auth-gate) #conversation { scroll-behavior:auto!important; overflow-anchor:none; }
-body:not(.auth-gate) .agent-vos { align-self:flex-end; flex-direction:row-reverse; margin-left:auto; }
-body:not(.auth-gate) .agent-vos .message-body {
+body:not(.auth-gate) .agent-vos,
+body:not(.auth-gate) .agent-usuario { align-self:flex-end; flex-direction:row-reverse; margin-left:auto; }
+body:not(.auth-gate) .agent-vos .message-body,
+body:not(.auth-gate) .agent-usuario .message-body {
   background:linear-gradient(145deg,#294d3d,#203c31);
   border:1px solid #79d6a45c;
   border-radius:16px 5px 16px 16px;
 }
-body:not(.auth-gate) .agent-vos .message-heading strong { color:#a3edbd; }
-body:not(.auth-gate) .agent-vos .agent-avatar { background:#3b7454;color:#e0ffe9;border-color:#82d8a4; }
+body:not(.auth-gate) .agent-vos .message-heading strong,
+body:not(.auth-gate) .agent-usuario .message-heading strong { color:#a3edbd; }
+body:not(.auth-gate) .agent-vos .agent-avatar,
+body:not(.auth-gate) .agent-usuario .agent-avatar { background:#3b7454;color:#e0ffe9;border-color:#82d8a4; }
 .jump-to-latest {
   position:absolute; z-index:12; left:50%; bottom:12px; transform:translateX(-50%);
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
